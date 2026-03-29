@@ -224,7 +224,8 @@ def extract_call_graph(
                 )
                 parsed = _parse_structural_index(idx, lowercase=False)
                 _disk_index_cache[file_path] = parsed.get(file_path, "")
-            except Exception:
+            except (OSError, SyntaxError, ValueError) as e:
+                logger.debug(f"Disk index build failed for '{file_path}': {e}")
                 _disk_index_cache[file_path] = ""
         return _extract_class_detail(_disk_index_cache[file_path])
 

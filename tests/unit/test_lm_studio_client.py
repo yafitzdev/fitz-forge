@@ -107,7 +107,8 @@ class TestHealthCheck:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("fitz_graveyard.llm.lm_studio.httpx.AsyncClient") as mock_http:
+        with patch("fitz_graveyard.llm.lm_studio.httpx.AsyncClient") as mock_http, \
+             patch.object(client, "is_model_loaded", AsyncMock(return_value=True)):
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_http.return_value.get = AsyncMock(return_value=mock_response)

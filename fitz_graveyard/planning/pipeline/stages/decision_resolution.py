@@ -261,7 +261,7 @@ class DecisionResolutionStage(PipelineStage):
                 try:
                     resolution = self.parse_output(raw)
                     resolution["decision_id"] = d_id
-                except Exception as e:
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
                     logger.warning(
                         f"Stage '{self.name}': failed to parse resolution "
                         f"for {d_id}: {e}. Using raw text as decision."

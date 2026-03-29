@@ -47,6 +47,8 @@ async def test_process_job_success(store: SQLiteJobStore, tmp_path: Path):
     mock_client = AsyncMock()
     mock_client.health_check = AsyncMock(return_value=True)
     mock_client.generate = AsyncMock(return_value="yes")  # For confidence scorer
+    mock_client.model = "test-model"
+    mock_client.context_size = 65536
 
     # Mock pipeline result
     mock_pipeline_result = MagicMock()
@@ -149,6 +151,8 @@ async def test_process_job_oom_fallback(store: SQLiteJobStore, tmp_path: Path):
     mock_client = AsyncMock()
     mock_client.health_check = AsyncMock(return_value=True)
     mock_client.generate = AsyncMock(return_value="yes")  # For confidence scorer
+    mock_client.model = "test-model"
+    mock_client.context_size = 65536
 
     # Mock pipeline result
     mock_pipeline_result = MagicMock()

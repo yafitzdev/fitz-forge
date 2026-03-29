@@ -13,6 +13,27 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
+# --- Ollama retry parameters ---
+_OLLAMA_MAX_ATTEMPTS = 3  # Total attempts before giving up
+_OLLAMA_BACKOFF_MIN_SECONDS = 4  # Minimum exponential backoff delay
+_OLLAMA_BACKOFF_MAX_SECONDS = 60  # Maximum exponential backoff delay
+
+# --- LM Studio retry parameters ---
+_LM_STUDIO_MAX_ATTEMPTS = 3
+_LM_STUDIO_BACKOFF_MIN_SECONDS = 5
+_LM_STUDIO_BACKOFF_MAX_SECONDS = 60
+
+# --- llama.cpp retry parameters (more attempts, shorter waits for model swap latency) ---
+_LLAMA_CPP_MAX_ATTEMPTS = 5
+_LLAMA_CPP_BACKOFF_MIN_SECONDS = 2
+_LLAMA_CPP_BACKOFF_MAX_SECONDS = 30
+
+# HTTP status codes considered transient (safe to retry)
+_RETRYABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+
+# HTTP status codes retryable for LM Studio/llama.cpp (no 500 — handled separately)
+_LM_STUDIO_RETRYABLE_STATUSES = {408, 429, 502, 503, 504}
+
 
 def is_retryable(exception: BaseException) -> bool:
     """
@@ -34,7 +55,7 @@ def is_retryable(exception: BaseException) -> bool:
     if isinstance(exception, ResponseError):
         status = exception.status_code
         # Retryable HTTP status codes (transient errors)
-        retryable_statuses = {408, 429, 500, 502, 503, 504}
+        retryable_statuses = _RETRYABLE_HTTP_STATUSES
 
         if status not in retryable_statuses:
             return False
@@ -52,8 +73,8 @@ def is_retryable(exception: BaseException) -> bool:
 
 # Tenacity retry decorator for Ollama API calls
 ollama_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(_OLLAMA_MAX_ATTEMPTS),
+    wait=wait_exponential(multiplier=1, min=_OLLAMA_BACKOFF_MIN_SECONDS, max=_OLLAMA_BACKOFF_MAX_SECONDS),
     retry=retry_if_exception(is_retryable),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
@@ -85,7 +106,7 @@ def is_lm_studio_retryable(exception: BaseException) -> bool:
         if isinstance(exception, (APIConnectionError, APITimeoutError)):
             return True
         if isinstance(exception, APIStatusError):
-            return exception.status_code in {408, 429, 502, 503, 504}
+            return exception.status_code in _LM_STUDIO_RETRYABLE_STATUSES
     except ImportError:
         pass
 
@@ -94,8 +115,8 @@ def is_lm_studio_retryable(exception: BaseException) -> bool:
 
 # Tenacity retry decorator for LM Studio API calls
 lm_studio_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=5, max=60),
+    stop=stop_after_attempt(_LM_STUDIO_MAX_ATTEMPTS),
+    wait=wait_exponential(multiplier=1, min=_LM_STUDIO_BACKOFF_MIN_SECONDS, max=_LM_STUDIO_BACKOFF_MAX_SECONDS),
     retry=retry_if_exception(is_lm_studio_retryable),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
@@ -132,8 +153,8 @@ def is_llama_cpp_retryable(exception: BaseException) -> bool:
 # Tenacity retry decorator for llama.cpp API calls
 # More attempts + shorter waits to handle model swap latency
 llama_cpp_retry = retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
+    stop=stop_after_attempt(_LLAMA_CPP_MAX_ATTEMPTS),
+    wait=wait_exponential(multiplier=1, min=_LLAMA_CPP_BACKOFF_MIN_SECONDS, max=_LLAMA_CPP_BACKOFF_MAX_SECONDS),
     retry=retry_if_exception(is_llama_cpp_retryable),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )

@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.importorskip("anthropic")
+
 from fitz_graveyard.api_review.client import AnthropicReviewClient
 from fitz_graveyard.api_review.schemas import ReviewRequest, ReviewResult
 

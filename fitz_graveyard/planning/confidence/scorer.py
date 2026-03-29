@@ -196,7 +196,7 @@ class ConfidenceScorer:
             logger.warning(f"LLM response not 1-10: {response[:50]}. Defaulting to 0.5")
             return 0.5
         except Exception as e:
-            logger.warning(f"LLM assessment failed: {e}. Defaulting to 0.5")
+            logger.warning(f"LLM assessment failed: {e}. Defaulting to 0.5", exc_info=True)
             return 0.5
 
     def _heuristic_score(self, content: str) -> float:

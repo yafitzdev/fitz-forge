@@ -123,7 +123,7 @@ class AnthropicReviewClient:
 
         except Exception as e:
             # Log and re-raise for gather() to handle
-            logger.warning(f"API call failed for section '{section.section_name}': {e}")
+            logger.warning(f"API call failed for section '{section.section_name}': {e}", exc_info=True)
             raise
 
     def get_cost_calculator(self) -> CostCalculator:

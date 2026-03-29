@@ -81,7 +81,7 @@ def make_codebase_tools(
             if arg.annotation:
                 try:
                     p += f": {ast.unparse(arg.annotation)}"
-                except Exception:
+                except (ValueError, TypeError):
                     pass
             params.append(p)
         # Defaults
@@ -93,14 +93,14 @@ def make_codebase_tools(
             if param_idx >= 0:
                 try:
                     params[param_idx] += f" = {ast.unparse(default)}"
-                except Exception:
+                except (ValueError, TypeError):
                     pass
 
         sig = f"{method.name}({', '.join(params)})"
         if method.returns:
             try:
                 sig += f" -> {ast.unparse(method.returns)}"
-            except Exception:
+            except (ValueError, TypeError):
                 pass
         return sig
 
@@ -205,7 +205,7 @@ def make_codebase_tools(
                             name = node.target.id
                             try:
                                 ann = ast.unparse(node.annotation)
-                            except Exception:
+                            except (ValueError, TypeError):
                                 ann = "?"
                             fields.append(f"  {name}: {ann}")
                 if fields:

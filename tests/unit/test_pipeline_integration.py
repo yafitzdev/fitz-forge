@@ -269,7 +269,7 @@ async def test_plan_output_creation_and_rendering():
     assert "---" in markdown  # Frontmatter
     assert "generated_at:" in markdown
     assert "git_sha:" in markdown
-    assert "# Project:" in markdown
+    assert "# REST API service" in markdown
     assert "## Context" in markdown
     assert "## Architecture" in markdown
     assert "## Design" in markdown

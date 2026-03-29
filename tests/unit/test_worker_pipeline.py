@@ -44,6 +44,8 @@ async def test_worker_uses_pipeline(store: SQLiteJobStore, tmp_path: Path):
     # Create mock OllamaClient
     mock_client = AsyncMock()
     mock_client.health_check = AsyncMock(return_value=True)
+    mock_client.model = "test-model"
+    mock_client.context_size = 65536
     # Mock pipeline result (outputs are dicts from model_dump())
     mock_pipeline_result = MagicMock()
     mock_pipeline_result.success = True
@@ -138,6 +140,8 @@ async def test_worker_progress_updates(store: SQLiteJobStore, tmp_path: Path):
     # Create mock OllamaClient
     mock_client = AsyncMock()
     mock_client.health_check = AsyncMock(return_value=True)
+    mock_client.model = "test-model"
+    mock_client.context_size = 65536
     # Mock pipeline that calls progress callback
     async def mock_execute(client, job_id, job_description, resume, progress_callback, **kwargs):
         # Simulate stage progress updates

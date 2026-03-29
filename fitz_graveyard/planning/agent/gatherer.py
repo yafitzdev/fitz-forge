@@ -377,8 +377,8 @@ class AgentContextGatherer:
                 },
             }
 
-        except Exception:
-            logger.exception("AgentContextGatherer: pipeline failed")
+        except Exception as e:
+            logger.error(f"AgentContextGatherer: pipeline failed: {e}", exc_info=True)
             return empty
 
     # ------------------------------------------------------------------

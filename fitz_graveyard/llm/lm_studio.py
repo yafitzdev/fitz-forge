@@ -27,6 +27,20 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# --- Default timeouts and limits ---
+_DEFAULT_TIMEOUT_SECONDS = 300  # Request timeout for OpenAI client
+_DEFAULT_CONTEXT_LENGTH = 32_768  # Default context window in tokens
+_DEFAULT_MAX_TOKENS = 16_384  # Hard cap on output tokens to prevent infinite generation
+_HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # Timeout for health check HTTP requests
+_LMS_PS_TIMEOUT_SECONDS = 10  # Timeout for `lms ps` subprocess
+_LMS_LOAD_TIMEOUT_SECONDS = 300  # Timeout for `lms load` subprocess
+_LMS_UNLOAD_TIMEOUT_SECONDS = 30  # Timeout for `lms unload` subprocess
+_VRAM_RELEASE_DELAY_SECONDS = 3  # Wait for VRAM release after model unload
+_MODEL_LOAD_RETRY_DELAY_SECONDS = 10  # Cooldown before retrying model load
+_SMART_CONTEXT_LENGTH = 65_536  # Context length for smart_model (agent retrieval needs large context)
+_STDERR_PREVIEW_CHARS = 300  # Max chars of stderr to include in error messages
+_CHARS_PER_TOKEN_ESTIMATE = 4  # Rough character-to-token ratio for speed estimation
+
 # Strip <think>...</think> blocks that some models emit even when thinking
 # is disabled.  Applied once after accumulation so all downstream parsers
 # receive clean text.
@@ -106,8 +120,8 @@ class LMStudioClient:
         base_url: str = "http://localhost:1234/v1",
         model: str = "local-model",
         fallback_model: str | None = None,
-        timeout: int = 300,
-        context_length: int = 32768,
+        timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+        context_length: int = _DEFAULT_CONTEXT_LENGTH,
         gpu_guard: "GPUTemperatureGuard | None" = None,
         fast_model: str | None = None,
         smart_model: str | None = None,
@@ -183,12 +197,12 @@ class LMStudioClient:
 
         # Check LM Studio is reachable
         try:
-            async with httpx.AsyncClient(timeout=5.0) as http:
+            async with httpx.AsyncClient(timeout=_HEALTH_CHECK_TIMEOUT_SECONDS) as http:
                 response = await http.get(f"{self.base_url}/models")
             if response.status_code != 200:
                 return False
         except Exception as e:
-            logger.error(f"LM Studio health check failed: {e}")
+            logger.error(f"LM Studio health check failed: {e}", exc_info=True)
             return False
 
         # Accept any loaded model. The orchestrator handles switching
@@ -215,7 +229,7 @@ class LMStudioClient:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [lms, "ps"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=_LMS_PS_TIMEOUT_SECONDS,
                 encoding="utf-8", errors="replace",
             )
             output = result.stdout + result.stderr
@@ -228,7 +242,8 @@ class LMStudioClient:
                     continue
                 return line.split()[0]
             return None
-        except Exception:
+        except (subprocess.SubprocessError, OSError, TimeoutError) as e:
+            logger.debug(f"Failed to get loaded model: {e}")
             return None
 
     async def is_model_loaded(self) -> bool:
@@ -237,7 +252,7 @@ class LMStudioClient:
 
     # Context length for smart_model (agent retrieval needs large context
     # for the structural index, even when planning uses small context).
-    _SMART_CONTEXT_LENGTH = 65536
+    _SMART_CONTEXT_LENGTH = _SMART_CONTEXT_LENGTH
 
     async def _load_model_via_cli(self, model_name: str | None = None) -> bool:
         """Load a model via ``lms load``.
@@ -270,7 +285,7 @@ class LMStudioClient:
                     "-c", str(ctx),
                     "--parallel", "1",
                 ],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True, text=True, timeout=_LMS_LOAD_TIMEOUT_SECONDS,
                 encoding="utf-8", errors="replace",
             )
             if result.returncode == 0:
@@ -278,13 +293,13 @@ class LMStudioClient:
                 return True
             logger.error(
                 f"lms load failed (code {result.returncode}): "
-                f"{result.stderr[:300]}"
+                f"{result.stderr[:_STDERR_PREVIEW_CHARS]}"
             )
             return False
         except subprocess.TimeoutExpired:
-            logger.error("lms load timed out after 300s")
+            logger.error(f"lms load timed out after {_LMS_LOAD_TIMEOUT_SECONDS}s")
             return False
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"lms load failed: {e}")
             return False
 
@@ -307,12 +322,12 @@ class LMStudioClient:
         logger.info(f"Switching model: {loaded} -> {model_name}")
         await self.unload_model()
         # Wait for VRAM to be fully released before loading
-        await asyncio.sleep(3)
+        await asyncio.sleep(_VRAM_RELEASE_DELAY_SECONDS)
         ok = await self._load_model_via_cli(model_name)
         if not ok:
             # Retry once after longer cooldown (CUDA context cleanup)
-            logger.warning(f"Model load failed, retrying after 10s cooldown...")
-            await asyncio.sleep(10)
+            logger.warning(f"Model load failed, retrying after {_MODEL_LOAD_RETRY_DELAY_SECONDS}s cooldown...")
+            await asyncio.sleep(_MODEL_LOAD_RETRY_DELAY_SECONDS)
             ok = await self._load_model_via_cli(model_name)
         if not ok:
             raise RuntimeError(
@@ -333,7 +348,7 @@ class LMStudioClient:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [lms, "unload", "--all"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=_LMS_UNLOAD_TIMEOUT_SECONDS,
                 encoding="utf-8", errors="replace",
             )
             output = (result.stdout + result.stderr).strip()
@@ -344,7 +359,7 @@ class LMStudioClient:
                 f"lms unload failed (code {result.returncode}): {output}"
             )
             return False
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.warning(f"lms unload failed: {e}")
             return False
 
@@ -358,7 +373,7 @@ class LMStudioClient:
         messages: list[dict],
         model: str | None = None,
         temperature: float | None = None,
-        max_tokens: int = 16384,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> str:
         """
         Generate a streaming response from LM Studio.
@@ -401,7 +416,7 @@ class LMStudioClient:
 
         result = _strip_thinking("".join(accumulated))
         elapsed = time.monotonic() - t0
-        est_tokens = len(result) / 4
+        est_tokens = len(result) / _CHARS_PER_TOKEN_ESTIMATE
         tok_s = est_tokens / elapsed if elapsed > 0 else 0
         self._call_metrics.append({"elapsed_s": elapsed, "output_chars": len(result), "model": model})
         logger.info(

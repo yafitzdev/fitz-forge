@@ -39,7 +39,7 @@ async def retry_job(job_id: str, store: JobStore) -> dict:
         sanitized_id = sanitize_job_id(job_id)
     except ToolError:
         raise
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         raise ToolError(f"Invalid job ID: {e}")
 
     # Look up job

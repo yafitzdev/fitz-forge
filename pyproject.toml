@@ -48,6 +48,7 @@ retrieval = ["sentence-transformers>=3.0", "einops>=0.7"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=6.0",
     "build>=1.0",
     "twine>=5.0",
 ]
@@ -65,7 +66,11 @@ fitz = "fitz_graveyard.cli:app"
 # -p fitz_graveyard: forces early import of fitz_graveyard/__init__.py which
 # patches platform._wmi_query before setuptools entry points (faker) load.
 # Without this, faker triggers a WMI deadlock on Windows (MS Store Python 3.12).
-addopts = "-p fitz_graveyard"
+addopts = "-p fitz_graveyard --cov=fitz_graveyard --cov-report=term-missing:skip-covered"
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require LLM or database)",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

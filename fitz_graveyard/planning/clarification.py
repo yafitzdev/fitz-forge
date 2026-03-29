@@ -54,5 +54,5 @@ async def get_clarifying_questions(
         return [q for q in questions if isinstance(q, str) and q.strip()][:3]
 
     except Exception as e:
-        logger.warning(f"Clarification question generation failed (skipping): {e}")
+        logger.warning(f"Clarification question generation failed (skipping): {e}", exc_info=True)
         return []

@@ -132,7 +132,7 @@ class SQLiteJobStore(JobStore):
                 await db.commit()
                 logger.info(f"Added job {record.job_id} to SQLite store")
 
-            except Exception:
+            except aiosqlite.Error:
                 await db.rollback()
                 raise
 
@@ -247,7 +247,7 @@ class SQLiteJobStore(JobStore):
                 await db.commit()
                 logger.info(f"Updated job {job_id}: {list(kwargs.keys())}")
 
-            except Exception:
+            except aiosqlite.Error:
                 await db.rollback()
                 raise
 
@@ -281,7 +281,7 @@ class SQLiteJobStore(JobStore):
             async with aiosqlite.connect(self._db_path) as db:
                 await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 logger.info("WAL checkpoint completed")
-        except Exception as e:
+        except (aiosqlite.Error, OSError) as e:
             logger.warning(f"WAL checkpoint failed: {e}")
 
     def _row_to_record(self, row: aiosqlite.Row) -> JobRecord:

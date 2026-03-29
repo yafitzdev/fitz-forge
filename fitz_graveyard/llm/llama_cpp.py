@@ -41,6 +41,24 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# --- Default timeouts and limits ---
+_DEFAULT_TIMEOUT_SECONDS = 300  # Request timeout for OpenAI client
+_DEFAULT_STARTUP_TIMEOUT_SECONDS = 120  # How long to wait for llama-server to become ready
+_DEFAULT_PORT = 8012  # Default port for llama-server
+_DEFAULT_MAX_TOKENS = 16_384  # Hard cap on output tokens to prevent infinite generation
+_HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # Timeout for health check HTTP requests
+_HEALTH_POLL_INTERVAL_SECONDS = 1.0  # Interval between health polls during startup
+_HEALTH_POLL_TIMEOUT_SECONDS = 2.0  # Timeout for individual health poll requests
+_STOP_TIMEOUT_SECONDS = 10  # Graceful shutdown timeout before kill
+_STOP_KILL_TIMEOUT_SECONDS = 5  # Timeout after sending kill signal
+_ORPHAN_KILL_TIMEOUT_SECONDS = 5  # Timeout for killing orphaned processes
+_GPU_RESET_COOLDOWN_SECONDS = 3  # Wait after GPU reset before restarting (crash recovery)
+_GPU_RESET_FULL_COOLDOWN_SECONDS = 5  # Wait after GPU reset before restarting (auto-reset)
+_STDERR_PREVIEW_CHARS = 500  # Max chars of stderr to include in error messages
+_TOK_S_NOISE_FLOOR = 0.05  # Minimum seconds for meaningful tok/s calculation
+_CHARS_PER_TOKEN_ESTIMATE = 4  # Rough character-to-token ratio for speed estimation
+_DISK_READ_MAX_BYTES = 50_000  # Max bytes to read from disk for tool file access
+
 # Strip <think>...</think> blocks that some models emit even when thinking
 # is disabled.  Applied once after accumulation so all downstream parsers
 # receive clean text.
@@ -180,9 +198,9 @@ class LlamaCppClient:
         fast_model: "LlamaCppModelConfig",
         mid_model: "LlamaCppModelConfig | None" = None,
         smart_model: "LlamaCppModelConfig | None" = None,
-        port: int = 8012,
-        timeout: int = 300,
-        startup_timeout: int = 120,
+        port: int = _DEFAULT_PORT,
+        timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+        startup_timeout: int = _DEFAULT_STARTUP_TIMEOUT_SECONDS,
         gpu_guard: "GPUTemperatureGuard | None" = None,
     ):
         if AsyncOpenAI is None:
@@ -324,12 +342,12 @@ class LlamaCppClient:
         try:
             result = subprocess.run(
                 ["taskkill", "/IM", "llama-server.exe", "/F"],
-                capture_output=True, timeout=5,
+                capture_output=True, timeout=_ORPHAN_KILL_TIMEOUT_SECONDS,
             )
             if result.returncode == 0:
                 logger.info("Killed orphaned llama-server process(es)")
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug(f"Failed to kill orphaned llama-server: {e}")
 
     async def stop(self) -> None:
         """Stop the llama-server subprocess."""
@@ -339,11 +357,11 @@ class LlamaCppClient:
         logger.info("Stopping llama-server...")
         self._process.terminate()
         try:
-            self._process.wait(timeout=10)
+            self._process.wait(timeout=_STOP_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             logger.warning("llama-server did not stop, killing")
             self._process.kill()
-            self._process.wait(timeout=5)
+            self._process.wait(timeout=_STOP_KILL_TIMEOUT_SECONDS)
 
         self._process = None
         self._active_tier = None
@@ -504,7 +522,7 @@ class LlamaCppClient:
 
             logger.info("GPU driver reset: Ctrl+Win+Shift+B sent successfully")
             return True
-        except Exception as e:
+        except (OSError, ctypes.ArgumentError, ValueError) as e:
             logger.warning(f"GPU driver reset failed: {e}")
             return False
 
@@ -513,7 +531,7 @@ class LlamaCppClient:
         url = f"http://127.0.0.1:{self._port}/health"
         deadline = time.monotonic() + self._startup_timeout
 
-        async with httpx.AsyncClient(timeout=2.0) as http:
+        async with httpx.AsyncClient(timeout=_HEALTH_POLL_TIMEOUT_SECONDS) as http:
             while time.monotonic() < deadline:
                 # Check if process died
                 if self._process and self._process.poll() is not None:
@@ -524,7 +542,7 @@ class LlamaCppClient:
                         )
                     raise RuntimeError(
                         f"llama-server exited with code "
-                        f"{self._process.returncode}: {stderr[:500]}"
+                        f"{self._process.returncode}: {stderr[:_STDERR_PREVIEW_CHARS]}"
                     )
                 try:
                     resp = await http.get(url)
@@ -532,7 +550,7 @@ class LlamaCppClient:
                         return
                 except (httpx.ConnectError, httpx.TimeoutException):
                     pass
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(_HEALTH_POLL_INTERVAL_SECONDS)
 
         raise TimeoutError(
             f"llama-server did not become ready within "
@@ -550,7 +568,7 @@ class LlamaCppClient:
             code = self._process.returncode
             logger.warning(
                 f"llama-server crashed (code {code}), restarting: "
-                f"{stderr[:500]}"
+                f"{stderr[:_STDERR_PREVIEW_CHARS]}"
             )
             self._process = None
             self._client = None
@@ -559,7 +577,7 @@ class LlamaCppClient:
 
             # Reset GPU driver after crash (CUDA context was destroyed)
             if self._reset_gpu_driver():
-                await asyncio.sleep(3)
+                await asyncio.sleep(_GPU_RESET_COOLDOWN_SECONDS)
 
             await self.start(tier)
 
@@ -577,7 +595,7 @@ class LlamaCppClient:
 
         if self._reset_gpu_driver():
             # Driver reset takes a few seconds to complete
-            await asyncio.sleep(5)
+            await asyncio.sleep(_GPU_RESET_FULL_COOLDOWN_SECONDS)
             logger.info("Auto-reset: GPU driver reset complete, restarting server")
         else:
             logger.warning("Auto-reset: GPU driver reset failed, restarting anyway")
@@ -604,12 +622,12 @@ class LlamaCppClient:
             )
         try:
             await self._ensure_alive()
-            async with httpx.AsyncClient(timeout=5.0) as http:
+            async with httpx.AsyncClient(timeout=_HEALTH_CHECK_TIMEOUT_SECONDS) as http:
                 resp = await http.get(
                     f"http://127.0.0.1:{self._port}/health"
                 )
             return resp.status_code == 200
-        except Exception as e:
+        except (httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError, RuntimeError) as e:
             logger.error(f"llama-cpp health check failed: {e}")
             return False
 
@@ -619,7 +637,7 @@ class LlamaCppClient:
         messages: list[dict],
         model: str | None = None,
         temperature: float | None = None,
-        max_tokens: int = 16384,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> str:
         """Generate a streaming response. Switches tier if model differs.
 
@@ -675,10 +693,10 @@ class LlamaCppClient:
         elapsed = t_end - t0
         prefill_s = (t_first_token - t0) if t_first_token else elapsed
         gen_s = (t_end - t_first_token) if t_first_token else 0.0
-        est_output_tokens = len(result) / 4
-        est_input_tokens = sum(len(m.get("content", "")) for m in messages) / 4
-        gen_tok_s = est_output_tokens / gen_s if gen_s > 0.05 else 0.0
-        prefill_tok_s = est_input_tokens / prefill_s if prefill_s > 0.05 else 0.0
+        est_output_tokens = len(result) / _CHARS_PER_TOKEN_ESTIMATE
+        est_input_tokens = sum(len(m.get("content", "")) for m in messages) / _CHARS_PER_TOKEN_ESTIMATE
+        gen_tok_s = est_output_tokens / gen_s if gen_s > _TOK_S_NOISE_FLOOR else 0.0
+        prefill_tok_s = est_input_tokens / prefill_s if prefill_s > _TOK_S_NOISE_FLOOR else 0.0
         self._call_metrics.append({
             "elapsed_s": elapsed,
             "prefill_s": prefill_s,
@@ -776,7 +794,7 @@ class LlamaCppClient:
             messages=messages,
             tools=openai_tools,
             tool_choice=tool_choice,
-            max_tokens=16384,
+            max_tokens=_DEFAULT_MAX_TOKENS,
             stream=False,
             extra_body={
                 "chat_template_kwargs": {"enable_thinking": False},
