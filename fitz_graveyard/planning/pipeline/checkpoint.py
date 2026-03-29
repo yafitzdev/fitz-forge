@@ -79,7 +79,7 @@ class CheckpointManager:
                 await db.commit()
                 logger.info(f"Saved checkpoint for stage '{stage_name}' in job {job_id}")
 
-            except aiosqlite.Error:
+            except Exception:
                 await db.rollback()
                 raise
 
@@ -163,6 +163,6 @@ class CheckpointManager:
                 await db.commit()
                 logger.info(f"Cleared checkpoint for job {job_id}")
 
-            except aiosqlite.Error:
+            except Exception:
                 await db.rollback()
                 raise

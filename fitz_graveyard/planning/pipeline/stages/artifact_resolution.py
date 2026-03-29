@@ -191,8 +191,7 @@ async def resolve_artifacts(
         except Exception as e:
             elapsed = time.monotonic() - t0
             logger.warning(
-                f"Artifact resolution failed for {filename} ({elapsed:.1f}s): {e}",
-                exc_info=True,
+                f"Artifact resolution failed for {filename} ({elapsed:.1f}s): {e}"
             )
             # Don't crash — return empty artifact
             artifacts.append({

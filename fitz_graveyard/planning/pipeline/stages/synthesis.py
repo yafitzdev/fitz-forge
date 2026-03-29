@@ -377,7 +377,7 @@ def _build_attribute_template(
                                 if _child.returns:
                                     try:
                                         sig += f" -> {_ast.unparse(_child.returns)}"
-                                    except (ValueError, TypeError):
+                                    except Exception:
                                         pass
                                 meths.append(sig)
                         if meths:
@@ -814,10 +814,6 @@ class SynthesisStage(PipelineStage):
                             try:
                                 result = fn(**tc.arguments)
                             except Exception as e:
-                                logger.warning(
-                                    f"Stage 'synthesis': tool call {tc.name} failed: {e}",
-                                    exc_info=True,
-                                )
                                 result = f"Error: {e}"
                             seen_calls[call_key] = result
                             total_tool_calls += 1
@@ -870,8 +866,7 @@ class SynthesisStage(PipelineStage):
 
         except Exception as e:
             logger.warning(
-                f"Stage 'synthesis': tool-assisted artifacts failed: {e}",
-                exc_info=True,
+                f"Stage 'synthesis': tool-assisted artifacts failed: {e}"
             )
             return None, ""
 

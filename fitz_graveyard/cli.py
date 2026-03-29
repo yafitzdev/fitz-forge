@@ -7,21 +7,10 @@ All commands delegate to the same functions that MCP wraps.
 """
 
 import asyncio
-import logging
 import re
 import sys
 import time
 from collections import deque
-
-logger = logging.getLogger(__name__)
-
-# --- Live progress display constants ---
-_PROGRESS_BAR_WIDTH = 36  # Character width of the progress bar
-_DESCRIPTION_MAX_CHARS = 60  # Truncate job description to this length in display
-_ACTIVITY_LOG_MAX_LINES = 5  # Number of recent activity lines shown in live display
-_LIVE_POLL_INTERVAL_SECONDS = 0.3  # How often to poll job status during live display
-_LIVE_REFRESH_PER_SECOND = 4  # Rich Live display refresh rate
-_TABLE_SEPARATOR_WIDTH = 80  # Width of separator line in list command
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -56,40 +45,6 @@ async def _get_store():
     store = SQLiteJobStore(str(config_dir / "jobs.db"))
     await store.initialize()
     return store
-
-
-def _with_store(fn):
-    """Decorator that provides a managed store to async CLI commands.
-
-    Wraps an async function that takes ``store`` as its first argument.
-    Handles store lifecycle (open/close) and KeyboardInterrupt.
-
-    Usage::
-
-        @_with_store
-        async def _my_cmd(store):
-            return await some_tool(store=store)
-
-        result = _my_cmd()  # synchronous — calls asyncio.run internally
-    """
-    import functools
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        async def _inner():
-            store = await _get_store()
-            try:
-                return await fn(store, *args, **kwargs)
-            finally:
-                await store.close()
-
-        try:
-            return _run(_inner())
-        except KeyboardInterrupt:
-            typer.echo("\nCancelled.", err=True)
-            raise typer.Exit(130)
-
-    return wrapper
 
 
 async def _find_last_job(store) -> str | None:
@@ -292,15 +247,16 @@ def _make_live_display(
         prev_threshold = threshold
 
     # Progress bar
-    filled = int(progress * _PROGRESS_BAR_WIDTH)
-    bar = "█" * filled + "░" * (_PROGRESS_BAR_WIDTH - filled)
+    bar_width = 36
+    filled = int(progress * bar_width)
+    bar = "█" * filled + "░" * (bar_width - filled)
     pct = f"{progress * 100:.0f}%"
 
     from rich.panel import Panel
     from rich.console import Group
     from rich.text import Text as RichText
 
-    title = RichText(f" {description[:_DESCRIPTION_MAX_CHARS]}{'…' if len(description) > _DESCRIPTION_MAX_CHARS else ''} ", style="bold")
+    title = RichText(f" {description[:60]}{'…' if len(description) > 60 else ''} ", style="bold")
     bar_text = RichText(f"\n  {bar}  {pct}", style="cyan")
 
     # Status line: current activity
@@ -411,7 +367,7 @@ async def _run_inline(
     prev_thresholds = [0.0] + [t for _, t in _DISPLAY_STAGES[:-1]]
 
     # Activity log
-    log_lines: deque[str] = deque(maxlen=_ACTIVITY_LOG_MAX_LINES)
+    log_lines: deque[str] = deque(maxlen=5)
     last_phase = ""
     tick = 0
 
@@ -422,7 +378,7 @@ async def _run_inline(
             live = Live(
                 _make_live_display(description, 0.0, 0.0, model_name=model_name),
                 console=console,
-                refresh_per_second=_LIVE_REFRESH_PER_SECOND,
+                refresh_per_second=4,
             )
             live.start()
 
@@ -462,7 +418,7 @@ async def _run_inline(
                     model_name=model_name,
                 ))
             tick += 1
-            await asyncio.sleep(_LIVE_POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(0.3)
 
         # Final update
         job = await store.get(job_id)
@@ -580,7 +536,7 @@ def plan(
                             )
                         typer.echo()
             except Exception as e:
-                _logging.getLogger(__name__).warning(f"Clarification skipped: {e}", exc_info=True)
+                _logging.getLogger(__name__).warning(f"Clarification skipped: {e}")
 
         if detach:
             store = await _get_store()
@@ -628,8 +584,7 @@ def plan(
                 pre_gathered_context=pre_gathered_context,
                 live=live, console=console,
             )
-        except Exception as e:
-            _logging.getLogger(__name__).error(f"Plan execution failed: {e}", exc_info=True)
+        except Exception:
             live.stop()
             raise
         finally:
@@ -658,7 +613,6 @@ def plan(
         typer.echo(f"\nERROR: LLM server not reachable. Is LM Studio running?\n  {e}", err=True)
         raise typer.Exit(1)
     except Exception as e:
-        logger.error(f"Plan command failed: {e}", exc_info=True)
         typer.echo(f"\nERROR: {type(e).__name__}: {e}", err=True)
         raise typer.Exit(1)
 
@@ -709,11 +663,14 @@ def list_jobs():
     """List all planning jobs."""
     from fitz_graveyard.tools.list_plans import list_plans
 
-    @_with_store
-    async def _list(store):
-        return await list_plans(store=store)
+    async def _list():
+        store = await _get_store()
+        try:
+            return await list_plans(store=store)
+        finally:
+            await store.close()
 
-    result = _list()
+    result = _run(_list())
     plans = result["plans"]
 
     if not plans:
@@ -722,7 +679,7 @@ def list_jobs():
 
     # Print table header
     typer.echo(f"{'JOB ID':<14} {'STATE':<18} {'QUALITY':<9} DESCRIPTION")
-    typer.echo("-" * _TABLE_SEPARATOR_WIDTH)
+    typer.echo("-" * 80)
 
     for p in plans:
         state = p["state"]
@@ -754,14 +711,16 @@ def status(job_id: str = typer.Argument(..., help="Job ID to check")):
     """Check the status of a planning job."""
     from fitz_graveyard.tools.check_status import check_status
 
-    @_with_store
-    async def _status(store):
-        return await check_status(job_id, store=store)
+    async def _status():
+        store = await _get_store()
+        try:
+            return await check_status(job_id, store=store)
+        finally:
+            await store.close()
 
     try:
-        result = _status()
+        result = _run(_status())
     except Exception as e:
-        logger.error(f"Status command failed: {e}", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
@@ -785,14 +744,16 @@ def get(
     """Retrieve a completed plan."""
     from fitz_graveyard.tools.get_plan import get_plan
 
-    @_with_store
-    async def _get(store):
-        return await get_plan(job_id, format, store=store)
+    async def _get():
+        store = await _get_store()
+        try:
+            return await get_plan(job_id, format, store=store)
+        finally:
+            await store.close()
 
     try:
-        result = _get()
+        result = _run(_get())
     except Exception as e:
-        logger.error(f"Get command failed: {e}", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
@@ -848,14 +809,16 @@ def retry(job_id: str = typer.Argument(..., help="Job ID to retry")):
     """Retry a failed or interrupted job (queue only, use 'resume' for live UI)."""
     from fitz_graveyard.tools.retry_job import retry_job
 
-    @_with_store
-    async def _retry(store):
-        return await retry_job(job_id, store=store)
+    async def _retry():
+        store = await _get_store()
+        try:
+            return await retry_job(job_id, store=store)
+        finally:
+            await store.close()
 
     try:
-        result = _retry()
+        result = _run(_retry())
     except Exception as e:
-        logger.error(f"Retry command failed: {e}", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
@@ -867,14 +830,16 @@ def confirm(job_id: str = typer.Argument(..., help="Job ID to approve API review
     """Approve API review after seeing cost estimate."""
     from fitz_graveyard.tools.confirm_review import confirm_review
 
-    @_with_store
-    async def _confirm(store):
-        return await confirm_review(job_id, store=store)
+    async def _confirm():
+        store = await _get_store()
+        try:
+            return await confirm_review(job_id, store=store)
+        finally:
+            await store.close()
 
     try:
-        result = _confirm()
+        result = _run(_confirm())
     except Exception as e:
-        logger.error(f"Confirm command failed: {e}", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
@@ -886,14 +851,16 @@ def cancel(job_id: str = typer.Argument(..., help="Job ID to skip API review")):
     """Skip API review, finalize plan without it."""
     from fitz_graveyard.tools.cancel_review import cancel_review
 
-    @_with_store
-    async def _cancel(store):
-        return await cancel_review(job_id, store=store)
+    async def _cancel():
+        store = await _get_store()
+        try:
+            return await cancel_review(job_id, store=store)
+        finally:
+            await store.close()
 
     try:
-        result = _cancel()
+        result = _run(_cancel())
     except Exception as e:
-        logger.error(f"Cancel command failed: {e}", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
@@ -962,24 +929,26 @@ def purge(
     include_complete: bool = typer.Option(False, "--all", help="Also remove completed jobs"),
 ):
     """Kill all zombie jobs (interrupted, queued, running, failed)."""
-    @_with_store
-    async def _purge(store):
+    async def _purge():
         import aiosqlite
+        store = await _get_store()
+        try:
+            states = ["interrupted", "queued", "running", "failed"]
+            if include_complete:
+                states.append("complete")
 
-        states = ["interrupted", "queued", "running", "failed"]
-        if include_complete:
-            states.append("complete")
+            placeholders = ",".join("?" for _ in states)
+            async with aiosqlite.connect(store._db_path) as db:
+                cursor = await db.execute(
+                    f"UPDATE jobs SET state='failed' WHERE state IN ({placeholders})",
+                    states,
+                )
+                await db.commit()
+                return cursor.rowcount
+        finally:
+            await store.close()
 
-        placeholders = ",".join("?" for _ in states)
-        async with aiosqlite.connect(store._db_path) as db:
-            cursor = await db.execute(
-                f"UPDATE jobs SET state='failed' WHERE state IN ({placeholders})",
-                states,
-            )
-            await db.commit()
-            return cursor.rowcount
-
-    count = _purge()
+    count = _run(_purge())
     if count:
         typer.echo(f"Purged {count} job(s).")
     else:

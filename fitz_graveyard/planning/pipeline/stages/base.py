@@ -18,23 +18,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# --- JSON repair / extraction constants ---
-_JSON_REPAIR_MAX_TRIM_ATTEMPTS = 200  # Max trim iterations when repairing truncated JSON
-_JSON_ERROR_PREVIEW_CHARS = 500  # Max chars of raw output to include in error messages
-
-# --- LLM call constants ---
-_EXTRACTION_MAX_TOKENS = 4096  # Token cap for JSON extraction and investigation calls
-_TOOL_REASONING_MAX_ROUNDS = 5  # Default max tool-use rounds in agentic reasoning
-
-# --- Self-critique quality thresholds ---
-_CRITIQUE_MIN_LENGTH_RATIO = 0.3  # Minimum refined/original ratio to accept critique output
-_CRITIQUE_MIN_LENGTH_FLOOR = 2000  # Absolute floor — accept critique if longer than this
-
-# --- Tool reasoning constants ---
-_DISK_READ_MAX_BYTES = 50_000  # Max bytes to read from disk for tool file access
-_MAX_READ_BATCH = 10  # Max files per read_files() call to prevent context blowup
-_MAX_INSPECT_BATCH = 15  # Max files per inspect_files() call
-
 SYSTEM_PROMPT = (
     "You are a senior software architect and technical strategist with 15 years of experience "
     "shipping production systems at scale. You think rigorously, challenge vague requirements, "
@@ -75,39 +58,6 @@ def _count_unclosed_delimiters(text: str) -> tuple[int, int, bool]:
     return max(braces, 0), max(brackets, 0), in_string
 
 
-def _build_closing_suffix(text: str) -> str:
-    """Build the closing suffix for unclosed JSON delimiters in correct LIFO order.
-
-    Unlike simple count-based closing (all ] then all }), this tracks the
-    actual stack of unclosed delimiters and closes them in reverse order.
-    For example, ``[{`` needs ``}]``, not ``]}`` which would be invalid JSON.
-    """
-    stack: list[str] = []
-    in_string = False
-    escape = False
-    for ch in text:
-        if escape:
-            escape = False
-            continue
-        if ch == '\\' and in_string:
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == '{':
-            stack.append('}')
-        elif ch == '[':
-            stack.append(']')
-        elif ch in ('}', ']') and stack and stack[-1] == ch:
-            stack.pop()
-    # Close in reverse (LIFO) order
-    stack.reverse()
-    return ''.join(stack)
-
-
 def _repair_truncated_json(
     candidate: str, braces: int, brackets: int, in_string: bool
 ) -> dict[str, Any] | None:
@@ -130,14 +80,8 @@ def _repair_truncated_json(
     # Try progressively trimming from the end to find a parseable state.
     # Strip back to after the last complete JSON value by removing trailing
     # partial tokens (commas, colons, partial keys, whitespace).
-    for _ in range(_JSON_REPAIR_MAX_TRIM_ATTEMPTS):
-        # Recount in_string after any trimming — closing the string may have
-        # been invalidated by stripping characters.
-        _, _, still_in_string = _count_unclosed_delimiters(text)
-        if still_in_string:
-            text = text + '"'
-
-        suffix = _build_closing_suffix(text)
+    for _ in range(200):  # max trim attempts
+        suffix = "]" * brackets + "}" * braces
         try:
             return json.loads(text + suffix)
         except json.JSONDecodeError:
@@ -166,6 +110,11 @@ def _repair_truncated_json(
                     continue
         # Remove last character as fallback
         text = text[:-1]
+        # Recount after trimming
+        braces, brackets, in_string = _count_unclosed_delimiters(text)
+        if in_string:
+            text = text + '"'
+            braces, brackets, in_string = _count_unclosed_delimiters(text)
 
     return None
 
@@ -259,7 +208,7 @@ def extract_json(raw_output: str) -> dict[str, Any]:
         if repaired is not None:
             return repaired
 
-    preview = raw_output[:_JSON_ERROR_PREVIEW_CHARS].replace('\n', '\\n')
+    preview = raw_output[:500].replace('\n', '\\n')
     raise ValueError(
         f"Could not extract valid JSON from output ({len(raw_output)} chars). "
         f"Preview: {preview}"
@@ -423,7 +372,7 @@ class PipelineStage(ABC):
         ]
         t2 = time.monotonic()
         json_output = await client.generate(
-            messages=extract_messages, max_tokens=_EXTRACTION_MAX_TOKENS,
+            messages=extract_messages, max_tokens=4096,
         )
         t3 = time.monotonic()
         logger.info(f"Stage '{self.name}': two-pass formatting took {t3 - t2:.1f}s")
@@ -537,7 +486,7 @@ class PipelineStage(ABC):
         try:
             t0 = time.monotonic()
             raw = await client.generate(
-                messages=extract_messages, max_tokens=_EXTRACTION_MAX_TOKENS,
+                messages=extract_messages, max_tokens=4096,
             )
             t1 = time.monotonic()
             logger.info(
@@ -546,8 +495,7 @@ class PipelineStage(ABC):
             return extract_json(raw)
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': field group '{group_label}' extraction failed: {e}",
-                exc_info=True,
+                f"Stage '{self.name}': field group '{group_label}' extraction failed: {e}"
             )
             return {}
 
@@ -613,14 +561,14 @@ class PipelineStage(ABC):
             # Only use refined if it's substantial (not a short error/refusal).
             # Use absolute floor (2000 chars) — a focused critique is naturally
             # shorter than the full reasoning it reviews.
-            if len(refined) > min(len(reasoning_text) * _CRITIQUE_MIN_LENGTH_RATIO, _CRITIQUE_MIN_LENGTH_FLOOR):
+            if len(refined) > min(len(reasoning_text) * 0.3, 2000):
                 return refined
             logger.warning(
                 f"Stage '{self.name}': critique output too short ({len(refined)} chars), keeping original"
             )
             return reasoning_text
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': self-critique failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': self-critique failed: {e}")
             return reasoning_text
 
     async def _devil_advocate(
@@ -678,7 +626,7 @@ class PipelineStage(ABC):
                 f"Stage '{self.name}': devil's advocate took {t1 - t0:.1f}s "
                 f"({len(reasoning_text)} → {len(refined)} chars)"
             )
-            if len(refined) > min(len(reasoning_text) * _CRITIQUE_MIN_LENGTH_RATIO, _CRITIQUE_MIN_LENGTH_FLOOR):
+            if len(refined) > min(len(reasoning_text) * 0.3, 2000):
                 return refined
             logger.warning(
                 f"Stage '{self.name}': devil's advocate output too short "
@@ -686,7 +634,7 @@ class PipelineStage(ABC):
             )
             return reasoning_text
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': devil's advocate failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': devil's advocate failed: {e}")
             return reasoning_text
 
     # ------------------------------------------------------------------
@@ -788,7 +736,7 @@ class PipelineStage(ABC):
         )
         t1 = time.monotonic()
 
-        # Format findings. Each investigation answer is bounded by _EXTRACTION_MAX_TOKENS,
+        # Format findings. Each investigation answer is bounded by max_tokens=4096,
         # so total size is naturally limited by question count (max 7).
         findings: list[str] = []
         for r in results:
@@ -835,10 +783,10 @@ class PipelineStage(ABC):
         ]
         try:
             return await client.generate(
-                messages=messages, temperature=0, max_tokens=_EXTRACTION_MAX_TOKENS,
+                messages=messages, temperature=0, max_tokens=4096,
             )
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': _ask_one failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': _ask_one failed: {e}")
             return ""
 
     _MAX_GATHERED_CONTEXT_CHARS = 32000
@@ -892,7 +840,7 @@ class PipelineStage(ABC):
         client: Any,
         messages: list[dict],
         prior_outputs: dict[str, Any],
-        max_rounds: int = _TOOL_REASONING_MAX_ROUNDS,
+        max_rounds: int = 5,
     ) -> str:
         """Run reasoning with read_file/read_files tools for agentic exploration.
 
@@ -956,7 +904,7 @@ class PipelineStage(ABC):
 
                     resolved = sanitize_agent_path(path, source_dir)
                     if resolved.is_file():
-                        raw = resolved.read_bytes()[:_DISK_READ_MAX_BYTES]
+                        raw = resolved.read_bytes()[:50_000]
                         text = raw.decode("utf-8", errors="replace")
                         compressed = compress_file(text, path)
                         # Cache for future reads
@@ -967,7 +915,7 @@ class PipelineStage(ABC):
                             f"({len(text)} raw → {len(compressed)} compressed)"
                         )
                         return compressed
-                except (OSError, ValueError) as e:
+                except Exception as e:
                     logger.debug(f"Stage '{self.name}': disk read failed for '{path}': {e}")
 
             return f"File not found: {path}. Check the structural overview for correct paths."
@@ -975,6 +923,8 @@ class PipelineStage(ABC):
         def read_file(path: str) -> str:
             """Read the full source code of a file. Use this to inspect implementation details beyond the seed set."""
             return _resolve_file(path)
+
+        _MAX_READ_BATCH = 10  # prevent context blowup from reading too many files at once
 
         def read_files(paths: list[str]) -> str:
             """Read up to 10 files at once. Returns each file with a header."""
@@ -986,12 +936,14 @@ class PipelineStage(ABC):
                 results.append(f"### {p}\n{content}")
             return "\n\n".join(results)
 
+        _MAX_INSPECT = 15  # prevent context blowup — model can call multiple times
+
         def inspect_files(paths: list[str]) -> str:
             """Get structural detail (classes, methods, imports) for up to 15 files per call. Call multiple times for more files."""
-            if len(paths) > _MAX_INSPECT_BATCH:
-                skipped = len(paths) - _MAX_INSPECT_BATCH
-                paths = paths[:_MAX_INSPECT_BATCH]
-                suffix = f"\n\n(Showing {_MAX_INSPECT_BATCH} of {_MAX_INSPECT_BATCH + skipped} requested. Call again with remaining paths.)"
+            if len(paths) > _MAX_INSPECT:
+                skipped = len(paths) - _MAX_INSPECT
+                paths = paths[:_MAX_INSPECT]
+                suffix = f"\n\n(Showing {_MAX_INSPECT} of {_MAX_INSPECT + skipped} requested. Call again with remaining paths.)"
             else:
                 suffix = ""
             results: list[str] = []

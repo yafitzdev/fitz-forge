@@ -157,7 +157,7 @@ def _extract_python(content: str) -> str:
                     if n.returns:
                         try:
                             ret = ast.unparse(n.returns)
-                        except (ValueError, TypeError):
+                        except Exception:
                             ret = _ast_name(n.returns)
                         m_str += f" -> {ret}"
                     methods.append(m_str)
@@ -182,7 +182,7 @@ def _extract_python(content: str) -> str:
             if node.returns:
                 try:
                     ret = ast.unparse(node.returns)
-                except (ValueError, TypeError):
+                except Exception:
                     ret = _ast_name(node.returns)
                 func_str += f" -> {ret}"
             decs = _extract_key_decorators(node.decorator_list)
@@ -433,8 +433,7 @@ def _extract_config(suffix: str, content: str) -> str:
             data = tomllib.loads(content)
         else:
             return ""
-    except (ValueError, KeyError, OSError, ImportError) as e:
-        logger.debug(f"Config file parsing failed: {e}")
+    except Exception:
         return ""
 
     if isinstance(data, dict):
@@ -711,7 +710,7 @@ def _format_annotation(node: ast.expr | None) -> str:
         return ""
     try:
         return ast.unparse(node)
-    except (ValueError, TypeError):
+    except Exception:
         return "?"
 
 
@@ -887,13 +886,13 @@ def extract_library_signatures(
     for pkg_name in sorted(third_party)[:_MAX_LIBRARY_PACKAGES]:
         try:
             mod = importlib.import_module(pkg_name)
-        except (ImportError, ModuleNotFoundError):
+        except Exception:
             continue
 
         lines: list[str] = []
         try:
             members = inspect.getmembers(mod)
-        except (ImportError, TypeError):
+        except Exception:
             members = [(name, getattr(mod, name, None)) for name in dir(mod)]
 
         for name, obj in members:
@@ -909,7 +908,7 @@ def extract_library_signatures(
                 elif inspect.isfunction(obj) or inspect.isbuiltin(obj):
                     sig = _safe_signature(obj)
                     lines.append(f"{name}{sig}")
-            except (TypeError, ValueError, AttributeError):
+            except Exception:
                 continue
 
         if not lines:
@@ -941,7 +940,7 @@ def _extract_class_public_methods(cls: type) -> list[str]:
             continue
         try:
             attr = getattr(cls, name)
-        except (AttributeError, TypeError):
+        except Exception:
             continue
         if callable(attr) or isinstance(attr, property):
             sig = _safe_signature(attr) if callable(attr) else " (property)"

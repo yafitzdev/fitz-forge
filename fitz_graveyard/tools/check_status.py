@@ -38,7 +38,7 @@ async def check_status(job_id: str, store: JobStore) -> dict:
         sanitized_id = sanitize_job_id(job_id)
     except ToolError:
         raise
-    except (ValueError, TypeError) as e:
+    except Exception as e:
         raise ToolError(f"Invalid job ID: {e}")
 
     # Look up job

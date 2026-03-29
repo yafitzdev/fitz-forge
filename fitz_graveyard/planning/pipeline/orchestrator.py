@@ -24,18 +24,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Subprocess timeout for fetching git SHA
-_GIT_SHA_TIMEOUT_SECONDS = 5
-
-# Max matching file lines to include per artifact in duplicate check (prevents prompt bloat)
-_ARTIFACT_DUPLICATE_MAX_HITS = 10
-
-# Substep fraction ceiling — never exceed this to leave room for stage_complete callback
-_SUBSTEP_MAX_FRACTION = 0.95
-
-# Max chars to check for COHERENT marker in coherence check response
-_COHERENT_MARKER_SCAN_CHARS = 50
-
 
 @dataclass
 class PipelineResult:
@@ -71,11 +59,11 @@ def get_git_sha() -> str | None:
             ["git", "rev-parse", "--short=7", "HEAD"],
             capture_output=True,
             text=True,
-            timeout=_GIT_SHA_TIMEOUT_SECONDS,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except (subprocess.SubprocessError, OSError) as e:
+    except Exception as e:
         logger.warning(f"Failed to get git SHA: {e}")
 
     return None
@@ -345,7 +333,7 @@ class PlanningPipeline:
                     lo, hi = _stage.progress_range
                     expected = _EXPECTED_SUBSTEPS.get(_stage.name, 5)
                     # Advance within range, never exceed hi (leave room for stage_complete)
-                    frac = min(substep_counter[0] / (expected + 1), _SUBSTEP_MAX_FRACTION)
+                    frac = min(substep_counter[0] / (expected + 1), 0.95)
                     interpolated = lo + frac * (hi - lo)
                     result_or_coro = progress_callback(interpolated, phase_detail)
                     if hasattr(result_or_coro, '__await__'):
@@ -476,7 +464,7 @@ class PlanningPipeline:
             logger.warning(f"Implementation check returned unexpected structure: {type(result)}")
             return {"already_implemented": False, "evidence": "", "gaps": []}
         except Exception as e:
-            logger.warning(f"Implementation check failed (non-fatal): {e}", exc_info=True)
+            logger.warning(f"Implementation check failed (non-fatal): {e}")
             return {"already_implemented": False, "evidence": "", "gaps": []}
 
     @staticmethod
@@ -529,7 +517,7 @@ class PlanningPipeline:
                 matches.append({
                     "proposed": artifact,
                     "keywords": keywords,
-                    "existing_matches": hits[:_ARTIFACT_DUPLICATE_MAX_HITS],
+                    "existing_matches": hits[:10],  # cap to avoid bloat
                 })
 
         return matches
@@ -606,7 +594,7 @@ class PlanningPipeline:
             t1 = time.monotonic()
             logger.info(f"Coherence check took {t1 - t0:.1f}s ({len(response)} chars)")
 
-            if "COHERENT" in response.upper()[:_COHERENT_MARKER_SCAN_CHARS]:
+            if "COHERENT" in response.upper()[:50]:
                 logger.info("Cross-stage coherence check: all sections coherent")
                 return {}
 
@@ -618,7 +606,7 @@ class PlanningPipeline:
                 return fixes
             return {}
         except Exception as e:
-            logger.warning(f"Coherence check failed (non-fatal): {e}", exc_info=True)
+            logger.warning(f"Coherence check failed (non-fatal): {e}")
             return {}
 
     def get_progress(self, completed_stages: set[str]) -> float:
@@ -849,7 +837,7 @@ class DecomposedPipeline:
                     substep_counter[0] += 1
                     lo, hi = _stage.progress_range
                     expected = _EXPECTED_SUBSTEPS.get(_stage.name, 5)
-                    frac = min(substep_counter[0] / (expected + 1), _SUBSTEP_MAX_FRACTION)
+                    frac = min(substep_counter[0] / (expected + 1), 0.95)
                     interpolated = lo + frac * (hi - lo)
                     result_or_coro = progress_callback(
                         interpolated, phase_detail,
@@ -924,7 +912,7 @@ class DecomposedPipeline:
                 f"AST violations"
             )
         except Exception as e:
-            logger.warning(f"Grounding validation failed (non-fatal): {e}", exc_info=True)
+            logger.warning(f"Grounding validation failed (non-fatal): {e}")
             prior_outputs["_grounding_validation"] = {"error": str(e)}
         stage_timings["grounding_validation"] = time.monotonic() - t_grounding
 

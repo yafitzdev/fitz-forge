@@ -58,7 +58,7 @@ async def create_plan(
         cleaned_description = sanitize_description(description)
     except ToolError:
         raise
-    except (ValueError, TypeError) as e:
+    except Exception as e:
         raise ToolError(f"Invalid description: {e}")
 
     # Validate source_dir if provided

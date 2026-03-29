@@ -156,7 +156,7 @@ class CostCalculator:
 
             return self._converter.convert(usd_amount, "USD", "EUR")
 
-        except (ImportError, ValueError, OSError) as e:
+        except Exception as e:
             # Fallback to hardcoded rate if conversion fails (no network, etc.)
             logger.warning(
                 f"EUR conversion failed: {e}. Using fallback rate 0.92. "

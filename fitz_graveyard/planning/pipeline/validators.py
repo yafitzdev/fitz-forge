@@ -125,7 +125,7 @@ async def ensure_min_adrs(
             merged["adrs"] = adrs
             logger.info(f"ensure_min_adrs: added {len(new_adrs[:needed])} ADRs via LLM")
     except Exception as e:
-        logger.warning(f"ensure_min_adrs: LLM repair failed: {e}", exc_info=True)
+        logger.warning(f"ensure_min_adrs: LLM repair failed: {e}")
 
     return merged
 
@@ -288,7 +288,7 @@ async def ensure_concrete_verification(
                 phase["verification_command"] = _fallback_verification(phase)
                 logger.info(f"ensure_concrete_verification: fallback for phase {phase['number']}")
     except Exception as e:
-        logger.warning(f"ensure_concrete_verification: LLM repair failed: {e}", exc_info=True)
+        logger.warning(f"ensure_concrete_verification: LLM repair failed: {e}")
         for phase in vague_phases:
             phase["verification_command"] = _fallback_verification(phase)
 
@@ -536,6 +536,6 @@ async def ensure_correct_artifacts(
             if applied:
                 logger.info(f"ensure_correct_artifacts: LLM corrected {applied} artifacts")
     except Exception as e:
-        logger.warning(f"ensure_correct_artifacts: LLM review failed: {e}", exc_info=True)
+        logger.warning(f"ensure_correct_artifacts: LLM review failed: {e}")
 
     return merged

@@ -195,7 +195,7 @@ class BackgroundWorker:
                             error="Server shutdown during processing",
                         )
                     except Exception as e:
-                        logger.error(f"Failed to mark job as interrupted: {e}", exc_info=True)
+                        logger.error(f"Failed to mark job as interrupted: {e}")
                     raise  # Re-raise to exit loop
 
                 except Exception as e:
@@ -209,7 +209,7 @@ class BackgroundWorker:
                         state=JobState.FAILED,
                         error=f"{error_msg}\n\n{tb_snippet}",
                     )
-                    logger.error(f"Job {job.job_id} failed: {error_msg}", exc_info=True)
+                    logger.error(f"Job {job.job_id} failed: {error_msg}")
 
                 finally:
                     self._current_job_id = None
@@ -567,11 +567,10 @@ class BackgroundWorker:
                 await self._store.update(job_id, state=JobState.COMPLETE, progress=1.0)
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"Job {job_id} execution failed: {error_msg}", exc_info=True)
             try:
                 await self._store.update(job_id, state=JobState.FAILED, error=error_msg)
-            except Exception as store_err:
-                logger.error(f"Failed to mark job {job_id} as failed: {store_err}", exc_info=True)
+            except Exception:
+                pass
             raise
         finally:
             self._current_job_id = None

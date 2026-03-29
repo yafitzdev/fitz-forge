@@ -646,7 +646,7 @@ async def validate_grounding(
                 llm_gaps = {"raw": raw[:2000], "parse_error": True}
             logger.info(f"Grounding LLM check: {llm_gaps.get('summary', 'no summary')}")
         except Exception as e:
-            logger.warning(f"Grounding LLM check failed (non-fatal): {e}", exc_info=True)
+            logger.warning(f"Grounding LLM check failed (non-fatal): {e}")
             llm_gaps = {"error": str(e)}
 
     return GroundingReport(

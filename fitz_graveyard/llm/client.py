@@ -18,15 +18,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Ollama default context window size in tokens (128K)
-_OLLAMA_CONTEXT_SIZE = 131_072
-
-# Default request timeout in seconds (generous to allow model loading)
-_OLLAMA_DEFAULT_TIMEOUT_SECONDS = 300
-
-# Default hard cap on output tokens to prevent infinite generation
-_DEFAULT_MAX_TOKENS = 16_384
-
 
 class OllamaClient:
     """
@@ -44,7 +35,7 @@ class OllamaClient:
         base_url: str,
         model: str,
         fallback_model: str | None = None,
-        timeout: int = _OLLAMA_DEFAULT_TIMEOUT_SECONDS,
+        timeout: int = 300,
     ):
         """
         Initialize Ollama client.
@@ -64,7 +55,7 @@ class OllamaClient:
     @property
     def context_size(self) -> int:
         """Context window size in tokens (Ollama default: 128K)."""
-        return _OLLAMA_CONTEXT_SIZE
+        return 131072
 
     @property
     def fast_model(self) -> str:
@@ -112,11 +103,8 @@ class OllamaClient:
             # Return True even if model not found - Ollama can pull on demand
             return True
 
-        except (httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError) as e:
-            logger.error(f"Health check failed (network): {e}")
-            return False
-        except ResponseError as e:
-            logger.error(f"Health check failed (ollama): {e}")
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
             return False
 
     @ollama_retry
@@ -125,7 +113,7 @@ class OllamaClient:
         messages: list[dict],
         model: str | None = None,
         temperature: float | None = None,
-        max_tokens: int = _DEFAULT_MAX_TOKENS,
+        max_tokens: int = 16384,
     ) -> str:
         """
         Generate a response from Ollama with streaming.

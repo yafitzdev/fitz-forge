@@ -230,7 +230,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': contract verification took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': contract verification failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': contract verification failed: {e}")
             return ""
 
     async def _verify_data_flow(
@@ -248,7 +248,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': data flow verification took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': data flow verification failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': data flow verification failed: {e}")
             return ""
 
     async def _verify_patterns(
@@ -266,7 +266,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': pattern verification took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': pattern verification failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': pattern verification failed: {e}")
             return ""
 
     async def _verify_type_boundaries(
@@ -284,7 +284,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': type boundary audit took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': type boundary audit failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': type boundary audit failed: {e}")
             return ""
 
     async def _verify_sketch(
@@ -310,7 +310,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': sketch verification took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': sketch verification failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': sketch verification failed: {e}")
             return ""
 
     async def _verify_assumptions(
@@ -340,7 +340,7 @@ class ArchitectureDesignStage(PipelineStage):
             logger.info(f"Stage '{self.name}': assumption verification took {time.monotonic() - t0:.1f}s")
             return result
         except Exception as e:
-            logger.warning(f"Stage '{self.name}': assumption verification failed: {e}", exc_info=True)
+            logger.warning(f"Stage '{self.name}': assumption verification failed: {e}")
             return ""
 
     async def _run_verification_agents(
