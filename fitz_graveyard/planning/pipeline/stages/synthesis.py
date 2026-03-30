@@ -13,6 +13,7 @@ Output: same PlanOutput format (ContextOutput + ArchitectureOutput + DesignOutpu
 import difflib
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -432,6 +433,10 @@ class SynthesisStage(PipelineStage):
         call_graph_text = prior_outputs.get("_call_graph_text", "")
         gathered_context = self._get_gathered_context(prior_outputs)
 
+        layer_warning = self._build_layer_warning(prior_outputs)
+        if layer_warning:
+            gathered_context = gathered_context + "\n\n" + layer_warning
+
         prompt_template = load_prompt("synthesis")
         prompt = prompt_template.format(
             task_description=job_description,
@@ -440,6 +445,48 @@ class SynthesisStage(PipelineStage):
             gathered_context=gathered_context,
         )
         return self._make_messages(prompt)
+
+    @staticmethod
+    def _build_layer_warning(prior_outputs: dict[str, Any]) -> str:
+        """Return a warning if interior call chain layers have no resolutions.
+
+        Defensive fallback for when the coverage gate at decomposition wasn't
+        sufficient. Appended to gathered_context so the model sees a concrete
+        list of uncovered files before writing needed_artifacts.
+        """
+        call_graph = prior_outputs.get("_call_graph")
+        if not call_graph or not call_graph.nodes:
+            return ""
+        max_depth = call_graph.max_depth
+        if max_depth < 2:
+            return ""
+
+        interior = [n for n in call_graph.nodes if 0 < n.depth < max_depth]
+        if len(interior) < 2:
+            return ""
+
+        resolution_output = prior_outputs.get("decision_resolution", {})
+        resolutions = resolution_output.get("resolutions", [])
+        covered_text = " ".join(
+            r.get("decision", "") + " " + " ".join(r.get("evidence", []))
+            for r in resolutions
+        ).lower()
+
+        def is_mentioned(path: str) -> bool:
+            base = os.path.basename(path).replace(".py", "").lower()
+            return path.lower() in covered_text or base in covered_text
+
+        uncovered = [n for n in interior if not is_mentioned(n.file_path)]
+        if not uncovered or len(uncovered) * 2 < len(interior):
+            return ""
+
+        file_list = ", ".join(n.file_path for n in uncovered[:4])
+        return (
+            "## LAYER COVERAGE WARNING\n"
+            f"No decision explicitly covers: {file_list}\n"
+            "If these files require changes, include them in needed_artifacts. "
+            "Do not skip intermediate layers — trace the full call chain."
+        )
 
     def parse_output(self, raw_output: str) -> dict[str, Any]:
         return extract_json(raw_output)

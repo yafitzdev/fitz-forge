@@ -8,6 +8,7 @@ Output: ordered list of AtomicDecision objects with dependencies
 """
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -49,6 +50,7 @@ class DecisionDecompositionStage(PipelineStage):
 
     def build_prompt(
         self, job_description: str, prior_outputs: dict[str, Any],
+        coverage_hint: str = "",
     ) -> list[dict]:
         call_graph_text = prior_outputs.get("_call_graph_text", "")
         manifest = prior_outputs.get("_raw_summaries", "")
@@ -62,7 +64,60 @@ class DecisionDecompositionStage(PipelineStage):
         )
         if impl_check:
             prompt = f"{impl_check}\n\n{prompt}"
+        if coverage_hint:
+            prompt = f"{prompt}\n\n{coverage_hint}"
         return self._make_messages(prompt)
+
+    @staticmethod
+    def _build_coverage_hint(
+        decisions: list[dict], prior_outputs: dict[str, Any],
+    ) -> str:
+        """Return a retry hint if interior call chain layers are uncovered.
+
+        Checks whether decisions collectively cover the intermediate nodes
+        (depth > 0, depth < max_depth) in the call graph. If more than half
+        are missing, the decomposition took a shortcut — return a hint listing
+        the uncovered files so the model can retry with explicit guidance.
+        """
+        call_graph = prior_outputs.get("_call_graph")
+        if not call_graph or not call_graph.nodes:
+            return ""
+        max_depth = call_graph.max_depth
+        if max_depth < 2:
+            return ""
+
+        interior = [
+            n for n in call_graph.nodes
+            if 0 < n.depth < max_depth
+        ]
+        if len(interior) < 2:
+            return ""
+
+        decision_files: set[str] = {
+            f for d in decisions for f in d.get("relevant_files", [])
+        }
+
+        def is_covered(path: str) -> bool:
+            base = os.path.basename(path)
+            for df in decision_files:
+                if path == df or path in df or df in path:
+                    return True
+                if os.path.basename(df) == base:
+                    return True
+            return False
+
+        uncovered = [n for n in interior if not is_covered(n.file_path)]
+        if not uncovered or len(uncovered) * 2 < len(interior):
+            return ""
+
+        file_list = "\n".join(f"- {n.file_path}" for n in uncovered[:6])
+        return (
+            "COVERAGE WARNING: Your decomposition skips intermediate call chain "
+            "layers. These files are in the call chain but have no decisions:\n"
+            f"{file_list}\n"
+            "Every layer that changes needs at least one decision with that "
+            "file in relevant_files."
+        )
 
     def parse_output(self, raw_output: str) -> dict[str, Any]:
         data = extract_json(raw_output)
@@ -93,6 +148,39 @@ class DecisionDecompositionStage(PipelineStage):
             logger.info(
                 f"Stage '{self.name}': produced {len(decisions)} decisions"
             )
+
+            # Coverage gate: retry once if interior call chain layers are skipped.
+            coverage_hint = self._build_coverage_hint(decisions, prior_outputs)
+            if coverage_hint:
+                logger.info(
+                    f"Stage '{self.name}': coverage gap detected, retrying"
+                )
+                retry_messages = self.build_prompt(
+                    job_description, prior_outputs, coverage_hint=coverage_hint,
+                )
+                t0 = time.monotonic()
+                retry_raw = await client.generate(
+                    messages=retry_messages, temperature=0, max_tokens=4096,
+                )
+                t1 = time.monotonic()
+                logger.info(
+                    f"Stage '{self.name}': coverage retry took {t1 - t0:.1f}s"
+                )
+                try:
+                    retry_parsed = self.parse_output(retry_raw)
+                    retry_decisions = retry_parsed.get("decisions", [])
+                    logger.info(
+                        f"Stage '{self.name}': retry produced "
+                        f"{len(retry_decisions)} decisions"
+                    )
+                    parsed = retry_parsed
+                    decisions = retry_decisions
+                    raw = retry_raw
+                except Exception as e:
+                    logger.warning(
+                        f"Stage '{self.name}': coverage retry parse failed "
+                        f"({e}), using original decisions"
+                    )
 
             # Validate dependency references
             ids = {d["id"] for d in decisions}

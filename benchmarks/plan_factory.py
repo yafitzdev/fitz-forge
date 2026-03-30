@@ -540,30 +540,46 @@ def decomposed(
     score_plans: bool = typer.Option(
         False, "--score", help="Prepare scoring prompts after generation",
     ),
+    parallel_runs: int = typer.Option(
+        1, "--parallel-runs", "-p",
+        help="Run N plans concurrently (requires LM Studio --parallel N)",
+    ),
 ):
     """Run decomposed pipeline benchmarks with fixed retrieval context."""
     context = json.loads(Path(context_file).read_text())
     out_dir = _results_dir("decomposed")
     logger.info(f"Running {runs} decomposed benchmarks -> {out_dir}")
+    if parallel_runs > 1:
+        logger.info(f"Parallel runs: {parallel_runs} (ensure LM Studio loaded with --parallel {parallel_runs})")
 
     all_results = []
 
+    async def _run_one(i: int) -> dict:
+        logger.info(f"--- Decomposed run {i + 1}/{runs} ---")
+        result = await _run_decomposed_once(
+            source_dir, query, context, i + 1, out_dir,
+        )
+        run_file = out_dir / f"run_{i + 1:02d}.json"
+        run_file.write_text(json.dumps(result, indent=2))
+        logger.info(
+            f"Run {i + 1}: {result['recommended']} "
+            f"({result['elapsed_s']}s, {result['num_decisions']} decisions, "
+            f"success={result['success']})"
+        )
+        return result
+
     async def _run_all():
-        for i in range(runs):
-            logger.info(f"--- Decomposed run {i + 1}/{runs} ---")
-            result = await _run_decomposed_once(
-                source_dir, query, context, i + 1, out_dir,
+        for batch_start in range(0, runs, parallel_runs):
+            batch_end = min(batch_start + parallel_runs, runs)
+            batch_indices = list(range(batch_start, batch_end))
+            if len(batch_indices) > 1:
+                logger.info(
+                    f"Starting batch: runs {[i + 1 for i in batch_indices]}"
+                )
+            results = await asyncio.gather(
+                *[_run_one(i) for i in batch_indices]
             )
-            all_results.append(result)
-
-            run_file = out_dir / f"run_{i + 1:02d}.json"
-            run_file.write_text(json.dumps(result, indent=2))
-
-            logger.info(
-                f"Run {i + 1}: {result['recommended']} "
-                f"({result['elapsed_s']}s, {result['num_decisions']} decisions, "
-                f"success={result['success']})"
-            )
+            all_results.extend(results)
 
     asyncio.run(_run_all())
     _print_reasoning_summary(all_results, out_dir)

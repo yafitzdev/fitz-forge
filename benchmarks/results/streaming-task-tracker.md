@@ -50,7 +50,12 @@
 | 35a-e | 2026-03-29 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `56f411e1` | `81b5abf` | synthesis prompt fix: "trace call chain, don't skip layers" | 12 | 258-306s | 7.6 | 8.0 | 6.0 | 5.6 | 5.4 | 7.6 | **40.6 avg (37-47)** | Prompt fix raised floor from 33 to 37. Prevented shortcut architecture. 5 runs: 47, 37, 42, 38, 39. |
 | 36a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `9f4bd8c6` | `81b5abf` | + artifact retry when coverage < 50% of needed | 12 | 284-331s | 8.0 | 8.0 | 6.4 | 6.0 | 5.6 | 7.2 | **43.2 avg (32-47)** | Retry fired on plan 4 (0→2 artifacts) but quality was low (scored 32). Four plans hit 45-47 — best consistency yet. 5 runs: 47, 46, 42, 32, 45. |
 | 37a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `9f4bd8c6` | `81b5abf` | + improved retry (component interfaces in retry context) | 12 | 266-331s | 7.8 | 8.0 | 6.2 | 7.0 | 5.6 | 8.0 | **42.6 avg (33-48)** | Three plans at 47-48 (best ceiling). Retry fired on plan 1 (1→5 artifacts). But floor still 33 — plan 2 had self-contradicting decisions + fabricated AnswerMode.NORMAL. Floor is decision quality, not artifact coverage. 5 runs: 47, 33, 48, 38, 47. |
-| 38a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `823a06b7` | `81b5abf` | + AST quality gate (retry on ≥3 fabricated methods) | 12 | 260-331s | 7.2 | 8.2 | 6.0 | 5.2 | 5.0 | 7.4 | **39.0 avg (35-44)** | AST gate fired once (run 2: 3→3 violations, kept original). Retry can't fix fabrication because model doesn't know WHAT to use instead. Floor 35 (better than 33 but ceiling dropped to 44). 5 runs: 39, 42, 44, 35, 35. |
+| 38a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `823a06b7` | `81b5abf` | + AST quality gate v1 (retry on ≥3 fabricated methods) | 12 | 260-331s | 7.2 | 8.2 | 6.0 | 5.2 | 5.0 | 7.4 | **39.0 avg (35-44)** | AST gate fired once (run 2: 3→3 violations, kept original). Retry can't fix fabrication because model doesn't know WHAT to use instead. Floor 35 (better than 33 but ceiling dropped to 44). 5 runs: 39, 42, 44, 35, 35. |
+| 39a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `d5c3b8dd` | `81b5abf` | + AST quality gate v2 (real method names in retry) | 12 | 262-319s | 7.6 | 8.0 | 5.6 | 5.4 | 5.6 | 7.8 | **40.0 avg (33-46)** | AST gate now shows real methods from structural index. Plan 1: 3→0 violations (retry worked!) but scored only 38 — scorer catches deeper issues AST misses. Gate adds complexity without raising avg. Reverted. 5 runs: 38, 33, 45, 46, 38. |
+| 40a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377` | `81b5abf` | + P1: post-decomp coverage gate (retry if interior layers uncovered) | 12-13 | — | 8.2 | 7.4 | 6.8 | 5.6 | 5.6 | 8.4 | **42.0 avg (36-49)** | Gate fired on ALL 5 runs — model always skips interior layers on first try. Floor 33→36 (+3). Ceiling 49 (new best). Avg 42.0 ≈ 42.6 baseline (within noise). Residual floor issue: even with corrected decisions, artifacts still fabricate engine internals (_retrieval, _build_context). 5 runs: 36, 49, 38, 39, 48. |
+| 41a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2` | `81b5abf` | + P2: synthesis layer warning (inject uncovered files into gathered_context) | 12-13 | — | 8.4 | 7.6 | 6.6 | 6.6 | 6.6 | 8.4 | **44.2 avg (37-53)** | P1 still fired all 5 runs. P2 injected silently. Alignment +1.0, Implementability +1.0 vs run 40. Ceiling 53 (new record). Floor 37 (+1 vs P1 alone). Residual floor: decision contradictions — plan 4 d14 (per-token governance) contradicts synthesis (pre-streaming); plan 5 d4 claims providers lack chat_stream (they don't). Exactly P3's target. 5 runs: 51, 41, 53, 39, 37. |
+| 42a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3bug` | `81b5abf` | + P3: contradiction detection (buggy — model returned wrong JSON key names) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.2 | 8.6 | **44.0 avg (38-51)** | P3 was a no-op: model returned contradictions with keys like "a"/"b" instead of "decision_a"/"decision_b" — all 6 contradictions in plan 2 skipped. Scores identical to run 41 (within noise). Bug fixed in same session: robust fallback parsing (key aliases + regex scan). Floor 38 (+1 vs 41, within noise). Need run 43 to test fixed P3. 5 runs: 42, 40, 51, 38, 49. |
+| 43a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3fix` | `81b5abf` | + P3 fixed: robust key parsing (aliases + regex scan) | 12-14 | — | 8.4 | 7.4 | 6.6 | 6.0 | 6.2 | 8.4 | **43.0 avg (39-52)** | P3 fired on plan 3 only (4 contradictions, d4 retried 3x + d14 once) — plan 3 scored 52. P3 did NOT fire on the floor plans (39, 39). Floor issues are synthesis hallucinations: wrong field names (request.messages vs request.history), non-existent internal methods (_retrieve, _build_context), synthesizer.py treated as new when it exists. P3 can't fix synthesis-layer errors. Floor: 39 (+2 vs run 41, marginal). Avg essentially flat. 5 runs: 42, 39, 52, 39, 43. |
 | # | Date | Model | Quant | Ctx | Pipeline SHA | Codebase SHA | Pipeline | Decisions | Time | Files | Contract | Consistency | Alignment | Implement | Scope | **Total** | Notes |
 
 ### Column Key
@@ -288,6 +293,11 @@ The model uses opaque special tokens for its cascade reasoning that are not mean
 43.4   → + tool-enriched template (run 28, NEW BEST — tools gather, template extracts)
 39.0   → + baseline pre-call (run 29, REGRESSION — pre-fill always hurts)
 38.0   → + disk grep + Pydantic fields (run 30, REGRESSION — wrong files found)
+40.6   → + synthesis prompt fix (run 35, floor 33→37 but avg dropped)
+43.2   → + artifact coverage retry (run 36, four plans at 45-47)
+42.6   → + improved retry with component interfaces (run 37, ceiling 48)
+39.0   → + AST quality gate v1 (run 38, REGRESSION — retry adds complexity)
+40.0   → + AST quality gate v2 with real methods (run 39, reverted)
 ```
 
 **Tool reliability engineering — solved problem, wrong bottleneck:**
@@ -314,17 +324,18 @@ These are in the METHOD BODY, not the interface. Tools verify interfaces but can
 
 Run 21's best plans had the model voluntarily produce JSON after organically researching for 3-4 rounds. The model's internal "I'm ready" signal led to more careful output than forced exits. But the model NEVER produces JSON voluntarily in subsequent runs — it always exhausts rounds. The natural JSON production in run 21 may have been model variance, not reproducible behavior.
 
-**What to try next (ranked by expected impact):**
+**Current best config (runs 36/37, commit `9f4bd8c6`):**
 
-1. **Different benchmark task** — all 30 runs were on "add query result streaming." Need to validate whether 43.4 avg is task-specific or generalizes. A second task would also test the tool-enriched template approach on different codebase patterns.
+Three changes from v0.5.0 baseline:
+1. **Tool-enriched template** (run 28) — tools gather verified class/method info, template extraction uses enriched context
+2. **Synthesis prompt fix** (run 35) — "trace the call chain from entry point to implementation, don't skip layers"
+3. **Artifact coverage retry** (run 36) — when extracted artifacts < 50% of needed_artifacts, retry with missing file hints + component interfaces
 
-2. **10-run batch on current config** — run 28 was only 5 runs (43.4 avg, stdev 3.6, range 39-48). A 10-run batch would show the true distribution and whether the 48 was an outlier.
+Results across all runs with this config:
+- Run 36: avg 43.2, range 32-47, four plans at 45-47
+- Run 37: avg 42.6, range 33-48, three plans at 47-48
 
-3. **Post-hoc verification** — after template extracts artifacts, Python checks every class.method reference. Mismatches shown to model for correction. Directly attacks alignment (4-7) but adds another LLM call.
-
-4. **Pydantic field injection into cheat sheet** — the template cheat sheet has class/method info but NOT Pydantic model field names. Most remaining fabrication is `request.query` instead of `request.question`. Adding field names to the cheat sheet (not tools) would be safe since the cheat sheet is already used.
-
-**What was tried and ruled out this session:**
+**What was tried and ruled out (sessions 2026-03-29/30):**
 
 | Approach | Run | Result | Why it failed |
 |----------|-----|--------|---------------|
@@ -333,40 +344,96 @@ Run 21's best plans had the model voluntarily produce JSON after organically res
 | Pre-fill as tool history + forced exit | 25 | 37.4 | Forced exit uses inferior client.generate() path |
 | Pre-fill + 3 rounds + source reading | 26 | 37.0 | Extra source doesn't help |
 | Pre-fill + no forced exit (silent dedup) | 27 | DNF | Model loops forever on pre-filled duplicates |
-| **Tool-enriched template** | **28** | **43.4** | **NEW BEST — tools gather, template extracts** |
+| **Tool-enriched template** | **28** | **43.4** | **Breakthrough — tools gather, template extracts** |
 | Baseline pre-call (seed dedup cache) | 29 | 39.0 | Pre-fill seeds dedup → earlier stale exit |
 | Disk grep + Pydantic fields | 30 | 38.0 | Disk grep found wrong files |
+| Refactored code (constants + exceptions) | 32-34 | 33-42 | Ceiling dropped from 48 to 42, reverted |
+| Synthesis prompt fix | 35 | 40.6 | Floor rose 33→37, ceiling held at 47 |
+| + Coverage retry | 36 | 43.2 | Four plans at 45-47, retry saved 0→2 artifact case |
+| + Improved retry (component interfaces) | 37 | 42.6 | Three plans at 47-48 |
+| + AST quality gate v1 | 38 | 39.0 | Retry can't fix fabrication without real method info |
+| + AST quality gate v2 (real methods) | 39 | 40.0 | Gate worked (3→0 violations) but scorer catches deeper issues |
 
-**Key engineering in production (run 28 config, commit `4ed3b16d`):**
+**The floor problem (33-35) — root cause:**
+5-why analysis traced the floor to **decision resolution quality**, not artifact extraction:
+1. Low score → thin artifacts (1-2 files, fabricated methods)
+2. Thin artifacts → thin synthesis reasoning (few components)
+3. Thin synthesis → shallow needed_artifacts list (2 instead of 5)
+4. Shallow list → decisions took a shortcut architecture (API→provider.chat_stream directly, bypassing engine/synthesizer)
+5. Shortcut decisions → model non-determinism in resolution quality (5/12 resolutions mention stream methods vs 11/12 in good plans)
+
+The prompt fix addresses this partially ("trace the call chain"). The coverage retry catches missing artifacts. But when the decisions themselves are self-contradicting (e.g., d9 contradicts d2), no amount of artifact retry can fix the plan. This is a model capability limitation at 40B Q5_K_S.
+
+**Key engineering in production:**
 1. `_strip_module()` — handles fully-qualified names (fitz_ai.sdk.fitz.Fitz → Fitz)
-2. `_find_source` disk fallback with filename matching (original, NOT grep pass 2)
+2. `_find_source` disk fallback with filename matching
 3. check_exists removed from tool list — eliminated degeneration
 4. Normalized dedup cache keys — module-path variants caught
-5. Early stale exit (2 consecutive duplicate rounds) → fall back to template
+5. Early stale exit (2 consecutive duplicate rounds) → template fallback
 6. Tool results formatted as "VERIFIED CODEBASE INFO" and injected into template context
 7. `_build_artifacts_with_tools` returns `(artifacts, tool_context)` tuple
-8. Template extraction receives cheat sheet + tool-verified signatures
-9. Pydantic field extraction in lookup_class (AnnAssign nodes)
-10. `tool_choice` parameter added to generate_with_tools (both clients)
+8. Synthesis prompt: "trace the call chain, don't skip layers"
+9. Artifact coverage retry with component interface hints
+10. Pydantic field extraction in lookup_class (AnnAssign nodes)
 
-**Key insight: the model NEVER produces JSON voluntarily in tool mode.**
-0/12 diagnostic runs produced JSON within generate_with_tools. The model always calls tools until exhaustion. Run 21's 2/5 "voluntary" JSON was likely extreme variance or different model/server state. The tool-enriched template approach (run 28) works around this by using tools ONLY for research, then extracting artifacts via the reliable template path.
+**How to run the benchmark:**
+```bash
+# Model: qwen3-coder-next-reap-40b-a3b-i1 in LM Studio at 65K context
+# Use --parallel 2 for concurrent benchmark runs (see below)
+lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536 --parallel 2
 
-**Other work items:**
-1. **Fix the two config files problem** — `AppData\Local\fitz-graveyard\...` vs `AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_...\LocalCache\Local\fitz-graveyard\...`. Must update BOTH when changing models.
-2. **Try on a different benchmark task** — all testing was on "add query result streaming". Need to validate on 2-3 other tasks.
-3. **The FitzService gap** — every run misses the service layer between API and engine.
-4. **Unicode fix in plan_factory.py** — SUMMARY.md writing crashes on Windows cp1252 when plan text contains → characters. Need to set encoding='utf-8' on file writes.
+# Run N plans, 2 at a time (streaming task against fitz-ai codebase)
+.venv/Scripts/python -m benchmarks.plan_factory decomposed \
+  --runs 5 -p 2 \
+  --source-dir ../fitz-ai \
+  --context-file benchmarks/ideal_context.json \
+  --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
+  --score
 
-**Key findings documented in:**
-- `docs/findings/fabrication-analysis.md` — root cause of codebase alignment failures + Level 2 analysis
-- `docs/findings/findings-20260324.md` — original session findings (retrieval, decomposition, scoring)
-- `benchmarks/results/streaming-task-tracker.md` — this file, all 26 runs with scores
+# Score via Claude Code subagents (read score_prompt_NN.md files)
+# Results go to benchmarks/results/decomposed_YYYYMMDD_HHMMSS/
+```
+
+IMPORTANT: The `--query` MUST be the streaming task above. The default query is "Add token usage tracking" which is a DIFFERENT task and scores are NOT comparable (run 31 used the wrong query and scored 30.8).
+
+### Session 2026-03-30 — Parallel Benchmark Runs
+
+**Problem:** Each 5-run benchmark takes ~1500s (5 x ~300s sequential). GPU utilization during inference is only ~70% — headroom exists for concurrent request batching.
+
+**Experiment:** Tested LM Studio concurrent request throughput at N=1,2,3,4 with `benchmarks/test_parallel_throughput.py`. Each test sends N identical-length architectural design prompts (2048 max tokens) concurrently and measures wall time + per-request tok/s.
+
+**Results (RTX 5090 32GB, qwen3-coder-next-reap 40B Q5_K_S, 65K context):**
+
+| N | Throughput | Gain | Per-req tok/s | TTFT |
+|---|-----------|------|---------------|------|
+| 1 | 150.6 t/s | 1.00x | 158.9 | 0.76s |
+| 2 | 209.1 t/s | 1.39x | 114.0 | 1.80s |
+| 3 | 234.2 t/s | 1.56x | 83.6 | 1.90s |
+| 4 | 249.0 t/s | 1.65x | 67.1 | 2.59s |
+
+**Analysis:**
+- N=2 is the sweet spot: +39% throughput, each request only 28% slower, TTFT still under 2s
+- N=3: marginal gain (+17% over N=2) but per-request drops to 84 tok/s
+- N=4: almost no gain over N=3 (+6%), per-request tanks to 67 tok/s, TTFT 3.4x worse
+- Scaling is sub-linear — model is memory-bandwidth bound, all requests compete for VRAM bandwidth to read weights
+- LM Studio does real continuous batching (not queuing) — both requests stream tokens simultaneously
+
+**What was built:**
+- `benchmarks/test_parallel_throughput.py` — standalone throughput scaling test (N=1..4)
+- `--parallel-runs` / `-p` flag on `decomposed` command in `plan_factory.py` — runs N plans concurrently in batches
+
+**Impact on benchmarking:**
+- 5 runs with `-p 2`: 3 batches (2+2+1) instead of 5 sequential → ~1050s vs ~1500s (~30% wall time reduction)
+- No quality impact — each run gets its own client, config, pipeline instance
+
+**Requirements:**
+- LM Studio must be loaded with `--parallel N` matching the `-p N` flag
+- `lms load ... --parallel 2` for `-p 2`
 
 **Critical files to read first in new session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — the core. Key methods: `_build_artifacts_with_tools` (tool loop → returns `(artifacts, tool_context)`), `_build_artifact_source_context` (template cheat sheet), `execute` (integration point where tool_context enriches template). Dead code: `_extract_class_names`, `_build_tool_history` (from pre-fill experiments, not wired in).
-- `fitz_graveyard/planning/pipeline/tools/codebase_tools.py` — 4 tools defined (lookup_method, lookup_class, check_exists, read_method_source) but only 3 exposed (check_exists filtered in synthesis.py). `_strip_module` normalizes fully-qualified names. `lookup_class` now extracts Pydantic fields (AnnAssign nodes).
-- `fitz_graveyard/llm/llama_cpp.py` + `lm_studio.py` — `generate_with_tools` has `tool_choice` parameter (unused currently but available).
+- `benchmarks/BENCHMARK.md` — how to run benchmarks, parallel throughput findings, architecture
+- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — the core. Key methods: `_build_artifacts_with_tools` (tool loop → returns `(artifacts, tool_context)`), `_build_artifact_source_context` (template cheat sheet), `execute` (artifact retry logic at ~line 980). Dead code: `_extract_class_names`, `_build_tool_history` (from pre-fill experiments).
+- `fitz_graveyard/planning/pipeline/tools/codebase_tools.py` — 4 tools defined but only 3 exposed (check_exists filtered). `_strip_module` normalizes names. `lookup_class` extracts Pydantic fields.
+- `fitz_graveyard/planning/prompts/synthesis.txt` — synthesis prompt with "trace the call chain" fix
 - `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` class
-- `docs/findings/fabrication-analysis.md` — root cause analysis of codebase alignment failures

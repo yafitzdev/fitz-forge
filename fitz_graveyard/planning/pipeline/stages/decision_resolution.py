@@ -28,6 +28,27 @@ from fitz_graveyard.planning.schemas.decisions import (
 
 logger = logging.getLogger(__name__)
 
+_CONTRADICTION_CHECK_PROMPT = """\
+Review these resolved decisions for direct contradictions.
+A contradiction is when decision A and decision B give incompatible answers \
+for the same component (e.g., A says "providers already have chat_stream()" \
+but B says "providers do not have chat_stream() yet").
+
+{resolutions}
+
+Respond with JSON:
+{{
+  "contradictions": [
+    {{
+      "decision_a": "d1",
+      "decision_b": "d4",
+      "description": "brief description of the contradiction"
+    }}
+  ]
+}}
+If there are no contradictions, return: {{"contradictions": []}}
+Respond with ONLY JSON."""
+
 
 def _topological_sort(decisions: list[dict]) -> list[dict]:
     """Sort decisions in topological order based on depends_on.
@@ -175,6 +196,151 @@ class DecisionResolutionStage(PipelineStage):
         )
         return self._make_messages(prompt)
 
+    async def _check_and_fix_contradictions(
+        self,
+        client: Any,
+        resolutions: list[dict],
+        original_decisions: list[dict],
+        job_description: str,
+        call_graph: Any,
+        file_contents: dict[str, str],
+        file_index_entries: dict[str, str],
+        source_dir: str | None,
+    ) -> list[dict]:
+        """Detect and fix contradictions between resolved decisions.
+
+        One cheap LLM call against compact summaries. If contradictions are
+        found, re-resolves decision_b with a contradiction notice injected
+        into upstream constraints so the model knows what to reconcile.
+        """
+        if len(resolutions) < 3:
+            return resolutions
+
+        lines = []
+        for r in resolutions:
+            d_id = r.get("decision_id", "?")
+            decision = r.get("decision", "")[:200]
+            constraints = r.get("constraints_for_downstream", [])[:2]
+            c_str = "; ".join(constraints)
+            entry = f"{d_id}: {decision}"
+            if c_str:
+                entry += f" [{c_str}]"
+            lines.append(entry)
+
+        prompt = _CONTRADICTION_CHECK_PROMPT.format(
+            resolutions="\n".join(lines)
+        )
+        messages = self._make_messages(prompt)
+
+        try:
+            raw = await client.generate(
+                messages=messages, temperature=0, max_tokens=1024,
+            )
+            data = extract_json(raw)
+            contradictions = data.get("contradictions", [])
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': contradiction check failed ({e})"
+            )
+            return resolutions
+
+        if not contradictions:
+            logger.info(f"Stage '{self.name}': no contradictions detected")
+            return resolutions
+
+        logger.info(
+            f"Stage '{self.name}': {len(contradictions)} contradiction(s) "
+            "found, retrying affected decisions"
+        )
+
+        resolution_map = {r["decision_id"]: r for r in resolutions}
+        orig_map = {d["id"]: d for d in original_decisions}
+
+        for c in contradictions:
+            # Accept multiple key name variants, then fall back to scanning
+            # all string values for decision ID patterns (d\d+).
+            import re
+            _DID = re.compile(r"^d\d+$")
+
+            def _extract_ids(entry: dict) -> tuple[str, str]:
+                # Preferred key names first
+                a = (entry.get("decision_a") or entry.get("a") or
+                     entry.get("da") or entry.get("first") or "")
+                b = (entry.get("decision_b") or entry.get("b") or
+                     entry.get("db") or entry.get("second") or "")
+                if a and b:
+                    return str(a), str(b)
+                # Fall back: collect all values that look like decision IDs
+                ids = [
+                    str(v) for v in entry.values()
+                    if isinstance(v, str) and _DID.match(v)
+                ]
+                if len(ids) >= 2:
+                    return ids[0], ids[1]
+                return str(a), str(b)
+
+            d_a, d_b = _extract_ids(c)
+            description = c.get("description", "")
+            logger.debug(
+                f"Stage '{self.name}': contradiction entry keys={list(c.keys())} "
+                f"d_a={d_a!r} d_b={d_b!r}"
+            )
+
+            orig = orig_map.get(d_b)
+            if not orig:
+                logger.warning(
+                    f"Stage '{self.name}': contradiction references unknown "
+                    f"decision {d_b!r} (keys={list(c.keys())}), skipping"
+                )
+                continue
+
+            logger.info(
+                f"Stage '{self.name}': retrying {d_b} "
+                f"(contradicts {d_a}: {description})"
+            )
+
+            upstream: list[str] = [
+                f"CONTRADICTION NOTICE: Your previous answer contradicted "
+                f"decision {d_a} ({description}). Ensure your answer is "
+                "consistent with all prior decisions."
+            ]
+            for dep_id in orig.get("depends_on", []):
+                dep_res = resolution_map.get(dep_id, {})
+                upstream.extend(dep_res.get("constraints_for_downstream", []))
+
+            messages = self._build_decision_prompt(
+                decision=orig,
+                job_description=job_description,
+                call_graph=call_graph,
+                file_contents=file_contents,
+                upstream_constraints=upstream,
+                file_index_entries=file_index_entries,
+                source_dir=source_dir,
+            )
+
+            try:
+                retry_raw = await client.generate(
+                    messages=messages, temperature=0, max_tokens=4096,
+                )
+                retry_resolution = self.parse_output(retry_raw)
+                retry_resolution["decision_id"] = d_b
+                resolution_map[d_b] = retry_resolution
+                for i, r in enumerate(resolutions):
+                    if r.get("decision_id") == d_b:
+                        resolutions[i] = retry_resolution
+                        break
+                logger.info(
+                    f"Stage '{self.name}': contradiction retry for "
+                    f"{d_b} succeeded"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Stage '{self.name}': contradiction retry for "
+                    f"{d_b} failed ({e}), keeping original"
+                )
+
+        return resolutions
+
     async def execute(
         self,
         client: Any,
@@ -285,6 +451,19 @@ class DecisionResolutionStage(PipelineStage):
                 await self._report_substep(
                     f"resolved:{d_id} ({i + 1}/{len(sorted_decisions)})"
                 )
+
+            # Contradiction gate: detect and fix self-contradicting decisions
+            # before synthesis narrates them into a broken plan.
+            resolutions = await self._check_and_fix_contradictions(
+                client=client,
+                resolutions=resolutions,
+                original_decisions=sorted_decisions,
+                job_description=job_description,
+                call_graph=call_graph,
+                file_contents=file_contents,
+                file_index_entries=file_index_entries,
+                source_dir=source_dir,
+            )
 
             output = DecisionResolutionOutput(
                 resolutions=[
