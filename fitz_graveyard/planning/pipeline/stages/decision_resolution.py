@@ -116,7 +116,7 @@ class DecisionResolutionStage(PipelineStage):
         try:
             text = full.read_bytes()[:50_000].decode("utf-8", errors="replace")
             try:
-                from fitz_ai.engines.fitz_krag.context.compressor import compress_python
+                from fitz_sage.engines.fitz_krag.context.compressor import compress_python
                 if rel_path.endswith(".py"):
                     text = compress_python(text)
             except ImportError:

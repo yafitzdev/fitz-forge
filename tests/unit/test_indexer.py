@@ -63,14 +63,14 @@ async def resolve_auth(provider):
 import os
 import json
 from pathlib import Path
-from fitz_ai.llm.providers.base import ChatProvider
+from fitz_sage.llm.providers.base import ChatProvider
 """
         result = _extract_python(code)
         assert "imports:" in result
         assert "os" in result
         assert "json" in result
         assert "pathlib" in result
-        assert "fitz_ai" in result
+        assert "fitz_sage" in result
 
     def test_all_exports(self):
         code = """
@@ -424,20 +424,20 @@ class TestBuildModuleFileLookup:
 
 class TestExtractFullImports:
     def test_ast_extracts_full_paths(self):
-        code = "from fitz_ai.governance.governor import GovernanceDecision\nimport os\n"
+        code = "from fitz_sage.governance.governor import GovernanceDecision\nimport os\n"
         result = _extract_full_imports(code)
-        assert "fitz_ai.governance.governor" in result
+        assert "fitz_sage.governance.governor" in result
         assert "os" in result
 
     def test_ast_import_statement(self):
-        code = "import fitz_ai.governance.governor\n"
+        code = "import fitz_sage.governance.governor\n"
         result = _extract_full_imports(code)
-        assert "fitz_ai.governance.governor" in result
+        assert "fitz_sage.governance.governor" in result
 
     def test_regex_fallback_on_syntax_error(self):
-        code = "from fitz_ai.governance import governor\n>>>invalid<<<\n"
+        code = "from fitz_sage.governance import governor\n>>>invalid<<<\n"
         result = _extract_full_imports(code)
-        assert "fitz_ai.governance" in result
+        assert "fitz_sage.governance" in result
 
     def test_lazy_imports_inside_functions(self):
         code = (

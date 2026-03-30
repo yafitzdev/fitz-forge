@@ -70,7 +70,7 @@ async def _run_retrieval_once(
         AgentContextGatherer,
         _make_chat_factory,
     )
-    from fitz_ai.code import CodeRetriever
+    from fitz_sage.code import CodeRetriever
 
     config = load_config()
     client = create_llm_client(config)
@@ -227,10 +227,10 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
 
     # Critical file check
     critical_files = [
-        "fitz_ai/engines/fitz_krag/engine.py",
-        "fitz_ai/core/answer.py",
-        "fitz_ai/engines/fitz_krag/query_analyzer.py",
-        "fitz_ai/retrieval/detection/registry.py",
+        "fitz_sage/engines/fitz_krag/engine.py",
+        "fitz_sage/core/answer.py",
+        "fitz_sage/engines/fitz_krag/query_analyzer.py",
+        "fitz_sage/retrieval/detection/registry.py",
     ]
     lines.append(f"\n## Critical File Discovery")
     lines.append(f"| File | Found | % |")

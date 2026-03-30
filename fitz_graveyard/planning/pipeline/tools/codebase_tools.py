@@ -108,7 +108,7 @@ def make_codebase_tools(
         """Strip module path from a class/function name.
 
         Models often pass fully-qualified names like
-        'fitz_ai.engines.fitz_krag.engine.FitzKragEngine' but tools
+        'fitz_sage.engines.fitz_krag.engine.FitzKragEngine' but tools
         index by simple name 'FitzKragEngine'. Also strips method
         names passed as 'ClassName.method'.
         """

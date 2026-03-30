@@ -488,8 +488,8 @@ class PlanningPipeline:
             return []
 
         # Extract keywords from proposed artifact names
-        # e.g. "fitz_ai/engines/fitz_krag/cache.py" → ["cache"]
-        # e.g. "fitz_ai/core/token_tracking.py" → ["token", "tracking"]
+        # e.g. "fitz_sage/engines/fitz_krag/cache.py" → ["cache"]
+        # e.g. "fitz_sage/core/token_tracking.py" → ["token", "tracking"]
         matches: list[dict[str, str]] = []
 
         for artifact in proposed_artifacts:

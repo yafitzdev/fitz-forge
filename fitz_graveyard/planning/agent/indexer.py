@@ -640,8 +640,8 @@ def _extract_full_imports_regex(content: str) -> set[str]:
 def _build_module_file_lookup(file_list: list[str]) -> dict[str, str]:
     """Build module_dotted_path -> relative_file_path lookup.
 
-    E.g.: "fitz_ai.governance.governor" -> "fitz_ai/governance/governor.py"
-    Also maps package inits: "fitz_ai.governance" -> "fitz_ai/governance/__init__.py"
+    E.g.: "fitz_sage.governance.governor" -> "fitz_sage/governance/governor.py"
+    Also maps package inits: "fitz_sage.governance" -> "fitz_sage/governance/__init__.py"
     """
     lookup: dict[str, str] = {}
     for rel_path in file_list:

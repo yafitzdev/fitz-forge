@@ -22,8 +22,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fitz_ai.code import CodeRetriever
-from fitz_ai.code.indexer import build_structural_index
+from fitz_sage.code import CodeRetriever
+from fitz_sage.code.indexer import build_structural_index
 
 from fitz_graveyard.planning.agent.compressor import compress_file
 from fitz_graveyard.planning.agent.indexer import (
@@ -117,9 +117,9 @@ class AgentContextGatherer:
         try:
             if override_files is not None:
                 # Benchmark mode: skip LLM retrieval, use fixed file list
-                from fitz_ai.code.indexer import build_file_list
-                from fitz_ai.engines.fitz_krag.context.compressor import compress_python
-                from fitz_ai.engines.fitz_krag.types import Address, AddressKind, ReadResult
+                from fitz_sage.code.indexer import build_file_list
+                from fitz_sage.engines.fitz_krag.context.compressor import compress_python
+                from fitz_sage.engines.fitz_krag.types import Address, AddressKind, ReadResult
 
                 await self._report(progress_callback, 0.06, "agent:mapping")
                 file_paths = build_file_list(
