@@ -1089,24 +1089,88 @@ class SynthesisStage(PipelineStage):
                             if v.kind == "missing_method"
                         ]
                         if len(method_violations) >= 3:
-                            violation_hint = "\n".join(
-                                f"- {v.symbol}: {v.detail}"
-                                for v in method_violations[:8]
-                            )
+                            # For each fabrication, look up what methods
+                            # ACTUALLY exist on that class so the retry
+                            # knows what to use instead.
+                            fix_lines = []
+                            seen_classes = set()
+                            for v in method_violations[:8]:
+                                # Extract class name from detail
+                                # e.g. "Method '_sanitize' not found on
+                                # any class in the target file"
+                                # The artifact filename hints at the class
+                                fix_lines.append(
+                                    f"- {v.symbol}: does NOT exist"
+                                )
+                            # Look up real methods for classes in
+                            # the artifacts that had violations
+                            violated_files = {
+                                v.artifact for v in method_violations
+                            }
+                            for art in artifacts:
+                                fn = art.get("filename", "")
+                                if fn not in violated_files:
+                                    continue
+                                content = art.get("content", "")
+                                # Find class names in the artifact
+                                import re as _re
+                                for cls_match in _re.finditer(
+                                    r'class\s+(\w+)', content,
+                                ):
+                                    cls_name = cls_match.group(1)
+                                    if cls_name in seen_classes:
+                                        continue
+                                    seen_classes.add(cls_name)
+                                    cls_info = ast_lookup.find_class(
+                                        cls_name,
+                                    )
+                                    if cls_info and cls_info.methods:
+                                        meths = ", ".join(
+                                            cls_info.methods.keys(),
+                                        )
+                                        fix_lines.append(
+                                            f"- {cls_name} REAL methods: "
+                                            f"{meths}"
+                                        )
+                                # Also check self.X references
+                                for self_match in _re.finditer(
+                                    r'self\.(_\w+)\s*[.=(]', content,
+                                ):
+                                    attr = self_match.group(1)
+                                    # See if it's a known attr on any
+                                    # class in the index
+                                    for cname in seen_classes:
+                                        ci = ast_lookup.find_class(cname)
+                                        if ci and attr in (
+                                            m for m in ci.methods
+                                        ):
+                                            break
+                                    # If not found, it's fabricated
+                                    # (already covered above)
+
+                            violation_hint = "\n".join(fix_lines)
                             logger.info(
                                 f"Stage 'synthesis': AST quality gate — "
                                 f"{len(method_violations)} fabricated "
-                                f"methods, retrying artifact extraction"
+                                f"methods, retrying with real method info"
                             )
+                            # Put tool-verified context LAST (closest
+                            # to where the model generates output) so
+                            # the real signatures are freshest in context.
                             fix_extra = (
                                 f"{extra}\n\n"
-                                f"## FABRICATED METHODS (do NOT use)\n"
-                                f"The following methods do NOT exist in "
-                                f"the codebase. Do not reference them:\n"
+                                f"## CORRECTIONS\n"
                                 f"{violation_hint}\n\n"
-                                f"Use only methods confirmed in the "
-                                f"VERIFIED CODEBASE INFO above."
+                                f"Rewrite artifacts using ONLY the real "
+                                f"methods listed above."
                             )
+                            # If tool_context has verified signatures,
+                            # append it again at the very end for emphasis
+                            if tool_context:
+                                fix_extra += (
+                                    f"\n\n## VERIFIED SIGNATURES "
+                                    f"(use these)\n{tool_context}"
+                                )
                             fix_partial = (
                                 await self._extract_field_group(
                                     client, reasoning, ["artifacts"],
