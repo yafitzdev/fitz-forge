@@ -223,7 +223,12 @@ _SKIP_NAMES = frozenset({
     "dataclass", "field", "dataclasses",
     "BaseModel", "Field", "ConfigDict",
     "APIRouter", "Request", "StreamingResponse", "Depends",
+    "HTTPException", "BackgroundTasks", "Response", "JSONResponse",
+    "Body", "Header", "Cookie", "Form", "File", "UploadFile",
+    "status",
     "router", "app",
+    # Common Pydantic/typing extras
+    "model_validator", "field_validator", "computed_field",
 })
 
 # Common stdlib/third-party module prefixes to skip
@@ -571,6 +576,109 @@ def build_llm_grounding_prompt(
         structural_index_excerpt=index_excerpt,
         decisions_summary=_format_decisions_summary(resolutions),
     )
+
+
+# ---------------------------------------------------------------------------
+# Violation repair: targeted LLM fix using exact AST violation messages
+# ---------------------------------------------------------------------------
+
+async def repair_violations(
+    violations: list[Violation],
+    artifacts: list[dict[str, Any]],
+    client: Any,
+) -> list[dict[str, Any]]:
+    """Fix AST violations in artifacts via targeted LLM repair.
+
+    One LLM call per affected artifact. The LLM is given exact violation
+    messages (machine-detected, not guesses) so it knows precisely what
+    to fix. Much more reliable than asking the LLM to self-audit.
+
+    Returns the artifact list with corrections applied (str.replace).
+    Artifacts with no violations are returned unchanged.
+    """
+    import json as _json
+    from fitz_graveyard.planning.pipeline.stages.base import extract_json
+
+    # Group violations by artifact filename
+    violations_by_file: dict[str, list[Violation]] = {}
+    for v in violations:
+        violations_by_file.setdefault(v.artifact, []).append(v)
+
+    artifact_map = {a.get("filename", ""): a for a in artifacts}
+    repaired: dict[str, dict] = {}
+
+    for filename, file_violations in violations_by_file.items():
+        artifact = artifact_map.get(filename)
+        if not artifact:
+            continue
+
+        content = artifact.get("content", "")
+        if not content.strip():
+            continue
+
+        # Format violations concisely
+        v_lines = []
+        for v in file_violations:
+            line = f"  line {v.line}: {v.symbol} — {v.detail}"
+            if v.suggestion:
+                line += f" ({v.suggestion})"
+            v_lines.append(line)
+        violations_text = "\n".join(v_lines)
+
+        prompt = (
+            f"Fix the following AST-verified errors in this code artifact.\n"
+            f"These errors are machine-detected — the named methods/symbols do not "
+            f"exist in the real codebase.\n\n"
+            f"FILE: {filename}\n"
+            f"ERRORS:\n{violations_text}\n\n"
+            f"ARTIFACT CODE:\n```python\n{content}\n```\n\n"
+            f"For each error, output the old text and a corrected replacement that "
+            f"eliminates the fabricated symbol. Use only real existing methods.\n"
+            f'Return JSON: {{"replacements": [{{"old": "exact old text", "new": "corrected text"}}]}}\n'
+            f'If no correction is possible, return: {{"replacements": []}}'
+        )
+
+        messages = [
+            {"role": "system", "content": "You are a code repair assistant. Fix only the specified errors."},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            raw = await client.generate(messages=messages, temperature=0, max_tokens=2048)
+            data = extract_json(raw)
+            replacements = data.get("replacements", [])
+        except Exception as e:
+            logger.warning(f"Grounding repair for {filename} failed ({e}), skipping")
+            continue
+
+        if not replacements:
+            logger.info(f"Grounding repair: no replacements for {filename}")
+            continue
+
+        applied = 0
+        for r in replacements:
+            old = r.get("old", "")
+            new = r.get("new", "")
+            if old and new and old != new and old in content:
+                content = content.replace(old, new)
+                applied += 1
+
+        if applied:
+            logger.info(
+                f"Grounding repair: applied {applied}/{len(replacements)} "
+                f"replacement(s) to {filename}"
+            )
+            repaired[filename] = {**artifact, "content": content}
+        else:
+            logger.info(
+                f"Grounding repair: 0/{len(replacements)} replacements matched "
+                f"in {filename} (old strings not found verbatim)"
+            )
+
+    if not repaired:
+        return artifacts
+
+    return [repaired.get(a.get("filename", ""), a) for a in artifacts]
 
 
 # ---------------------------------------------------------------------------

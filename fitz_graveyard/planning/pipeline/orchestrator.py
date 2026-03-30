@@ -911,6 +911,19 @@ class DecomposedPipeline:
                 f"Grounding validation: {grounding_report.total_violations} "
                 f"AST violations"
             )
+
+            # Repair: if AST violations found, fix them before the plan is finalized
+            if grounding_report.ast_violations and artifacts:
+                from fitz_graveyard.planning.validation.grounding import repair_violations
+                repaired = await repair_violations(
+                    violations=grounding_report.ast_violations,
+                    artifacts=artifacts,
+                    client=client,
+                )
+                if repaired is not artifacts:
+                    prior_outputs["design"]["artifacts"] = repaired
+                    logger.info("Grounding repair: artifact(s) updated in design output")
+
         except Exception as e:
             logger.warning(f"Grounding validation failed (non-fatal): {e}")
             prior_outputs["_grounding_validation"] = {"error": str(e)}

@@ -57,6 +57,10 @@
 | 42a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3bug` | `81b5abf` | + P3: contradiction detection (buggy — model returned wrong JSON key names) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.2 | 8.6 | **44.0 avg (38-51)** | P3 was a no-op: model returned contradictions with keys like "a"/"b" instead of "decision_a"/"decision_b" — all 6 contradictions in plan 2 skipped. Scores identical to run 41 (within noise). Bug fixed in same session: robust fallback parsing (key aliases + regex scan). Floor 38 (+1 vs 41, within noise). Need run 43 to test fixed P3. 5 runs: 42, 40, 51, 38, 49. |
 | 43a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3fix` | `81b5abf` | + P3 fixed: robust key parsing (aliases + regex scan) | 12-14 | — | 8.4 | 7.4 | 6.6 | 6.0 | 6.2 | 8.4 | **43.0 avg (39-52)** | P3 fired on plan 3 only (4 contradictions, d4 retried 3x + d14 once) — plan 3 scored 52. P3 did NOT fire on the floor plans (39, 39). Floor issues are synthesis hallucinations: wrong field names (request.messages vs request.history), non-existent internal methods (_retrieve, _build_context), synthesizer.py treated as new when it exists. P3 can't fix synthesis-layer errors. Floor: 39 (+2 vs run 41, marginal). Avg essentially flat. 5 runs: 42, 39, 52, 39, 43. |
 | # | Date | Model | Quant | Ctx | Pipeline SHA | Codebase SHA | Pipeline | Decisions | Time | Files | Contract | Consistency | Alignment | Implement | Scope | **Total** | Notes |
+| 44a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v1` | `81b5abf` | + P4: post-synthesis field grounding (Pydantic fields + self._X attrs) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.8 | 8.0 | **42.0 avg (37-53)** | P4 said "no corrections" on ALL 5 plans. Root cause: P4 only showed self._X=ClassName() **attributes** from __init__, not **method names**. Grounding validator still found violations: self._prepare_query() (plan 4), self._build_disputed_instruction() (plan 5). P4 couldn't flag them because it had no methods list to compare against. Plans 1-2: 38, 43 (from earlier). Plans 3-5: 53, 39, 37. Fix: (1) expanded P4 to also extract method names from class defs; (2) added grounding-repair pass in orchestrator — if AST violations found, feed exact violation messages to targeted LLM repair call. 5 runs: 38, 43, 53, 39, 37. |
+| 45a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair` | `81b5abf` | + P4 expanded (method names) + grounding repair (AST violations → targeted LLM fix) | 12-15 | — | 5.8 | 7.4 | 4.6 | 3.8 | 3.8 | 6.4 | **36.4 avg (28-49)** | Bimodal: plans 1-2 strong (49, 45), plans 3-5 floor (28, 30, 30). Plan 1: 0 violations, 49/60 — new ceiling for this run. Plan 2: 9 violations, repair applied to 3/4 artifacts (engine.py "no replacements" for 5 consecutive fabricated methods), scored 45. Plans 3-5: decision-level architectural failures (calling providers directly, claiming synthesizer.py doesn't exist, 12 duplicate decisions). Grounding repair working correctly but can't fix decision-layer reasoning errors. Floor not improved. P4+repair helps when decisions are sound but can't raise floor caused by decision_resolution misreads. 5 runs: 49, 45, 28, 30, 30. |
+| 46a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair+skipfix` | `81b5abf` | + false-positive fix: HTTPException + FastAPI classes added to grounding _SKIP_NAMES | 12-15 | — | 7.8 | 8.6 | 6.0 | 7.0 | 6.4 | 8.0 | **43.6 avg (40-47)** | Best floor ever: 40 (no catastrophic failures). Confirms run 45's 28-30 floors were statistical variance, not a regression. Grounding repair fired on plans 1 and 4 (successfully applied fixes). P4 said "no corrections" on all 5 (expected — no Pydantic field errors this run). Remaining implementability gap: synthesizer artifacts still call self._chat.build_messages() (chain call not caught by grounding), and engine.py sometimes assumes _analyze_and_retrieve() helper exists. 5 runs: 42, 47, 43, 40, 46. |
+
 
 ### Column Key
 
@@ -432,8 +436,56 @@ IMPORTANT: The `--query` MUST be the streaming task above. The default query is 
 
 **Critical files to read first in new session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
-- `benchmarks/BENCHMARK.md` — how to run benchmarks, parallel throughput findings, architecture
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — the core. Key methods: `_build_artifacts_with_tools` (tool loop → returns `(artifacts, tool_context)`), `_build_artifact_source_context` (template cheat sheet), `execute` (artifact retry logic at ~line 980). Dead code: `_extract_class_names`, `_build_tool_history` (from pre-fill experiments).
-- `fitz_graveyard/planning/pipeline/tools/codebase_tools.py` — 4 tools defined but only 3 exposed (check_exists filtered). `_strip_module` normalizes names. `lookup_class` extracts Pydantic fields.
-- `fitz_graveyard/planning/prompts/synthesis.txt` — synthesis prompt with "trace the call chain" fix
-- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` class
+- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential assessment protocol
+- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. Key additions: `_extract_schema_fields` (Pydantic field names via AST), `_extract_attribute_ref` (self._X attrs AND method names via AST), `_ground_artifact_fields` (P4: post-synthesis correction pass). P4 hook is in `execute()` between artifact building and roadmap fields.
+- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` + `repair_violations()` (Option A: grounding-repair pass using exact violation messages).
+- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook wired after `validate_grounding()` call at ~line 917. Updates `prior_outputs["design"]["artifacts"]` in-place if violations found.
+- `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — P3: contradiction detection + fix (robust key parsing: aliases + regex scan for d\d+ patterns).
+- `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — P1: coverage gate (retries if interior call-chain layers not covered by decisions).
+
+### Session 2026-03-30 — P4 + Grounding Repair
+
+**Baseline entering session:** P1+P2+P3 committed (`ee1e8a5a`), avg ~43-44, floor 39.
+
+**What was done:**
+
+**P4 (post-synthesis field grounding):**
+- Added `_extract_schema_fields`: AST-extracts Pydantic model fields from schema/model source files
+- Added `_extract_attribute_ref`: AST-extracts `self._X` attributes AND private method names from classes in artifact target files
+- Added `_ground_artifact_fields`: one cheap LLM call post-synthesis, shows Pydantic fields + attrs + methods as reference, asks for replacement pairs for any wrong field names or fabricated `self._X()` calls
+- P4 runs inside `synthesis.execute()` between artifact building and roadmap fields — post-synthesis, no context blowup risk
+
+**Grounding repair (Option A — deterministic harness):**
+- Added `repair_violations()` in `grounding.py`: one LLM call per affected artifact, fed EXACT AST violation messages ("Method '_prepare_query' not found"), asks for replacements
+- Wired in `orchestrator.py` after `validate_grounding()`: if violations found, repair runs, updated artifacts written back to `prior_outputs["design"]["artifacts"]`
+- More reliable than P4 because violations are machine-detected, not LLM self-audit
+
+**False-positive fix:**
+- Added `HTTPException`, FastAPI form/body classes to `_SKIP_NAMES` in grounding.py
+- These are legitimate FastAPI imports not in the structural index — were being flagged as fabrications and incorrectly "repaired"
+
+**Results:**
+- Run 44 (P4v1 — only checked attrs, not methods): 42.0 avg (37-53). P4 said "no corrections" on all plans because methods weren't in reference.
+- Run 45 (P4v2 + repair): 36.4 avg — bimodal: plans 1-2 scored 49/45 (strong), plans 3-5 scored 28/30/30 (decision-level architectural failures). Run 45 was statistical variance, not regression.
+- Run 46 (P4v2 + repair + skip fix): **43.6 avg (40-47)** — best floor ever (40). Confirms run 45 was variance.
+
+**Current baseline:** `ee1e8a5a` + P4v2 + grounding repair + skip fix. Committed as new baseline after run 46.
+
+**Remaining floor gap (40-47 range):** Decision-level architectural misreads that synthesis faithfully narrates:
+- Model sometimes calls LLM providers directly from API endpoint (bypasses engine/service stack)
+- Model sometimes assumes helper methods exist (`_analyze_and_retrieve`, `self._chat.build_messages()`)
+- Chain-call fabrications (`self._attr.method()`) not caught by grounding validator (only checks `self._X()` direct calls)
+
+**Next directions:**
+- P4 still says "no corrections" most of the time — the method-list prompt may help if violations are present, but often synthesis writes clean code or the LLM self-audit fails anyway. Consider if P4 is adding value beyond what grounding repair provides.
+- The `self._chat.build_messages()` chain-call pattern: grounding doesn't catch it, P4 doesn't catch it. Could extend grounding to also check `self._attr.method()` patterns by looking up what methods `_attr`'s type actually has.
+- Decision-layer: when model misreads architecture at d2 (claims synthesizer.py doesn't exist, invents fetch_chunks), all downstream decisions are wrong. No current mechanism catches this. A post-decomposition "architecture sanity check" could verify key claims against the structural index.
+
+**Critical files to read first in new session:**
+- This file (streaming-task-tracker.md) — the run log tells the full story
+- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential assessment protocol
+- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. Key methods: `_extract_attribute_ref` (attrs + methods), `_ground_artifact_fields` (P4), `execute` (P4 hook between artifacts and roadmap fields).
+- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `repair_violations()`.
+- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook after validate_grounding at ~line 917.
+- `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — P1 coverage gate.
+- `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — P3 contradiction detection.
