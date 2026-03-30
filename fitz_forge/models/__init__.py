@@ -1,6 +1,6 @@
 # fitz_forge/models/__init__.py
 """
-Data models for fitz-graveyard.
+Data models for fitz-forge.
 
 Provides Pydantic response models and internal job tracking.
 """

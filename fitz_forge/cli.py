@@ -1,6 +1,6 @@
 # fitz_forge/cli.py
 """
-CLI interface for fitz-graveyard.
+CLI interface for fitz-forge.
 
 Thin presentation layer over the tools/ service layer.
 All commands delegate to the same functions that MCP wraps.
@@ -24,7 +24,7 @@ def _fmt_duration(seconds: float) -> str:
 import typer
 
 app = typer.Typer(
-    name="fitz-graveyard",
+    name="fitz-forge",
     help="Local-first AI architectural planning using local LLMs.",
     no_args_is_help=True,
 )
@@ -41,7 +41,7 @@ async def _get_store():
 
     from fitz_forge.models.sqlite_store import SQLiteJobStore
 
-    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    config_dir = user_config_path("fitz-forge", ensure_exists=True)
     store = SQLiteJobStore(str(config_dir / "jobs.db"))
     await store.initialize()
     return store
@@ -470,10 +470,10 @@ async def _run_inline(
         console.print(f"[green]✓ Done[/green]  quality: {quality}  time: {_fmt_duration(elapsed)}")
         if final_job.file_path:
             console.print(f"[dim]Saved:[/dim] {final_job.file_path}")
-            console.print(f"[dim]View:[/dim]  fitz-graveyard get {job_id}")
+            console.print(f"[dim]View:[/dim]  fitz-forge get {job_id}")
         console.print()
     elif state == "awaiting_review":
-        console.print(f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-graveyard confirm {job_id}' to proceed.")
+        console.print(f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-forge confirm {job_id}' to proceed.")
     else:
         error = final_job.error or "unknown error"
         console.print(f"[red]✗ Failed[/red]: {error}")
@@ -549,7 +549,7 @@ def plan(
                 )
             finally:
                 await store.close()
-            typer.echo(f"Queued job {result['job_id']}. Run 'fitz-graveyard run' to start processing.")
+            typer.echo(f"Queued job {result['job_id']}. Run 'fitz-forge run' to start processing.")
             return
 
         # Resolve model name for display (sync, instant)
@@ -636,7 +636,7 @@ def run_worker():
     root.setLevel(logging.INFO)
 
     config = load_config()
-    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    config_dir = user_config_path("fitz-forge", ensure_exists=True)
     db_path = str(config_dir / "jobs.db")
 
     async def _run_worker():
@@ -686,14 +686,14 @@ def list_jobs():
         quality = f"{p['quality_score']:.2f}" if p["quality_score"] is not None else "-"
         desc = p["description"]
 
-        # Derive project name from plan file path (.../project/.fitz-graveyard/plans/plan_*.md)
+        # Derive project name from plan file path (.../project/.fitz-forge/plans/plan_*.md)
         project = ""
         if p.get("file_path"):
             from pathlib import Path as _Path
             parts = _Path(p["file_path"]).parts
-            # Find the part before .fitz-graveyard
+            # Find the part before .fitz-forge
             for i, part in enumerate(parts):
-                if part == ".fitz-graveyard" and i > 0:
+                if part == ".fitz-forge" and i > 0:
                     project = parts[i - 1]
                     break
 
@@ -786,7 +786,7 @@ def resume(job_id: str = typer.Argument(..., help="Job ID to resume")):
             await store.update(job_id, state=JobState.QUEUED, progress=0.0, error=None, current_phase=None)
         elif job.state.value == "complete":
             await store.close()
-            typer.echo(f"Job '{job_id}' is already complete. Use 'fitz-graveyard get {job_id}' to view.", err=True)
+            typer.echo(f"Job '{job_id}' is already complete. Use 'fitz-forge get {job_id}' to view.", err=True)
             raise typer.Exit(1)
         # queued / awaiting_review — just run it
 
@@ -822,7 +822,7 @@ def retry(job_id: str = typer.Argument(..., help="Job ID to retry")):
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Job {result['job_id']} re-queued. Run 'fitz-graveyard resume {result['job_id']}' or 'fitz-graveyard run' to process.")
+    typer.echo(f"Job {result['job_id']} re-queued. Run 'fitz-forge resume {result['job_id']}' or 'fitz-forge run' to process.")
 
 
 @app.command()
@@ -843,7 +843,7 @@ def confirm(job_id: str = typer.Argument(..., help="Job ID to approve API review
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"API review approved for {result['job_id']}. Run 'fitz-graveyard run' to process.")
+    typer.echo(f"API review approved for {result['job_id']}. Run 'fitz-forge run' to process.")
 
 
 @app.command()
@@ -883,7 +883,7 @@ def replay(job_id: str = typer.Argument("last", help="Job ID to replay from, or 
     only the planning stages (~10 min). Useful for testing pipeline
     changes without re-gathering context.
 
-    Use 'fitz-graveyard replay last' (or just 'fitz-graveyard replay')
+    Use 'fitz-forge replay last' (or just 'fitz-forge replay')
     to replay the most recent completed job.
     """
     from fitz_forge.config.loader import load_config

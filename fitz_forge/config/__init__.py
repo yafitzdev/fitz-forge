@@ -1,5 +1,5 @@
 # fitz_forge/config/__init__.py
-"""Configuration system for fitz-graveyard."""
+"""Configuration system for fitz-forge."""
 
 from .loader import get_config_path, load_config
 from .schema import (

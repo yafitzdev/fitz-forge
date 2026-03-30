@@ -1,6 +1,6 @@
 # fitz_forge/__init__.py
 """
-fitz-graveyard: MCP server for local-first AI planning with fitz-ai integration.
+fitz-forge: MCP server for local-first AI planning with fitz-ai integration.
 
 Provides tools for analyzing projects, generating plans, and managing async planning jobs.
 """

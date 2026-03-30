@@ -118,7 +118,7 @@ class TestOutputConfig:
 
     def test_defaults(self):
         c = OutputConfig()
-        assert c.plans_dir == ".fitz-graveyard/plans"
+        assert c.plans_dir == ".fitz-forge/plans"
         assert c.verbosity == "normal"
 
     def test_verbosity_literal_validated(self):
@@ -129,7 +129,7 @@ class TestOutputConfig:
 
     def test_extra_fields_ignored(self):
         c = OutputConfig(color=True)
-        assert c.plans_dir == ".fitz-graveyard/plans"
+        assert c.plans_dir == ".fitz-forge/plans"
 
 
 # =========================================================================

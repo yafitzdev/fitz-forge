@@ -32,7 +32,7 @@ from fitz_forge.tools.retry_job import retry_job as _retry_job
 logger = logging.getLogger(__name__)
 
 # Create FastMCP instance
-mcp = FastMCP("fitz-graveyard")
+mcp = FastMCP("fitz-forge")
 
 # Load configuration
 _config = load_config()
@@ -69,7 +69,7 @@ async def initialize_lifecycle(config = None) -> None:
     global _lifecycle
 
     # Get DB path from platformdirs
-    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    config_dir = user_config_path("fitz-forge", ensure_exists=True)
     db_path = config_dir / "jobs.db"
 
     logger.info(f"Initializing lifecycle with db_path={db_path}")

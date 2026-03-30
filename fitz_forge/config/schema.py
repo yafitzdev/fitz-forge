@@ -1,6 +1,6 @@
 # fitz_forge/config/schema.py
 """
-Pydantic configuration models for fitz-graveyard.
+Pydantic configuration models for fitz-forge.
 
 All models use extra="ignore" to allow unknown YAML keys without crashing.
 """
@@ -74,7 +74,7 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     plans_dir: str = Field(
-        default=".fitz-graveyard/plans",
+        default=".fitz-forge/plans",
         description="Directory for plans. Relative paths are resolved against the project directory.",
     )
     verbosity: Literal["quiet", "normal", "verbose"] = Field(
@@ -219,7 +219,7 @@ class GPUConfig(BaseModel):
 
 
 class FitzPlannerConfig(BaseModel):
-    """Root configuration for fitz-graveyard."""
+    """Root configuration for fitz-forge."""
 
     model_config = ConfigDict(extra="ignore")
 

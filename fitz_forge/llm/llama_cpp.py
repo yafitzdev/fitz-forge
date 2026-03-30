@@ -112,7 +112,7 @@ class TokSecBaseline:
     def __init__(self, path: Path | None = None):
         if path is None:
             import platformdirs
-            path = Path(platformdirs.user_config_path("fitz-graveyard")) / "tok_baselines.json"
+            path = Path(platformdirs.user_config_path("fitz-forge")) / "tok_baselines.json"
         self._path = path
         self._data: dict = self._load()
 
@@ -170,7 +170,7 @@ class LlamaCppClient:
     Restarts the server when switching between fast/smart tiers, since
     context_size and gpu_layers are server-level (not per-request).
 
-    Requires: pip install fitz-graveyard[lm-studio]  (for openai SDK)
+    Requires: pip install fitz-forge[lm-studio]  (for openai SDK)
     """
 
     def __init__(
@@ -188,7 +188,7 @@ class LlamaCppClient:
         if AsyncOpenAI is None:
             raise ImportError(
                 "openai package required for llama.cpp support. "
-                "Install with: pip install fitz-graveyard[lm-studio]"
+                "Install with: pip install fitz-forge[lm-studio]"
             )
 
         self._server_path = server_path

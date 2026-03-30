@@ -98,7 +98,7 @@ class LMStudioClient:
     Async LM Studio client using the OpenAI-compatible API.
 
     LM Studio exposes an OpenAI-compatible endpoint at http://localhost:1234/v1.
-    Requires: pip install fitz-graveyard[lm-studio]
+    Requires: pip install fitz-forge[lm-studio]
     """
 
     def __init__(
@@ -116,7 +116,7 @@ class LMStudioClient:
         if AsyncOpenAI is None:
             raise ImportError(
                 "openai package required for LM Studio support. "
-                "Install with: pip install fitz-graveyard[lm-studio]"
+                "Install with: pip install fitz-forge[lm-studio]"
             )
 
         self.base_url = base_url

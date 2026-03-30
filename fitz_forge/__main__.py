@@ -1,6 +1,6 @@
 # fitz_forge/__main__.py
 """
-Entry point for fitz-graveyard MCP server.
+Entry point for fitz-forge MCP server.
 
 CRITICAL: Server imports configure_logging() first to prevent stdout pollution.
 

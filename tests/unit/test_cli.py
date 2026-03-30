@@ -88,7 +88,7 @@ class TestPlan:
 
         assert result.exit_code == 0
         assert "test12345678" in result.output
-        assert "fitz-graveyard run" in result.output
+        assert "fitz-forge run" in result.output
 
 
 class TestList:

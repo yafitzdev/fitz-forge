@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def get_config_path() -> Path:
     """Get path to config file, ensuring config directory exists."""
-    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    config_dir = user_config_path("fitz-forge", ensure_exists=True)
     return config_dir / "config.yaml"
 
 

@@ -40,7 +40,7 @@ _DEFAULT_MAX_SEED_FILES = 50
 
 
 def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable:
-    """Bridge fitz-graveyard's async LLM client to fitz-ai's sync ChatFactory.
+    """Bridge fitz-forge's async LLM client to fitz-ai's sync ChatFactory.
 
     Returns a factory ``(tier: str) -> ChatProvider`` where ChatProvider.chat()
     schedules the async ``client.generate()`` on *loop* and blocks for the result.
@@ -76,7 +76,7 @@ def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable
 class AgentContextGatherer:
     """Retrieval pipeline powered by fitz-ai's CodeRetriever.
 
-    Bridges fitz-graveyard's async LLM client to fitz-ai's sync interface,
+    Bridges fitz-forge's async LLM client to fitz-ai's sync interface,
     runs retrieval, then adds planning-specific post-processing.
     """
 
@@ -397,7 +397,7 @@ class AgentContextGatherer:
 
         Within each tier, original order is preserved.
         """
-        _DOC_DIRS = {"docs", "examples", "tools", ".fitz-graveyard", ".github"}
+        _DOC_DIRS = {"docs", "examples", "tools", ".fitz-forge", ".github"}
         _TEST_DIRS = {"tests", "test"}
 
         def _tier(p: str) -> int:
