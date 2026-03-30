@@ -23,7 +23,7 @@ Write a complete architectural analysis covering ALL of the following sections. 
 - Key requirements (derived from the decisions and their constraints)
 - Constraints (from upstream decisions and codebase structure)
 - Existing files (referenced in decisions' evidence)
-- Needed artifacts (new files identified in the decisions)
+- Needed artifacts: trace the call chain from entry point to implementation. If there are intermediate layers between the public API and the core logic, each layer needs changes -- do not skip layers.
 - Assumptions (any remaining uncertainty after decisions)
 
 ### Section 2: Architecture
@@ -34,7 +34,7 @@ Write a complete architectural analysis covering ALL of the following sections. 
 
 ### Section 3: Design
 - ADRs for 3-5 key decisions that someone might disagree with (from the resolved decisions, excluding the architecture choice itself)
-- Components with interfaces (from interface and integration decisions)
+- Components with interfaces: list every component that needs changes, not just new ones. For each, specify the new method signature mirroring existing parameters.
 - Data model if applicable
 - Integration points
 - Artifacts (config files, schemas -- write the complete content)

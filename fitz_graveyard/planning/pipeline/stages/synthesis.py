@@ -977,6 +977,86 @@ class SynthesisStage(PipelineStage):
                 )
                 design_merged.update(partial)
 
+                # Retry if artifact coverage is thin: compare extracted
+                # artifacts against needed_artifacts from context section.
+                # If the model produced far fewer artifacts than needed,
+                # the extraction missed files — retry with the gaps.
+                needed = context_merged.get("needed_artifacts", [])
+                extracted = design_merged.get("artifacts", [])
+                extracted_files = {
+                    a.get("filename", "") for a in extracted
+                }
+                if needed and len(extracted) < max(len(needed) // 2, 2):
+                    missing = [
+                        n for n in needed
+                        if not any(
+                            n.split(" -- ")[0].strip() in ef
+                            or ef in n
+                            for ef in extracted_files
+                        )
+                    ]
+                    if missing:
+                        missing_hint = "\n".join(
+                            f"- {m}" for m in missing[:5]
+                        )
+                        logger.info(
+                            f"Stage 'synthesis': artifact retry — "
+                            f"extracted {len(extracted)}/{len(needed)} "
+                            f"needed artifacts, retrying for "
+                            f"{len(missing)} missing"
+                        )
+                        # Include component interfaces from the design
+                        # section so the retry has concrete method
+                        # signatures to base artifacts on.
+                        comp_hint = ""
+                        components = design_merged.get("components", [])
+                        if components:
+                            comp_lines = []
+                            for c in components:
+                                name = c.get("name", "")
+                                ifaces = c.get("interfaces", [])
+                                if ifaces:
+                                    sigs = "; ".join(ifaces[:3])
+                                    comp_lines.append(
+                                        f"- {name}: {sigs}"
+                                    )
+                            if comp_lines:
+                                comp_hint = (
+                                    "\n\n## COMPONENT INTERFACES\n"
+                                    "Use these real method signatures:\n"
+                                    + "\n".join(comp_lines)
+                                )
+
+                        retry_extra = (
+                            f"{extra}\n\n"
+                            f"## MISSING ARTIFACTS\n"
+                            f"The following files were identified as "
+                            f"needed but no artifact was extracted for "
+                            f"them. Write artifacts for these files:\n"
+                            f"{missing_hint}"
+                            f"{comp_hint}"
+                        )
+                        retry_partial = await self._extract_field_group(
+                            client, reasoning, ["artifacts"],
+                            _DESIGN_FIELD_GROUPS[-1]["schema"],
+                            "artifacts",
+                            extra_context=retry_extra,
+                        )
+                        retry_arts = retry_partial.get("artifacts", [])
+                        if retry_arts:
+                            # Merge: keep originals + add new ones
+                            existing = design_merged.get("artifacts", [])
+                            seen = {a.get("filename") for a in existing}
+                            for a in retry_arts:
+                                if a.get("filename") not in seen:
+                                    existing.append(a)
+                            design_merged["artifacts"] = existing
+                            logger.info(
+                                f"Stage 'synthesis': artifact retry "
+                                f"added {len(retry_arts)} artifacts "
+                                f"(total now {len(existing)})"
+                            )
+
             # Roadmap fields
             roadmap_merged: dict[str, Any] = {}
             for group in _ROADMAP_FIELD_GROUPS:
