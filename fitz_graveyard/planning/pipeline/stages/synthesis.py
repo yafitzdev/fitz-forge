@@ -1057,6 +1057,92 @@ class SynthesisStage(PipelineStage):
                                 f"(total now {len(existing)})"
                             )
 
+                # AST quality gate: check artifacts for fabricated
+                # methods and retry if too many are found. Only checks
+                # missing_method violations (real fabrications), ignoring
+                # missing_class (often new classes the plan proposes)
+                # and parse_error (truncated code, not fabrication).
+                artifacts = design_merged.get("artifacts", [])
+                if artifacts:
+                    from fitz_graveyard.planning.validation.grounding import (
+                        StructuralIndexLookup,
+                        check_artifact,
+                    )
+                    agent_ctx = prior_outputs.get("_agent_context", {})
+                    full_index = agent_ctx.get(
+                        "full_structural_index", "",
+                    )
+                    if not full_index:
+                        full_index = prior_outputs.get(
+                            "_gathered_context", "",
+                        )
+                    if full_index:
+                        ast_lookup = StructuralIndexLookup(full_index)
+                        all_violations = []
+                        for art in artifacts:
+                            all_violations.extend(
+                                check_artifact(art, ast_lookup),
+                            )
+                        # Filter to actionable violations only
+                        method_violations = [
+                            v for v in all_violations
+                            if v.kind == "missing_method"
+                        ]
+                        if len(method_violations) >= 3:
+                            violation_hint = "\n".join(
+                                f"- {v.symbol}: {v.detail}"
+                                for v in method_violations[:8]
+                            )
+                            logger.info(
+                                f"Stage 'synthesis': AST quality gate — "
+                                f"{len(method_violations)} fabricated "
+                                f"methods, retrying artifact extraction"
+                            )
+                            fix_extra = (
+                                f"{extra}\n\n"
+                                f"## FABRICATED METHODS (do NOT use)\n"
+                                f"The following methods do NOT exist in "
+                                f"the codebase. Do not reference them:\n"
+                                f"{violation_hint}\n\n"
+                                f"Use only methods confirmed in the "
+                                f"VERIFIED CODEBASE INFO above."
+                            )
+                            fix_partial = (
+                                await self._extract_field_group(
+                                    client, reasoning, ["artifacts"],
+                                    _DESIGN_FIELD_GROUPS[-1]["schema"],
+                                    "artifacts",
+                                    extra_context=fix_extra,
+                                )
+                            )
+                            fix_arts = fix_partial.get("artifacts", [])
+                            if fix_arts:
+                                # Check if retry is actually better
+                                fix_violations = []
+                                for art in fix_arts:
+                                    fix_violations.extend(
+                                        check_artifact(art, ast_lookup),
+                                    )
+                                fix_method_v = [
+                                    v for v in fix_violations
+                                    if v.kind == "missing_method"
+                                ]
+                                if len(fix_method_v) < len(method_violations):
+                                    design_merged["artifacts"] = fix_arts
+                                    logger.info(
+                                        f"Stage 'synthesis': AST retry "
+                                        f"reduced violations "
+                                        f"{len(method_violations)}"
+                                        f"→{len(fix_method_v)}"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"Stage 'synthesis': AST retry "
+                                        f"not better ({len(fix_method_v)} "
+                                        f"vs {len(method_violations)}), "
+                                        f"keeping original"
+                                    )
+
             # Roadmap fields
             roadmap_merged: dict[str, Any] = {}
             for group in _ROADMAP_FIELD_GROUPS:
