@@ -57,15 +57,14 @@
 | 42a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3bug` | `81b5abf` | + P3: contradiction detection (buggy — model returned wrong JSON key names) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.2 | 8.6 | **44.0 avg (38-51)** | P3 was a no-op: model returned contradictions with keys like "a"/"b" instead of "decision_a"/"decision_b" — all 6 contradictions in plan 2 skipped. Scores identical to run 41 (within noise). Bug fixed in same session: robust fallback parsing (key aliases + regex scan). Floor 38 (+1 vs 41, within noise). Need run 43 to test fixed P3. 5 runs: 42, 40, 51, 38, 49. |
 | 43a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `da72f377+P2+P3fix` | `81b5abf` | + P3 fixed: robust key parsing (aliases + regex scan) | 12-14 | — | 8.4 | 7.4 | 6.6 | 6.0 | 6.2 | 8.4 | **43.0 avg (39-52)** | P3 fired on plan 3 only (4 contradictions, d4 retried 3x + d14 once) — plan 3 scored 52. P3 did NOT fire on the floor plans (39, 39). Floor issues are synthesis hallucinations: wrong field names (request.messages vs request.history), non-existent internal methods (_retrieve, _build_context), synthesizer.py treated as new when it exists. P3 can't fix synthesis-layer errors. Floor: 39 (+2 vs run 41, marginal). Avg essentially flat. 5 runs: 42, 39, 52, 39, 43. |
 | # | Date | Model | Quant | Ctx | Pipeline SHA | Codebase SHA | Pipeline | Decisions | Time | Files | Contract | Consistency | Alignment | Implement | Scope | **Total** | Notes |
-| 44a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v1` | `81b5abf` | + P4: post-synthesis field grounding (Pydantic fields + self._X attrs) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.8 | 8.0 | **42.0 avg (37-53)** | P4 said "no corrections" on ALL 5 plans. Root cause: P4 only showed self._X=ClassName() **attributes** from __init__, not **method names**. Grounding validator still found violations: self._prepare_query() (plan 4), self._build_disputed_instruction() (plan 5). P4 couldn't flag them because it had no methods list to compare against. Plans 1-2: 38, 43 (from earlier). Plans 3-5: 53, 39, 37. Fix: (1) expanded P4 to also extract method names from class defs; (2) added grounding-repair pass in orchestrator — if AST violations found, feed exact violation messages to targeted LLM repair call. 5 runs: 38, 43, 53, 39, 37. |
-| 45a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair` | `81b5abf` | + P4 expanded (method names) + grounding repair (AST violations → targeted LLM fix) | 12-15 | — | 5.8 | 7.4 | 4.6 | 3.8 | 3.8 | 6.4 | **36.4 avg (28-49)** | Bimodal: plans 1-2 strong (49, 45), plans 3-5 floor (28, 30, 30). Plan 1: 0 violations, 49/60 — new ceiling for this run. Plan 2: 9 violations, repair applied to 3/4 artifacts (engine.py "no replacements" for 5 consecutive fabricated methods), scored 45. Plans 3-5: decision-level architectural failures (calling providers directly, claiming synthesizer.py doesn't exist, 12 duplicate decisions). Grounding repair working correctly but can't fix decision-layer reasoning errors. Floor not improved. P4+repair helps when decisions are sound but can't raise floor caused by decision_resolution misreads. 5 runs: 49, 45, 28, 30, 30. |
-| 49a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7` | `81b5abf` | P4 re-enabled (A/B test vs runs 47-48) | 12-14 | — | 7.4 | 8.2 | 5.2 | 5.6 | 4.8 | 7.2 | **39.0 avg (36-45)** | A/B test conclusive: P4 re-enabled scored 39.0, LOWER than runs 47 (39.6) and 48 (41.5) without P4. P4 said "no corrections" on all 5 plans (as always). Run 46's 43.6 was a lucky sample, not caused by P4. Confirmed: P4 is dead weight — 13-16s wasted LLM time per plan, zero corrections ever applied. Kill it. 5 runs: 36, 45, 36, 38, 40. |
-| 51a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `10a9e8f6+enriched` | `665388d` | Enriched repair: "Available methods" list in violation messages | 12-15 | — | 5.6 | 7.4 | 6.2 | 3.4 | 3.8 | 5.6 | **33.2 avg (29-44)** | REGRESSION. Enriched repair actively hurts: when repair fires, LLM picks semantically wrong real methods from list (_build_prompt → _build_row). Plan 2 (0 violations, repair didn't fire) scored 44. Plans with repair: 29-33. Reverted. The "Available methods" approach fails because the LLM matches syntax not semantics — it picks any method from the list that looks vaguely similar. Fitz-ai → fitz-sage rename also in this run. 5 runs: 30, 44, 33, 29, 30. |
-| 50a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `10a9e8f6+chaincheck` | `81b5abf` | Chain call grounding (self._attr.method()) — reverted | 12-14 | — | 7.2 | 7.4 | 6.0 | 5.0 | 4.8 | 6.8 | **38.2 avg (29-46)** | Chain call check caught real fabrications but also false positives: structural index only covers 30-file subset, not full codebase. GovernanceDecider.decide() flagged as missing (real method, just not indexed). False positive repairs corrupted correct code. Reverted. 5 runs: 46, 43, 43, 29, 30. |
-| 49a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7` | `81b5abf` | P4 re-enabled (A/B test vs runs 47-48) | 12-14 | — | 7.4 | 8.2 | 5.2 | 5.6 | 4.8 | 7.2 | **39.0 avg (36-45)** | A/B test conclusive: P4 re-enabled scored 39.0, LOWER than runs 47 (39.6) and 48 (41.5) without P4. P4 said "no corrections" on all 5 plans (as always). Run 46's 43.6 was a lucky sample, not caused by P4. Confirmed: P4 is dead weight — 13-16s wasted LLM time per plan, zero corrections ever applied. Kill it. 5 runs: 36, 45, 36, 38, 40. |
-| 48a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7+P4removed` | `81b5abf` | same as 47 (confirmation run) | 12-14 | — | 8.0 | 7.5 | 5.8 | 6.8 | 5.5 | 8.0 | **41.5 avg (33-49)** | 4/5 plans (1 DNF: Pydantic DesignOutput validation — adrs.rationale returned as list). Grounding repair active: plan 1 got 3/3 on dependencies.py, plan 3 got 6/6 across 3 files, plan 4 had 2 violations (no replacements). Ceiling held at 49 (plan 5). Floor 33 (plan 4: fabricated engine methods, SDK artifact broke query()). Combined runs 47+48 (9 plans): avg 40.4, consistent with historical variance band (39-44). 4 runs: 39, 45, 33, 49. |
-| 47a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7+P4removed` | `81b5abf` | P4 removed (dead weight — never applied corrections). Grounding repair only. | 12-14 | — | 7.4 | 8.6 | 5.0 | 5.8 | 5.4 | 7.4 | **39.6 avg (36-49)** | P4 removal confirmed safe — ceiling held at 49. Floor dropped to 36 but within historical variance (run 43 floor was 39, run 44 floor was 37). Grounding repair still working: plan 2 had 9 violations, repair applied 7/7 across 3 files; plan 3 had 6 violations, repair applied 5/6. Plan 1 had 0 artifacts + empty phases (model output issue, not pipeline bug). Contract preservation consistently strong at 8.6. 5 runs: 36, 36, 49, 41, 36. |
-| 46a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair+skipfix` | `81b5abf` | + false-positive fix: HTTPException + FastAPI classes added to grounding _SKIP_NAMES | 12-15 | — | 7.8 | 8.6 | 6.0 | 7.0 | 6.4 | 8.0 | **43.6 avg (40-47)** | Best floor ever: 40 (no catastrophic failures). Confirms run 45's 28-30 floors were statistical variance, not a regression. Grounding repair fired on plans 1 and 4 (successfully applied fixes). P4 said "no corrections" on all 5 (expected — no Pydantic field errors this run). Remaining implementability gap: synthesizer artifacts still call self._chat.build_messages() (chain call not caught by grounding), and engine.py sometimes assumes _analyze_and_retrieve() helper exists. 5 runs: 42, 47, 43, 40, 46. |
+| 44a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v1` | `81b5abf` | + P4: post-synthesis field grounding (Pydantic fields + self._X attrs) | 12-13 | — | 7.8 | 8.4 | 6.8 | 6.2 | 6.8 | 8.0 | **42.0 avg (37-53)** | P4 said "no corrections" on ALL 5 plans. Grounding validator still found violations. Fix: expanded P4 + added grounding-repair pass. 5 runs: 38, 43, 53, 39, 37. |
+| 45a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair` | `81b5abf` | + P4 expanded (method names) + grounding repair (AST violations → targeted LLM fix) | 12-15 | — | 5.8 | 7.4 | 4.6 | 3.8 | 3.8 | 6.4 | **36.4 avg (28-49)** | Bimodal: plans 1-2 strong (49, 45), plans 3-5 floor (28, 30, 30). Confirmed as variance in run 46. 5 runs: 49, 45, 28, 30, 30. |
+| 46a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `ee1e8a5a+P4v2+repair+skipfix` | `81b5abf` | + false-positive fix: HTTPException + FastAPI classes added to grounding _SKIP_NAMES | 12-15 | — | 7.8 | 8.6 | 6.0 | 7.0 | 6.4 | 8.0 | **43.6 avg (40-47)** | Best floor ever: 40. Confirms run 45 was variance. 5 runs: 42, 47, 43, 40, 46. |
+| 47a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7+P4removed` | `81b5abf` | P4 removed (dead weight). Grounding repair only. | 12-14 | — | 7.4 | 8.6 | 5.0 | 5.8 | 5.4 | 7.4 | **39.6 avg (36-49)** | P4 removal safe — ceiling held at 49. 5 runs: 36, 36, 49, 41, 36. |
+| 48a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7+P4removed` | `81b5abf` | same as 47 (confirmation run) | 12-14 | — | 8.0 | 7.5 | 5.8 | 6.8 | 5.5 | 8.0 | **41.5 avg (33-49)** | 4/5 plans (1 DNF). Combined 47+48: avg 40.4. 4 runs: 39, 45, 33, 49. |
+| 49a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `3d935ba7` | `81b5abf` | P4 re-enabled (A/B test vs runs 47-48) | 12-14 | — | 7.4 | 8.2 | 5.2 | 5.6 | 4.8 | 7.2 | **39.0 avg (36-45)** | A/B test: P4 re-enabled scored 39.0 — LOWER than without. P4 confirmed dead weight. 5 runs: 36, 45, 36, 38, 40. |
+| 50a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `10a9e8f6+chaincheck` | `81b5abf` | Chain call grounding (self._attr.method()) — REVERTED | 12-14 | — | 7.2 | 7.4 | 6.0 | 5.0 | 4.8 | 6.8 | **38.2 avg (29-46)** | False positives: structural index only covers 30-file subset. Real methods on un-indexed classes flagged + repaired incorrectly. 5 runs: 46, 43, 43, 29, 30. |
+| 51a-e | 2026-03-30 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `10a9e8f6+enriched` | `665388d` | Enriched repair: "Available methods" list in violations — REVERTED | 12-15 | — | 5.6 | 7.4 | 6.2 | 3.4 | 3.8 | 5.6 | **33.2 avg (29-44)** | REGRESSION. LLM picks semantically wrong real methods from list. Plans with repair: 29-33. Plan without: 44. 5 runs: 30, 44, 33, 29, 30. |
 
 
 ### Column Key
@@ -440,58 +439,46 @@ IMPORTANT: The `--query` MUST be the streaming task above. The default query is 
 - LM Studio must be loaded with `--parallel N` matching the `-p N` flag
 - `lms load ... --parallel 2` for `-p 2`
 
-**Critical files to read first in new session:**
-- This file (streaming-task-tracker.md) — the run log tells the full story
-- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential assessment protocol
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. Key additions: `_extract_schema_fields` (Pydantic field names via AST), `_extract_attribute_ref` (self._X attrs AND method names via AST), `_ground_artifact_fields` (P4: post-synthesis correction pass). P4 hook is in `execute()` between artifact building and roadmap fields.
-- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` + `repair_violations()` (Option A: grounding-repair pass using exact violation messages).
-- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook wired after `validate_grounding()` call at ~line 917. Updates `prior_outputs["design"]["artifacts"]` in-place if violations found.
-- `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — P3: contradiction detection + fix (robust key parsing: aliases + regex scan for d\d+ patterns).
-- `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — P1: coverage gate (retries if interior call-chain layers not covered by decisions).
-
-### Session 2026-03-30 — P4 + Grounding Repair
+### Session 2026-03-30 — P4, Grounding Repair, and What Failed
 
 **Baseline entering session:** P1+P2+P3 committed (`ee1e8a5a`), avg ~43-44, floor 39.
 
-**What was done:**
+**What shipped (still active):**
 
-**P4 (post-synthesis field grounding):**
-- Added `_extract_schema_fields`: AST-extracts Pydantic model fields from schema/model source files
-- Added `_extract_attribute_ref`: AST-extracts `self._X` attributes AND private method names from classes in artifact target files
-- Added `_ground_artifact_fields`: one cheap LLM call post-synthesis, shows Pydantic fields + attrs + methods as reference, asks for replacement pairs for any wrong field names or fabricated `self._X()` calls
-- P4 runs inside `synthesis.execute()` between artifact building and roadmap fields — post-synthesis, no context blowup risk
+1. **Grounding repair** (`repair_violations()` in `grounding.py`): one LLM call per affected artifact, fed exact AST violation messages ("Method '_prepare_query' not found"), asks for replacements. Wired in `orchestrator.py` after `validate_grounding()`. Updates `prior_outputs["design"]["artifacts"]` in-place.
+2. **False-positive fix**: HTTPException + FastAPI form/body classes added to `_SKIP_NAMES` in grounding.py.
+3. **fitz_ai → fitz_sage rename**: all imports and path references updated for the fitz-ai package rebrand.
 
-**Grounding repair (Option A — deterministic harness):**
-- Added `repair_violations()` in `grounding.py`: one LLM call per affected artifact, fed EXACT AST violation messages ("Method '_prepare_query' not found"), asks for replacements
-- Wired in `orchestrator.py` after `validate_grounding()`: if violations found, repair runs, updated artifacts written back to `prior_outputs["design"]["artifacts"]`
-- More reliable than P4 because violations are machine-detected, not LLM self-audit
+**What was tried and reverted:**
 
-**False-positive fix:**
-- Added `HTTPException`, FastAPI form/body classes to `_SKIP_NAMES` in grounding.py
-- These are legitimate FastAPI imports not in the structural index — were being flagged as fabrications and incorrectly "repaired"
+1. **P4 field grounding** (runs 44-49): LLM self-audit of artifacts against extracted Pydantic fields + method lists. Said "no corrections" on ALL plans across ALL runs. A/B test (run 49 with P4 vs runs 47-48 without): 39.0 with vs 40.4 without. **Killed** — dead weight, 13-16s wasted per plan.
+2. **Chain call grounding** (run 50): extended AST check to catch `self._attr.method()` patterns. False positives because structural index only covers 30-file subset — methods on un-indexed classes (GovernanceDecider.decide, ContextAssembler.assemble) flagged as missing. Repair corrupted correct code. **Reverted.**
+3. **Enriched repair with "Available methods"** (run 51): included real method list in violation messages so repair LLM could pick correct replacements. **Backfired** — LLM picks semantically wrong but syntactically valid methods (_build_prompt → _build_row). Plans with enriched repair: 29-33. Plan without: 44. **Reverted.**
 
-**Results:**
-- Run 44 (P4v1 — only checked attrs, not methods): 42.0 avg (37-53). P4 said "no corrections" on all plans because methods weren't in reference.
-- Run 45 (P4v2 + repair): 36.4 avg — bimodal: plans 1-2 scored 49/45 (strong), plans 3-5 scored 28/30/30 (decision-level architectural failures). Run 45 was statistical variance, not regression.
-- Run 46 (P4v2 + repair + skip fix): **43.6 avg (40-47)** — best floor ever (40). Confirms run 45 was variance.
+**Current baseline:** `55386ee2`, avg ~40 (runs 47-49 combined: 40.4), floor ~36. Active: P1 coverage gate, P2 synthesis warnings, P3 contradiction detection, grounding repair with bare violation messages.
 
-**Current baseline:** `ee1e8a5a` + P4v2 + grounding repair + skip fix. Committed as new baseline after run 46.
+**Why the floor is ~33-36 (not addressable by post-synthesis fixes):**
 
-**Remaining floor gap (40-47 range):** Decision-level architectural misreads that synthesis faithfully narrates:
-- Model sometimes calls LLM providers directly from API endpoint (bypasses engine/service stack)
-- Model sometimes assumes helper methods exist (`_analyze_and_retrieve`, `self._chat.build_messages()`)
-- Chain-call fabrications (`self._attr.method()`) not caught by grounding validator (only checks `self._X()` direct calls)
+All floor plans share the same root cause: **decision-level architectural misreads**. The model:
+- Confuses eval tools (`GovernanceClassifier` in tools/governance/) with production governance
+- Claims providers lack `chat_stream()` when all 4 already have it
+- Fabricates engine internals (`_retrieve`, `_build_messages`, `_analyze_and_retrieve`)
+- Confuses `engine.chat()` with `engine.answer()` (chat doesn't exist)
 
-**Next directions:**
-- P4 still says "no corrections" most of the time — the method-list prompt may help if violations are present, but often synthesis writes clean code or the LLM self-audit fails anyway. Consider if P4 is adding value beyond what grounding repair provides.
-- The `self._chat.build_messages()` chain-call pattern: grounding doesn't catch it, P4 doesn't catch it. Could extend grounding to also check `self._attr.method()` patterns by looking up what methods `_attr`'s type actually has.
-- Decision-layer: when model misreads architecture at d2 (claims synthesizer.py doesn't exist, invents fetch_chunks), all downstream decisions are wrong. No current mechanism catches this. A post-decomposition "architecture sanity check" could verify key claims against the structural index.
+These errors enter at `decision_resolution`, not synthesis. No post-synthesis repair can fix them because the plan's architecture is wrong upstream.
+
+**Promising next directions (not yet tried):**
+
+1. **Decision trace injection**: serialize resolved decisions into a compact registry, inject into synthesis prompt, validate synthesis doesn't contradict it. Targets consistency (weakest dimension at ~5.0).
+2. **Phase count auto-correction**: deterministic post-synthesis check — count phases defined vs total_phases field, strip references to non-existent phases. Easy win for consistency.
+3. **Full codebase index for grounding**: the structural index only covers 30 files. A full index would eliminate false positives in chain call checking. Requires changes to `build_structural_index` or a separate full-scan pass.
+4. **Decision-level architecture sanity check**: after decomposition, verify key claims ("does synthesizer.py exist?") against structural index before resolution proceeds. Could prevent the most common floor-plan failure.
 
 **Critical files to read first in new session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
-- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential assessment protocol
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. Key methods: `_extract_attribute_ref` (attrs + methods), `_ground_artifact_fields` (P4), `execute` (P4 hook between artifacts and roadmap fields).
-- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `repair_violations()`.
-- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook after validate_grounding at ~line 917.
+- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential 1-1-1-2 assessment protocol
+- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` + `repair_violations()`. The `_SKIP_NAMES` set prevents false positives for framework classes.
+- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook after `validate_grounding()` at ~line 917.
+- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. P4 was deleted from here. Key methods: `_build_artifacts_with_tools`, `execute`.
 - `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — P1 coverage gate.
 - `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — P3 contradiction detection.
