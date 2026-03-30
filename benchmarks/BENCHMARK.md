@@ -130,7 +130,7 @@ Commands:
   --score
 ```
 
-After each run, score with parallel Opus subagents (one per plan):
+After each run, score with parallel Sonnet subagents (one per plan):
 
 ```
 Read score_prompt_NN.md and follow ALL instructions to score the plan. Output ONLY the final JSON scorecard.
@@ -140,7 +140,10 @@ Extract scores from JSON: `file + contract + consistency + alignment + implement
 
 After all 5 plans, synthesize: compare to baseline avg, note floor/ceiling shifts, update tracker.
 
-**When to abort early:** If plans 1-2 both show obvious regressions (score < 30 or same failure mode as what you're trying to fix), stop and diagnose before running the remaining 3.
+**When to abort early:**
+- If plans 1-2 both show obvious regressions (score < 30 or same failure mode as what you're trying to fix), stop immediately and diagnose before running more.
+- If a plan reveals a bug in the pipeline code (wrong output, crash, incorrect behavior), stop the benchmark sequence, fix the bug, then restart from plan 1.
+- Do NOT continue generating plans if a bug is confirmed — additional plans waste time and produce misleading data.
 
 **Full 5-run batch (verification only, not for active experiments):**
 
