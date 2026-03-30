@@ -13,22 +13,22 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from fitz_graveyard.planning.pipeline.checkpoint import CheckpointManager
-from fitz_graveyard.planning.pipeline.output import PlanRenderer
-from fitz_graveyard.planning.schemas.architecture import (
+from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
+from fitz_forge.planning.pipeline.output import PlanRenderer
+from fitz_forge.planning.schemas.architecture import (
     Approach,
     ArchitectureOutput,
 )
-from fitz_graveyard.planning.schemas.context import Assumption, ContextOutput
-from fitz_graveyard.planning.schemas.design import (
+from fitz_forge.planning.schemas.context import Assumption, ContextOutput
+from fitz_forge.planning.schemas.design import (
     ADR,
     Artifact,
     ComponentDesign,
     DesignOutput,
 )
-from fitz_graveyard.planning.schemas.plan_output import PlanOutput
-from fitz_graveyard.planning.schemas.risk import Risk, RiskOutput
-from fitz_graveyard.planning.schemas.roadmap import Phase, RoadmapOutput
+from fitz_forge.planning.schemas.plan_output import PlanOutput
+from fitz_forge.planning.schemas.risk import Risk, RiskOutput
+from fitz_forge.planning.schemas.roadmap import Phase, RoadmapOutput
 
 
 # ---------------------------------------------------------------------------

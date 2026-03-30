@@ -11,7 +11,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from fitz_graveyard.config.schema import (
+from fitz_forge.config.schema import (
     AgentConfig,
     AnthropicConfig,
     ConfidenceConfig,
@@ -23,7 +23,7 @@ from fitz_graveyard.config.schema import (
     OllamaConfig,
     OutputConfig,
 )
-from fitz_graveyard.config.loader import _warn_unknown_keys, load_config
+from fitz_forge.config.loader import _warn_unknown_keys, load_config
 
 
 # =========================================================================
@@ -466,7 +466,7 @@ class TestLoadConfig:
         """load_config creates a default YAML file when none exists."""
         config_path = tmp_path / "config.yaml"
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         config = load_config()
@@ -491,7 +491,7 @@ class TestLoadConfig:
             yaml.safe_dump(yaml_content, f)
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         config = load_config()
@@ -507,7 +507,7 @@ class TestLoadConfig:
             yaml.safe_dump({"provider": "ollama"}, f)
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         config = load_config()
@@ -527,7 +527,7 @@ class TestLoadConfig:
             yaml.safe_dump(yaml_content, f)
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         with caplog.at_level(logging.WARNING):
@@ -542,7 +542,7 @@ class TestLoadConfig:
         config_path.write_text("{invalid yaml: [unclosed")
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         with pytest.raises(Exception):
@@ -558,7 +558,7 @@ class TestLoadConfig:
             yaml.safe_dump(yaml_content, f)
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         with pytest.raises(ValidationError):
@@ -570,7 +570,7 @@ class TestLoadConfig:
         config_path.write_text("")
 
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         # yaml.safe_load("") returns None, which will fail when unpacked as **None
@@ -583,7 +583,7 @@ class TestLoadConfig:
 
         # First call: creates default
         monkeypatch.setattr(
-            "fitz_graveyard.config.loader.get_config_path",
+            "fitz_forge.config.loader.get_config_path",
             lambda: config_path,
         )
         first = load_config()

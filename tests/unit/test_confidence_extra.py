@@ -7,8 +7,8 @@ Covers: section-specific criteria in prompts, edge cases, overall scoring flow.
 
 import pytest
 
-from fitz_graveyard.config.schema import ConfidenceConfig
-from fitz_graveyard.planning.confidence import ConfidenceScorer, SectionFlagger
+from fitz_forge.config.schema import ConfidenceConfig
+from fitz_forge.planning.confidence import ConfidenceScorer, SectionFlagger
 
 
 # ---------------------------------------------------------------------------

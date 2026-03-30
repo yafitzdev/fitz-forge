@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from fitz_graveyard.background.worker import BackgroundWorker
-from fitz_graveyard.config.schema import FitzPlannerConfig
-from fitz_graveyard.models.jobs import JobRecord, JobState
-from fitz_graveyard.models.sqlite_store import SQLiteJobStore
+from fitz_forge.background.worker import BackgroundWorker
+from fitz_forge.config.schema import FitzPlannerConfig
+from fitz_forge.models.jobs import JobRecord, JobState
+from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 
 @pytest_asyncio.fixture

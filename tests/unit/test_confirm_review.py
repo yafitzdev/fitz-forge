@@ -7,9 +7,9 @@ import pytest
 import pytest_asyncio
 from datetime import datetime, timezone
 
-from fitz_graveyard.models.jobs import JobRecord, JobState, generate_job_id
-from fitz_graveyard.models.jobs import InMemoryJobStore
-from fitz_graveyard.tools.confirm_review import confirm_review
+from fitz_forge.models.jobs import JobRecord, JobState, generate_job_id
+from fitz_forge.models.jobs import InMemoryJobStore
+from fitz_forge.tools.confirm_review import confirm_review
 from fastmcp.exceptions import ToolError
 
 

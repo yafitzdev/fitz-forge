@@ -2,7 +2,7 @@
 
 ## Incident
 
-`fitz-graveyard plan` hung immediately after showing the TUI. No error, no output, infinite hang.
+`fitz-forge plan` hung immediately after showing the TUI. No error, no output, infinite hang.
 
 ## Root Causes (two separate bugs)
 
@@ -42,7 +42,7 @@ The WMI monkey-patch (`platform._wmi_query = raise OSError`) is clean because CP
 `platform.py` already has `except OSError` fallbacks everywhere `_wmi_query` is called —
 falling back to registry lookups and env vars. The output is correct: `platform.platform()`
 returns `Windows-11-10.0.26200-SP0`, `platform.processor()` returns the full CPU string.
-One line in `fitz_graveyard/__init__.py` kills all WMI deadlocks at the source.
+One line in `fitz_forge/__init__.py` kills all WMI deadlocks at the source.
 
 The lazy import pattern (`TYPE_CHECKING` + `from __future__ import annotations`) is
 standard Python. These changes correctly ensure that `import ollama` only happens when

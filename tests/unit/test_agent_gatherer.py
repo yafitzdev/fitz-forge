@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_graveyard.config.schema import AgentConfig
-from fitz_graveyard.planning.agent.gatherer import (
+from fitz_forge.config.schema import AgentConfig
+from fitz_forge.planning.agent.gatherer import (
     AgentContextGatherer,
     _make_chat_factory,
 )
@@ -149,7 +149,7 @@ class TestGatherEndToEnd:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
@@ -173,7 +173,7 @@ class TestGatherEndToEnd:
     @pytest.mark.asyncio
     async def test_empty_results_returns_empty(self, tmp_path, mock_client):
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = []
@@ -200,7 +200,7 @@ class TestGatherEndToEnd:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
@@ -219,7 +219,7 @@ class TestGatherEndToEnd:
     @pytest.mark.asyncio
     async def test_total_failure_returns_empty(self, tmp_path, mock_client):
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.side_effect = RuntimeError("total fail")
@@ -237,7 +237,7 @@ class TestGatherEndToEnd:
         (tmp_path / "a.py").write_text("x = 1")
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
@@ -267,7 +267,7 @@ class TestProgressCallback:
         (tmp_path / "main.py").write_text("def run(): pass")
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
@@ -295,7 +295,7 @@ class TestProgressCallback:
         (tmp_path / "main.py").write_text("def run(): pass")
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
@@ -333,7 +333,7 @@ class TestSeedAndFetch:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
@@ -360,7 +360,7 @@ class TestSeedAndFetch:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
@@ -393,7 +393,7 @@ class TestSeedAndFetch:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
@@ -423,7 +423,7 @@ class TestSeedAndFetch:
         ]
 
         with patch(
-            "fitz_graveyard.planning.agent.gatherer.CodeRetriever"
+            "fitz_forge.planning.agent.gatherer.CodeRetriever"
         ) as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results

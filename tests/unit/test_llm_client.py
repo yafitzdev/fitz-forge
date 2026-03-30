@@ -5,7 +5,7 @@ import pytest
 from ollama import ResponseError
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fitz_graveyard.llm.client import OllamaClient
+from fitz_forge.llm.client import OllamaClient
 
 
 class TestOllamaClientHealthCheck:

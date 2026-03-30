@@ -1,6 +1,6 @@
 ## Rules
 
-1. **File path comment required** - First line: `# fitz_graveyard/path/to/file.py`
+1. **File path comment required** - First line: `# fitz_forge/path/to/file.py`
 2. **No stdout** - MCP uses stdio. All logging → stderr via `logging`. Never `print()`.
 3. **Always use .venv** - `.venv/Scripts/pip` (Windows) or `.venv/bin/pip` (Unix)
 4. **No legacy code** - No backwards compat, no shims. Delete completely when removing.
@@ -19,15 +19,15 @@ MCP (fastmcp)  ──→ tools/ ──→ SQLiteJobStore
 ```bash
 pip install -e ".[dev]"           # Dev install
 pytest                            # 402 tests
-fitz-graveyard plan "desc"        # Queue job
-fitz-graveyard run                # Start worker (Ctrl+C to stop)
-fitz-graveyard list               # Show all jobs
-fitz-graveyard status <id>        # Check progress
-fitz-graveyard get <id>           # Print plan markdown
-fitz-graveyard retry <id>         # Re-queue failed job
-fitz-graveyard confirm <id>       # Approve API review
-fitz-graveyard cancel <id>        # Skip API review
-fitz-graveyard serve              # Start MCP server
+fitz-forge plan "desc"        # Queue job
+fitz-forge run                # Start worker (Ctrl+C to stop)
+fitz-forge list               # Show all jobs
+fitz-forge status <id>        # Check progress
+fitz-forge get <id>           # Print plan markdown
+fitz-forge retry <id>         # Re-queue failed job
+fitz-forge confirm <id>       # Approve API review
+fitz-forge cancel <id>        # Skip API review
+fitz-forge serve              # Start MCP server
 ```
 
 ## Job States

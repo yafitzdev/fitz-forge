@@ -3,35 +3,35 @@
 
 Covers default construction, full construction, validation,
 serialization round-trips, and optional field handling for every
-schema model in fitz_graveyard.planning.schemas.
+schema model in fitz_forge.planning.schemas.
 """
 
 import pytest
 from datetime import datetime
 from pydantic import ValidationError
 
-from fitz_graveyard.planning.schemas.context import Assumption, ContextOutput
-from fitz_graveyard.planning.schemas.architecture import Approach, ArchitectureOutput
-from fitz_graveyard.planning.schemas.design import (
+from fitz_forge.planning.schemas.context import Assumption, ContextOutput
+from fitz_forge.planning.schemas.architecture import Approach, ArchitectureOutput
+from fitz_forge.planning.schemas.design import (
     ADR,
     Artifact,
     ComponentDesign,
     DesignOutput,
 )
-from fitz_graveyard.planning.schemas.roadmap import (
+from fitz_forge.planning.schemas.roadmap import (
     Phase,
     PhaseRef,
     RoadmapOutput,
     _coerce_phase_number,
 )
-from fitz_graveyard.planning.schemas.risk import Risk, RiskOutput
-from fitz_graveyard.planning.schemas.decisions import (
+from fitz_forge.planning.schemas.risk import Risk, RiskOutput
+from fitz_forge.planning.schemas.decisions import (
     AtomicDecision,
     DecisionDecompositionOutput,
     DecisionResolution,
     DecisionResolutionOutput,
 )
-from fitz_graveyard.planning.schemas.plan_output import PlanOutput
+from fitz_forge.planning.schemas.plan_output import PlanOutput
 
 
 # ---- helpers ----
@@ -873,7 +873,7 @@ class TestSchemaReExports:
     """Verify the public API exposed by the schemas __init__."""
 
     def test_all_exports_importable(self):
-        from fitz_graveyard.planning.schemas import __all__
+        from fitz_forge.planning.schemas import __all__
 
         expected = {
             "Assumption", "ContextOutput",

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_graveyard.config.schema import LlamaCppModelConfig
-from fitz_graveyard.llm.llama_cpp import LlamaCppClient
+from fitz_forge.config.schema import LlamaCppModelConfig
+from fitz_forge.llm.llama_cpp import LlamaCppClient
 
 
 def _make_client(**kwargs):

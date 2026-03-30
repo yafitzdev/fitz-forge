@@ -1,7 +1,7 @@
 # tests/unit/test_call_graph.py
 """Tests for call graph extraction."""
 import pytest
-from fitz_graveyard.planning.pipeline.call_graph import (
+from fitz_forge.planning.pipeline.call_graph import (
     extract_call_graph,
     _extract_task_keywords,
     _match_keywords_to_files,

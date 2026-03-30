@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fitz_graveyard.planning.agent.indexer import (
+from fitz_forge.planning.agent.indexer import (
     _MAX_INDEX_CHARS,
     _build_module_file_lookup,
     _extract_config,

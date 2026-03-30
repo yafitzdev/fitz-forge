@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fitz_graveyard.planning.pipeline.stages import ContextStage
+from fitz_forge.planning.pipeline.stages import ContextStage
 
 
 class TestGroundingInstruction:

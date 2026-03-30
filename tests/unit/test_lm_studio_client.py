@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_graveyard.llm.lm_studio import LMStudioClient, _callable_to_openai_tool
-from fitz_graveyard.llm.types import AgentMessage, AgentToolCall
+from fitz_forge.llm.lm_studio import LMStudioClient, _callable_to_openai_tool
+from fitz_forge.llm.types import AgentMessage, AgentToolCall
 
 
 # ---------------------------------------------------------------------------
@@ -16,7 +16,7 @@ from fitz_graveyard.llm.types import AgentMessage, AgentToolCall
 
 def _make_client(**kwargs):
     """Create LMStudioClient with openai patched out."""
-    with patch("fitz_graveyard.llm.lm_studio.AsyncOpenAI"):
+    with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
         client = LMStudioClient(**kwargs)
     return client
 
@@ -107,7 +107,7 @@ class TestHealthCheck:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("fitz_graveyard.llm.lm_studio.httpx.AsyncClient") as mock_http, \
+        with patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http, \
              patch.object(client, "is_model_loaded", AsyncMock(return_value=True)):
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -120,7 +120,7 @@ class TestHealthCheck:
     async def test_returns_false_on_connection_error(self):
         client = _make_client()
 
-        with patch("fitz_graveyard.llm.lm_studio.httpx.AsyncClient") as mock_http:
+        with patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http:
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_http.return_value.get = AsyncMock(

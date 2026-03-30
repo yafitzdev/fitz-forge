@@ -7,16 +7,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_graveyard.llm.lm_studio import LMStudioClient
-from fitz_graveyard.llm.client import OllamaClient
-from fitz_graveyard.planning.pipeline.orchestrator import PipelineResult
-from fitz_graveyard.planning.pipeline.output import PlanRenderer
-from fitz_graveyard.planning.schemas.plan_output import PlanOutput
-from fitz_graveyard.planning.schemas.context import ContextOutput
-from fitz_graveyard.planning.schemas.architecture import ArchitectureOutput
-from fitz_graveyard.planning.schemas.design import DesignOutput
-from fitz_graveyard.planning.schemas.roadmap import RoadmapOutput
-from fitz_graveyard.planning.schemas.risk import RiskOutput
+from fitz_forge.llm.lm_studio import LMStudioClient
+from fitz_forge.llm.client import OllamaClient
+from fitz_forge.planning.pipeline.orchestrator import PipelineResult
+from fitz_forge.planning.pipeline.output import PlanRenderer
+from fitz_forge.planning.schemas.plan_output import PlanOutput
+from fitz_forge.planning.schemas.context import ContextOutput
+from fitz_forge.planning.schemas.architecture import ArchitectureOutput
+from fitz_forge.planning.schemas.design import DesignOutput
+from fitz_forge.planning.schemas.roadmap import RoadmapOutput
+from fitz_forge.planning.schemas.risk import RiskOutput
 
 
 def _minimal_plan(**kwargs) -> PlanOutput:
@@ -37,7 +37,7 @@ def _minimal_plan(**kwargs) -> PlanOutput:
 # ---------------------------------------------------------------------------
 
 def _make_lm_client(**kwargs):
-    with patch("fitz_graveyard.llm.lm_studio.AsyncOpenAI"):
+    with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
         client = LMStudioClient(**kwargs)
     return client
 

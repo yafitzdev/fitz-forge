@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fitz_graveyard.planning.pipeline.stages import (
+from fitz_forge.planning.pipeline.stages import (
     ArchitectureDesignStage,
     ContextStage,
     RoadmapRiskStage,
@@ -104,14 +104,14 @@ class TestNoKragImports:
     def test_context_stage_has_no_krag_dependency(self):
         """ContextStage should not reference KragClient."""
         import inspect
-        import fitz_graveyard.planning.pipeline.stages.context as mod
+        import fitz_forge.planning.pipeline.stages.context as mod
         source = inspect.getsource(mod)
         assert "KragClient" not in source
         assert "_get_krag_context" not in source
 
     def test_base_has_no_krag_dependency(self):
         import inspect
-        import fitz_graveyard.planning.pipeline.stages.base as mod
+        import fitz_forge.planning.pipeline.stages.base as mod
         source = inspect.getsource(mod)
         assert "KragClient" not in source
         assert "_get_krag_context" not in source

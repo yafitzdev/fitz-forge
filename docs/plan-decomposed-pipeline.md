@@ -61,37 +61,37 @@ moving to the next.
 ### Step 1: Call Graph Extractor (no LLM, pure Python)
 **Dependencies:** None. Uses existing `build_import_graph()` from `indexer.py`.
 **Test:** Unit tests with synthetic codebases.
-**Files:** `fitz_graveyard/planning/pipeline/call_graph.py`
+**Files:** `fitz_forge/planning/pipeline/call_graph.py`
 
 ### Step 2: Decision Schema
 **Dependencies:** None.
-**Files:** `fitz_graveyard/planning/schemas/decisions.py`
+**Files:** `fitz_forge/planning/schemas/decisions.py`
 
 ### Step 3: Decision Decomposition Stage
 **Dependencies:** Step 1, Step 2.
 **Files:**
-- `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py`
-- `fitz_graveyard/planning/prompts/decision_decomposition.txt`
+- `fitz_forge/planning/pipeline/stages/decision_decomposition.py`
+- `fitz_forge/planning/prompts/decision_decomposition.txt`
 
 ### Step 4: Decision Resolution Stage
 **Dependencies:** Step 2, Step 3.
 **Files:**
-- `fitz_graveyard/planning/pipeline/stages/decision_resolution.py`
-- `fitz_graveyard/planning/prompts/decision_resolution.txt`
+- `fitz_forge/planning/pipeline/stages/decision_resolution.py`
+- `fitz_forge/planning/prompts/decision_resolution.txt`
 
 ### Step 5: Synthesis Stage
 **Dependencies:** Step 2, Step 4.
 **Files:**
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py`
-- `fitz_graveyard/planning/prompts/synthesis.txt`
+- `fitz_forge/planning/pipeline/stages/synthesis.py`
+- `fitz_forge/planning/prompts/synthesis.txt`
 
 ### Step 6: Orchestrator Integration
 **Dependencies:** Steps 1-5.
 **Modified files:**
-- `fitz_graveyard/planning/pipeline/orchestrator.py` — new `DecomposedPipeline` class
-- `fitz_graveyard/planning/pipeline/stages/__init__.py` — new `create_decomposed_stages()`
-- `fitz_graveyard/background/worker.py` — use `DecomposedPipeline` instead of `PlanningPipeline`
-- `fitz_graveyard/config/schema.py` — no changes needed (uses existing config)
+- `fitz_forge/planning/pipeline/orchestrator.py` — new `DecomposedPipeline` class
+- `fitz_forge/planning/pipeline/stages/__init__.py` — new `create_decomposed_stages()`
+- `fitz_forge/background/worker.py` — use `DecomposedPipeline` instead of `PlanningPipeline`
+- `fitz_forge/config/schema.py` — no changes needed (uses existing config)
 
 ### Step 7: Benchmark Integration
 **Dependencies:** Step 6.
@@ -106,13 +106,13 @@ moving to the next.
 
 ## 3. New Files — Detailed Design
 
-### 3.1 `fitz_graveyard/planning/pipeline/call_graph.py`
+### 3.1 `fitz_forge/planning/pipeline/call_graph.py`
 
 This module extracts a call-level graph from the structural index and import graph.
 It does NOT use the LLM — it is pure Python operating on AST data.
 
 ```python
-# fitz_graveyard/planning/pipeline/call_graph.py
+# fitz_forge/planning/pipeline/call_graph.py
 """
 Call graph extraction from structural index + import graph.
 
@@ -435,10 +435,10 @@ def _extract_doc_line(index_entry: str) -> str:
 
 **Token budget:** The call graph text is typically 500-2000 chars (20-80 files at one line each). Well within budget.
 
-### 3.2 `fitz_graveyard/planning/schemas/decisions.py`
+### 3.2 `fitz_forge/planning/schemas/decisions.py`
 
 ```python
-# fitz_graveyard/planning/schemas/decisions.py
+# fitz_forge/planning/schemas/decisions.py
 """Schemas for decomposed decision pipeline."""
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -552,10 +552,10 @@ class DecisionResolutionOutput(BaseModel):
     )
 ```
 
-### 3.3 `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py`
+### 3.3 `fitz_forge/planning/pipeline/stages/decision_decomposition.py`
 
 ```python
-# fitz_graveyard/planning/pipeline/stages/decision_decomposition.py
+# fitz_forge/planning/pipeline/stages/decision_decomposition.py
 """
 Decision decomposition stage: one cheap LLM call to break the task into
 atomic decisions.
@@ -569,13 +569,13 @@ import logging
 import time
 from typing import Any
 
-from fitz_graveyard.planning.pipeline.stages.base import (
+from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
     StageResult,
     extract_json,
 )
-from fitz_graveyard.planning.prompts import load_prompt
-from fitz_graveyard.planning.schemas.decisions import (
+from fitz_forge.planning.prompts import load_prompt
+from fitz_forge.planning.schemas.decisions import (
     AtomicDecision,
     DecisionDecompositionOutput,
 )
@@ -686,10 +686,10 @@ class DecisionDecompositionStage(PipelineStage):
             )
 ```
 
-### 3.4 `fitz_graveyard/planning/pipeline/stages/decision_resolution.py`
+### 3.4 `fitz_forge/planning/pipeline/stages/decision_resolution.py`
 
 ```python
-# fitz_graveyard/planning/pipeline/stages/decision_resolution.py
+# fitz_forge/planning/pipeline/stages/decision_resolution.py
 """
 Per-decision resolution stage: one LLM call per atomic decision.
 
@@ -704,15 +704,15 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from fitz_graveyard.planning.pipeline.stages.base import (
+from fitz_forge.planning.pipeline.stages.base import (
     SYSTEM_PROMPT,
     PipelineStage,
     StageResult,
     extract_json,
 )
-from fitz_graveyard.planning.pipeline.call_graph import CallGraph
-from fitz_graveyard.planning.prompts import load_prompt
-from fitz_graveyard.planning.schemas.decisions import (
+from fitz_forge.planning.pipeline.call_graph import CallGraph
+from fitz_forge.planning.prompts import load_prompt
+from fitz_forge.planning.schemas.decisions import (
     AtomicDecision,
     DecisionResolution,
     DecisionResolutionOutput,
@@ -1002,10 +1002,10 @@ class DecisionResolutionStage(PipelineStage):
             )
 ```
 
-### 3.5 `fitz_graveyard/planning/pipeline/stages/synthesis.py`
+### 3.5 `fitz_forge/planning/pipeline/stages/synthesis.py`
 
 ```python
-# fitz_graveyard/planning/pipeline/stages/synthesis.py
+# fitz_forge/planning/pipeline/stages/synthesis.py
 """
 Synthesis stage: narrate pre-solved decisions into the final plan.
 
@@ -1022,13 +1022,13 @@ import logging
 import time
 from typing import Any
 
-from fitz_graveyard.planning.pipeline.stages.base import (
+from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
     StageResult,
     extract_json,
 )
-from fitz_graveyard.planning.prompts import load_prompt
-from fitz_graveyard.planning.schemas import (
+from fitz_forge.planning.prompts import load_prompt
+from fitz_forge.planning.schemas import (
     ArchitectureOutput,
     ContextOutput,
     DesignOutput,
@@ -1403,7 +1403,7 @@ class SynthesisStage(PipelineStage):
             design = DesignOutput(**design_merged).model_dump()
 
             # Fix roadmap
-            from fitz_graveyard.planning.pipeline.stages.roadmap_risk import (
+            from fitz_forge.planning.pipeline.stages.roadmap_risk import (
                 _remove_dependency_cycles,
             )
             if "phases" in roadmap_merged:
@@ -1456,7 +1456,7 @@ class SynthesisStage(PipelineStage):
 
 ## 4. Modified Files
 
-### 4.1 `fitz_graveyard/planning/pipeline/orchestrator.py`
+### 4.1 `fitz_forge/planning/pipeline/orchestrator.py`
 
 **What changes:** Add a new `DecomposedPipeline` class that replaces `PlanningPipeline`. The new class manages the decomposed flow: call graph extraction (deterministic), then three stages (decomposition, resolution, synthesis).
 
@@ -1484,13 +1484,13 @@ class DecomposedPipeline:
         self,
         checkpoint_manager: CheckpointManager,
     ) -> None:
-        from fitz_graveyard.planning.pipeline.stages.decision_decomposition import (
+        from fitz_forge.planning.pipeline.stages.decision_decomposition import (
             DecisionDecompositionStage,
         )
-        from fitz_graveyard.planning.pipeline.stages.decision_resolution import (
+        from fitz_forge.planning.pipeline.stages.decision_resolution import (
             DecisionResolutionStage,
         )
-        from fitz_graveyard.planning.pipeline.stages.synthesis import (
+        from fitz_forge.planning.pipeline.stages.synthesis import (
             SynthesisStage,
         )
 
@@ -1581,8 +1581,8 @@ class DecomposedPipeline:
                 if hasattr(result_or_coro, '__await__'):
                     await result_or_coro
 
-            from fitz_graveyard.planning.pipeline.call_graph import extract_call_graph
-            from fitz_graveyard.planning.agent.indexer import build_import_graph
+            from fitz_forge.planning.pipeline.call_graph import extract_call_graph
+            from fitz_forge.planning.agent.indexer import build_import_graph
 
             source_dir = prior_outputs.get("_source_dir", "")
             agent_ctx = prior_outputs.get("_agent_context", {})
@@ -1727,7 +1727,7 @@ class DecomposedPipeline:
         )
 ```
 
-### 4.2 `fitz_graveyard/planning/pipeline/stages/__init__.py`
+### 4.2 `fitz_forge/planning/pipeline/stages/__init__.py`
 
 Add the new factory function. The existing `create_stages()` and `DEFAULT_STAGES` remain for backward compatibility during migration but will be deleted in Step 8.
 
@@ -1740,13 +1740,13 @@ def create_decomposed_stages() -> list[PipelineStage]:
     Returns:
         List of [DecisionDecompositionStage, DecisionResolutionStage, SynthesisStage].
     """
-    from fitz_graveyard.planning.pipeline.stages.decision_decomposition import (
+    from fitz_forge.planning.pipeline.stages.decision_decomposition import (
         DecisionDecompositionStage,
     )
-    from fitz_graveyard.planning.pipeline.stages.decision_resolution import (
+    from fitz_forge.planning.pipeline.stages.decision_resolution import (
         DecisionResolutionStage,
     )
-    from fitz_graveyard.planning.pipeline.stages.synthesis import SynthesisStage
+    from fitz_forge.planning.pipeline.stages.synthesis import SynthesisStage
 
     return [
         DecisionDecompositionStage(),
@@ -1757,13 +1757,13 @@ def create_decomposed_stages() -> list[PipelineStage]:
 
 Also add to `__all__`: `"create_decomposed_stages"`.
 
-### 4.3 `fitz_graveyard/background/worker.py`
+### 4.3 `fitz_forge/background/worker.py`
 
 **What changes:** Replace `PlanningPipeline` with `DecomposedPipeline` in worker initialization.
 
 **Line ~29** (imports): Add:
 ```python
-from fitz_graveyard.planning.pipeline.orchestrator import DecomposedPipeline
+from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline
 ```
 
 **Line ~102** (in `__init__`, where pipeline is created): Change from:
@@ -1779,7 +1779,7 @@ self._pipeline = DecomposedPipeline(self._checkpoint_mgr)
 The `split_reasoning` flag is no longer needed because the decomposed pipeline
 inherently uses small calls.
 
-### 4.4 `fitz_graveyard/planning/agent/gatherer.py`
+### 4.4 `fitz_forge/planning/agent/gatherer.py`
 
 **What changes:** The `forward_map` field in the returned dict is currently always `{}` (line 373). This needs to be populated with the actual import graph data so the call graph extractor can use it.
 
@@ -1793,7 +1793,7 @@ However, since the `DecomposedPipeline` orchestrator calls `build_import_graph()
 
 ## 5. Prompt Templates
 
-### 5.1 `fitz_graveyard/planning/prompts/decision_decomposition.txt`
+### 5.1 `fitz_forge/planning/prompts/decision_decomposition.txt`
 
 ```
 You are decomposing a planning task into atomic decisions that can each be resolved independently with focused context.
@@ -1847,7 +1847,7 @@ Respond with ONLY valid JSON matching this schema:
 }}
 ```
 
-### 5.2 `fitz_graveyard/planning/prompts/decision_resolution.txt`
+### 5.2 `fitz_forge/planning/prompts/decision_resolution.txt`
 
 ```
 You are resolving a single architectural decision. You have the full source code of the relevant files. Make a concrete, committed decision based on what the code actually shows.
@@ -1889,7 +1889,7 @@ Respond with ONLY valid JSON:
 }}
 ```
 
-### 5.3 `fitz_graveyard/planning/prompts/synthesis.txt`
+### 5.3 `fitz_forge/planning/prompts/synthesis.txt`
 
 ```
 You are writing a comprehensive architectural plan. All the hard decisions have already been made and resolved below. Your job is to narrate these decisions into a coherent, complete plan.
@@ -2175,7 +2175,7 @@ File: `tests/unit/test_call_graph.py`
 ```python
 """Tests for call graph extraction."""
 import pytest
-from fitz_graveyard.planning.pipeline.call_graph import (
+from fitz_forge.planning.pipeline.call_graph import (
     extract_call_graph,
     _extract_task_keywords,
     _match_keywords_to_files,
@@ -2286,7 +2286,7 @@ class TestCallGraphExtraction:
         assert "b.py" in text
 
     def test_segment_for_files(self):
-        from fitz_graveyard.planning.pipeline.call_graph import CallGraphNode
+        from fitz_forge.planning.pipeline.call_graph import CallGraphNode
         graph = CallGraph(
             nodes=[
                 CallGraphNode("a.py", ["X"], "doc", 0),
@@ -2308,7 +2308,7 @@ File: `tests/unit/test_decision_schemas.py`
 
 ```python
 """Tests for decision schemas."""
-from fitz_graveyard.planning.schemas.decisions import (
+from fitz_forge.planning.schemas.decisions import (
     AtomicDecision,
     DecisionResolution,
     DecisionDecompositionOutput,
@@ -2354,7 +2354,7 @@ File: `tests/unit/test_decision_resolution.py`
 
 ```python
 """Tests for decision resolution topological sorting."""
-from fitz_graveyard.planning.pipeline.stages.decision_resolution import (
+from fitz_forge.planning.pipeline.stages.decision_resolution import (
     _topological_sort,
 )
 
@@ -2516,10 +2516,10 @@ async def _run_decomposed_once(
     out_dir: Path,
 ) -> dict:
     """Run the decomposed planning pipeline with fixed retrieval files."""
-    from fitz_graveyard.config import load_config
-    from fitz_graveyard.llm.factory import create_llm_client
-    from fitz_graveyard.planning.agent import AgentContextGatherer
-    from fitz_graveyard.planning.pipeline.orchestrator import DecomposedPipeline
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.planning.agent import AgentContextGatherer
+    from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline
 
     config = load_config()
     client = create_llm_client(config)
@@ -2713,19 +2713,19 @@ Compare to classic pipeline: ~30+ calls (reasoning + critique + 6 verifications 
 ## 12. Summary of All File Changes
 
 ### New files (8):
-1. `fitz_graveyard/planning/pipeline/call_graph.py` — Call graph extractor
-2. `fitz_graveyard/planning/schemas/decisions.py` — Decision schemas
-3. `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — Stage 1
-4. `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — Stage 2
-5. `fitz_graveyard/planning/pipeline/stages/synthesis.py` — Stage 3
-6. `fitz_graveyard/planning/prompts/decision_decomposition.txt` — Prompt
-7. `fitz_graveyard/planning/prompts/decision_resolution.txt` — Prompt
-8. `fitz_graveyard/planning/prompts/synthesis.txt` — Prompt
+1. `fitz_forge/planning/pipeline/call_graph.py` — Call graph extractor
+2. `fitz_forge/planning/schemas/decisions.py` — Decision schemas
+3. `fitz_forge/planning/pipeline/stages/decision_decomposition.py` — Stage 1
+4. `fitz_forge/planning/pipeline/stages/decision_resolution.py` — Stage 2
+5. `fitz_forge/planning/pipeline/stages/synthesis.py` — Stage 3
+6. `fitz_forge/planning/prompts/decision_decomposition.txt` — Prompt
+7. `fitz_forge/planning/prompts/decision_resolution.txt` — Prompt
+8. `fitz_forge/planning/prompts/synthesis.txt` — Prompt
 
 ### Modified files (4):
-1. `fitz_graveyard/planning/pipeline/orchestrator.py` — Add `DecomposedPipeline` class
-2. `fitz_graveyard/planning/pipeline/stages/__init__.py` — Add `create_decomposed_stages()`
-3. `fitz_graveyard/background/worker.py` — Use `DecomposedPipeline`
+1. `fitz_forge/planning/pipeline/orchestrator.py` — Add `DecomposedPipeline` class
+2. `fitz_forge/planning/pipeline/stages/__init__.py` — Add `create_decomposed_stages()`
+3. `fitz_forge/background/worker.py` — Use `DecomposedPipeline`
 4. `benchmarks/plan_factory.py` — Add `decomposed` command
 
 ### Test files (3):
@@ -2742,9 +2742,9 @@ Compare to classic pipeline: ~30+ calls (reasoning + critique + 6 verifications 
 - Config schema — unchanged (no new config needed)
 
 ### Deleted after benchmark validation (Step 8):
-- `fitz_graveyard/planning/pipeline/stages/context.py`
-- `fitz_graveyard/planning/pipeline/stages/architecture_design.py`
-- `fitz_graveyard/planning/pipeline/stages/roadmap_risk.py`
+- `fitz_forge/planning/pipeline/stages/context.py`
+- `fitz_forge/planning/pipeline/stages/architecture_design.py`
+- `fitz_forge/planning/pipeline/stages/roadmap_risk.py`
 - All `verify_*.txt` prompt files (6 files)
 - `architecture_design.txt`, `context.txt`, `roadmap_risk.txt` prompts
 - Classic `PlanningPipeline` class from `orchestrator.py`

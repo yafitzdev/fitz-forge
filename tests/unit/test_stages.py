@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fitz_graveyard.planning.pipeline.stages import (
+from fitz_forge.planning.pipeline.stages import (
     DEFAULT_STAGES,
     ArchitectureDesignStage,
     ContextStage,
     RoadmapRiskStage,
     extract_json,
 )
-from fitz_graveyard.planning.pipeline.stages.base import _count_unclosed_delimiters
-from fitz_graveyard.planning.pipeline.stages.roadmap_risk import _remove_dependency_cycles
+from fitz_forge.planning.pipeline.stages.base import _count_unclosed_delimiters
+from fitz_forge.planning.pipeline.stages.roadmap_risk import _remove_dependency_cycles
 
 
 class TestJsonExtraction:
@@ -1493,7 +1493,7 @@ class TestEnsureValidArtifacts:
     """Tests for ensure_valid_artifacts() deterministic validator."""
 
     def test_syntax_error_annotated(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         merged = {
             "artifacts": [
@@ -1505,7 +1505,7 @@ class TestEnsureValidArtifacts:
         assert "[SYNTAX ERROR" in content
 
     def test_valid_python_unchanged(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         code = "import json\ndata = json.dumps({'key': 'value'})\n"
         merged = {
@@ -1515,7 +1515,7 @@ class TestEnsureValidArtifacts:
         assert result["artifacts"][0]["content"] == code
 
     def test_unknown_method_annotated(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         code = "ctx = ContextVar('x')\nctx.update({'key': 1})\n"
         sigs = "## contextvars\nContextVar(name): get(default=...), set(value)"
@@ -1529,7 +1529,7 @@ class TestEnsureValidArtifacts:
         assert result["artifacts"][0]["content"]  # didn't crash
 
     def test_known_method_not_flagged(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         code = "provider.chat('hello')\n"
         sigs = "## provider.py\nclass ChatProvider:\n  chat(prompt: str) -> str"
@@ -1541,7 +1541,7 @@ class TestEnsureValidArtifacts:
         assert "[VERIFY]" not in result["artifacts"][0]["content"]
 
     def test_non_python_skipped(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         merged = {
             "artifacts": [{"filename": "config.yaml", "content": "key: value"}],
@@ -1550,13 +1550,13 @@ class TestEnsureValidArtifacts:
         assert result["artifacts"][0]["content"] == "key: value"
 
     def test_empty_artifacts(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         result = ensure_valid_artifacts({"artifacts": []}, {})
         assert result["artifacts"] == []
 
     def test_no_artifacts_key(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_valid_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_valid_artifacts
 
         result = ensure_valid_artifacts({}, {})
         assert "artifacts" not in result
@@ -1567,7 +1567,7 @@ class TestEnsureCorrectArtifacts:
 
     @pytest.mark.asyncio
     async def test_applies_corrections(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_correct_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
         mock_client.generate.return_value = json.dumps([
@@ -1583,7 +1583,7 @@ class TestEnsureCorrectArtifacts:
 
     @pytest.mark.asyncio
     async def test_no_corrections_needed(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_correct_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
         mock_client.generate.return_value = "[]"
@@ -1597,7 +1597,7 @@ class TestEnsureCorrectArtifacts:
 
     @pytest.mark.asyncio
     async def test_llm_failure_keeps_originals(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_correct_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
         mock_client.generate.side_effect = RuntimeError("LLM crashed")
@@ -1611,7 +1611,7 @@ class TestEnsureCorrectArtifacts:
 
     @pytest.mark.asyncio
     async def test_skips_non_python_artifacts(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_correct_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
 
@@ -1623,7 +1623,7 @@ class TestEnsureCorrectArtifacts:
 
     @pytest.mark.asyncio
     async def test_skips_without_reference(self):
-        from fitz_graveyard.planning.pipeline.validators import ensure_correct_artifacts
+        from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
 
@@ -1638,7 +1638,7 @@ class TestReasonWithTools:
     """Tests for _reason_with_tools — seed-and-fetch agentic exploration."""
 
     def _make_agent_message(self, content=None, tool_calls=None):
-        from fitz_graveyard.llm.types import AgentMessage
+        from fitz_forge.llm.types import AgentMessage
         return AgentMessage(
             content=content,
             tool_calls=tool_calls,
@@ -1647,7 +1647,7 @@ class TestReasonWithTools:
         )
 
     def _make_tool_call(self, name, arguments, call_id="call_1"):
-        from fitz_graveyard.llm.types import AgentToolCall
+        from fitz_forge.llm.types import AgentToolCall
         return AgentToolCall(id=call_id, name=name, arguments=arguments)
 
     @pytest.mark.asyncio

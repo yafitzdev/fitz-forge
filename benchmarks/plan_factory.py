@@ -64,9 +64,9 @@ async def _run_retrieval_once(
     run_id: int,
 ) -> dict:
     """Run a single retrieval and return metadata."""
-    from fitz_graveyard.config import load_config
-    from fitz_graveyard.llm.factory import create_llm_client
-    from fitz_graveyard.planning.agent.gatherer import (
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.planning.agent.gatherer import (
         AgentContextGatherer,
         _make_chat_factory,
     )
@@ -266,12 +266,12 @@ async def _run_reasoning_once(
     seed splitting, tool pool, provenance). The planning stages then
     execute exactly as they would in a normal run.
     """
-    from fitz_graveyard.config import load_config
-    from fitz_graveyard.llm.factory import create_llm_client
-    from fitz_graveyard.planning.agent import AgentContextGatherer
-    from fitz_graveyard.planning.pipeline.orchestrator import PlanningPipeline
-    from fitz_graveyard.planning.pipeline.stages import ContextStage, RoadmapRiskStage
-    from fitz_graveyard.planning.pipeline.stages.architecture_design import ArchitectureDesignStage
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.planning.agent import AgentContextGatherer
+    from fitz_forge.planning.pipeline.orchestrator import PlanningPipeline
+    from fitz_forge.planning.pipeline.stages import ContextStage, RoadmapRiskStage
+    from fitz_forge.planning.pipeline.stages.architecture_design import ArchitectureDesignStage
 
     config = load_config()
     client = create_llm_client(config)
@@ -469,10 +469,10 @@ async def _run_decomposed_once(
     out_dir: Path,
 ) -> dict:
     """Run the decomposed planning pipeline with fixed retrieval files."""
-    from fitz_graveyard.config import load_config
-    from fitz_graveyard.llm.factory import create_llm_client
-    from fitz_graveyard.planning.agent import AgentContextGatherer
-    from fitz_graveyard.planning.pipeline.orchestrator import DecomposedPipeline
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.planning.agent import AgentContextGatherer
+    from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline
 
     config = load_config()
     client = create_llm_client(config)

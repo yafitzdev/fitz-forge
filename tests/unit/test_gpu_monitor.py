@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from fitz_graveyard.llm.gpu_monitor import GPUTemperatureGuard
+from fitz_forge.llm.gpu_monitor import GPUTemperatureGuard
 
 
 class TestGetFreeVram:
@@ -111,7 +111,7 @@ class TestMaybeThrottle:
         guard._last_check = 0  # Force check
         with patch.object(guard, "get_gpu_temp", return_value=82):
             with patch(
-                "fitz_graveyard.llm.gpu_monitor.asyncio.sleep",
+                "fitz_forge.llm.gpu_monitor.asyncio.sleep",
                 new_callable=AsyncMock,
             ) as mock_sleep:
                 await guard.maybe_throttle()
@@ -125,7 +125,7 @@ class TestMaybeThrottle:
         guard._last_check = 0
         with patch.object(guard, "get_gpu_temp", return_value=110):
             with patch(
-                "fitz_graveyard.llm.gpu_monitor.asyncio.sleep",
+                "fitz_forge.llm.gpu_monitor.asyncio.sleep",
                 new_callable=AsyncMock,
             ) as mock_sleep:
                 await guard.maybe_throttle()
@@ -153,27 +153,27 @@ class TestConfig:
     """Tests for GPUConfig integration."""
 
     def test_gpu_config_defaults(self):
-        from fitz_graveyard.config.schema import GPUConfig
+        from fitz_forge.config.schema import GPUConfig
 
         gpu = GPUConfig()
         assert gpu.temp_threshold == 73
         assert gpu.cooldown_margin == 10
 
     def test_gpu_config_on_root(self):
-        from fitz_graveyard.config.schema import FitzPlannerConfig
+        from fitz_forge.config.schema import FitzPlannerConfig
 
         config = FitzPlannerConfig()
         assert config.gpu.temp_threshold == 73
 
     def test_gpu_config_extra_ignored(self):
-        from fitz_graveyard.config.schema import FitzPlannerConfig
+        from fitz_forge.config.schema import FitzPlannerConfig
 
         config = FitzPlannerConfig(gpu={"temp_threshold": 75, "unknown_field": 99})
         assert config.gpu.temp_threshold == 75
 
     def test_factory_creates_guard(self):
-        from fitz_graveyard.config.schema import FitzPlannerConfig
-        from fitz_graveyard.llm.factory import _create_gpu_guard
+        from fitz_forge.config.schema import FitzPlannerConfig
+        from fitz_forge.llm.factory import _create_gpu_guard
 
         config = FitzPlannerConfig(gpu={"temp_threshold": 75})
         guard = _create_gpu_guard(config)
@@ -182,8 +182,8 @@ class TestConfig:
         assert guard.cooldown_target == 65
 
     def test_factory_disabled_when_zero(self):
-        from fitz_graveyard.config.schema import FitzPlannerConfig
-        from fitz_graveyard.llm.factory import _create_gpu_guard
+        from fitz_forge.config.schema import FitzPlannerConfig
+        from fitz_forge.llm.factory import _create_gpu_guard
 
         config = FitzPlannerConfig(gpu={"temp_threshold": 0})
         assert _create_gpu_guard(config) is None

@@ -29,7 +29,7 @@ Replace the LLM call with pure Python generation:
 
 ### Files to Change
 
-- `fitz_graveyard/planning/pipeline/validators.py` — replace LLM call in
+- `fitz_forge/planning/pipeline/validators.py` — replace LLM call in
   `ensure_concrete_verification` with deterministic command builder
 - New helper: `_build_verification_command(path: str) -> str`
 - Tests in `tests/unit/test_validators.py`
@@ -60,7 +60,7 @@ Replace substring matching with entity-set validation:
 
 ### Files to Change
 
-- `fitz_graveyard/planning/pipeline/validators.py` — replace `ensure_grounded_risks`
+- `fitz_forge/planning/pipeline/validators.py` — replace `ensure_grounded_risks`
   with entity-set approach
 - New helper: `_build_known_entities(prior_outputs: dict) -> set[str]`
 - New helper: `_risk_references_entity(risk_text: str, entities: set[str]) -> bool`

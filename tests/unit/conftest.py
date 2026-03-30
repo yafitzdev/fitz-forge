@@ -13,13 +13,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
-from fitz_graveyard.models.jobs import (
+from fitz_forge.models.jobs import (
     InMemoryJobStore,
     JobRecord,
     JobState,
     generate_job_id,
 )
-from fitz_graveyard.models.sqlite_store import SQLiteJobStore
+from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 
 # ---------------------------------------------------------------------------

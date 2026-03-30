@@ -2,15 +2,15 @@
 
 <div align="center">
 
-# fitz-graveyard
+# fitz-forge
 
 ### Overnight AI architectural planning on local hardware. Queue a job. Go to sleep. Wake up to a plan.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://badge.fury.io/py/fitz-graveyard.svg)](https://pypi.org/project/fitz-graveyard/)
+[![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-graveyard?](#why-fitz-graveyard) • [How It Works](#how-it-works) • [GitHub](https://github.com/yafitzdev/fitz-graveyard)
+[The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-forge?](#why-fitz-forge) • [How It Works](#how-it-works) • [GitHub](https://github.com/yafitzdev/fitz-forge)
 
 </div>
 
@@ -19,7 +19,7 @@
 ---
 
 ```bash
-pip install fitz-graveyard
+pip install fitz-forge
 
 fitz plan "Add OAuth2 authentication with Google and GitHub providers"
 ```
@@ -63,7 +63,7 @@ And the best part: **as local models improve, your plans improve for free.**
 
 ---
 
-### Why fitz-graveyard?
+### Why fitz-forge?
 
 **Single model, zero swapping 🔀**
 > Qwen3-Coder-30B (MoE, 3B active) handles both retrieval and reasoning — benchmarked at 89% critical recall across 40 queries, faster than the 4B it replaced. No model switching, no VRAM churn. Split reasoning mode breaks large LLM calls into ~8K-token pieces, enabling dense 27B models at 32K context.
@@ -132,7 +132,7 @@ A retrieval agent pre-stage followed by 3 planning stages. Split reasoning mode 
 
 ```bash
 # Install
-pip install fitz-graveyard
+pip install fitz-forge
 
 # Queue a job
 fitz plan "Build a plugin system for data transformations"
@@ -149,9 +149,9 @@ fitz get 1
 
 **Optional extras:**
 ```bash
-pip install "fitz-graveyard[api-review]"    # Anthropic API review pass
-pip install "fitz-graveyard[lm-studio]"    # LM Studio provider (openai SDK)
-pip install "fitz-graveyard[dev]"          # pytest, build tools
+pip install "fitz-forge[api-review]"    # Anthropic API review pass
+pip install "fitz-forge[lm-studio]"    # LM Studio provider (openai SDK)
+pip install "fitz-forge[dev]"          # pytest, build tools
 ```
 
 **Prerequisites:**
@@ -203,7 +203,7 @@ Plug into Claude Code or Claude Desktop:
 ```json
 {
   "mcpServers": {
-    "fitz-graveyard": {
+    "fitz-forge": {
       "command": "fitz",
       "args": ["serve"]
     }
@@ -237,9 +237,9 @@ Auto-created on first run:
 
 | Platform | Path |
 |----------|------|
-| Windows | `%LOCALAPPDATA%\fitz-graveyard\fitz-graveyard\config.yaml` |
-| macOS | `~/Library/Application Support/fitz-graveyard/config.yaml` |
-| Linux | `~/.config/fitz-graveyard/config.yaml` |
+| Windows | `%LOCALAPPDATA%\fitz-forge\fitz-forge\config.yaml` |
+| macOS | `~/Library/Application Support/fitz-forge/config.yaml` |
+| Linux | `~/.config/fitz-forge/config.yaml` |
 
 Database (`jobs.db`) lives in the same directory.
 
@@ -289,7 +289,7 @@ anthropic:
   model: claude-sonnet-4-5-20250929
 
 output:
-  plans_dir: .fitz-graveyard/plans
+  plans_dir: .fitz-forge/plans
   verbosity: normal
 ```
 
@@ -309,10 +309,10 @@ MCP (fastmcp) --> tools/ --> SQLiteJobStore
 ```
 
 ```
-fitz_graveyard/
+fitz_forge/
 ├── cli.py                     # Typer CLI (9 commands)
 ├── server.py                  # FastMCP server + lifecycle
-├── __main__.py                # python -m fitz_graveyard (MCP stdio)
+├── __main__.py                # python -m fitz_forge (MCP stdio)
 ├── tools/                     # Service layer
 ├── models/                    # JobStore ABC, SQLiteJobStore, JobRecord
 ├── background/                # BackgroundWorker, signal handling
@@ -338,8 +338,8 @@ fitz_graveyard/
 <br>
 
 ```bash
-git clone https://github.com/yafitzdev/fitz-graveyard.git
-cd fitz-graveyard
+git clone https://github.com/yafitzdev/fitz-forge.git
+cd fitz-forge
 pip install -e ".[dev]"  # editable install for development
 pytest  # 550+ tests
 ```
@@ -366,6 +366,6 @@ MIT
 
 ### Links
 
-- [GitHub](https://github.com/yafitzdev/fitz-graveyard)
-- [PyPI](https://pypi.org/project/fitz-graveyard/)
+- [GitHub](https://github.com/yafitzdev/fitz-forge)
+- [PyPI](https://pypi.org/project/fitz-forge/)
 - [Changelog](CHANGELOG.md)

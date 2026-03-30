@@ -14,18 +14,18 @@ import pytest_asyncio
 
 from fastmcp.exceptions import ToolError
 
-from fitz_graveyard.config.schema import FitzPlannerConfig
-from fitz_graveyard.models.jobs import (
+from fitz_forge.config.schema import FitzPlannerConfig
+from fitz_forge.models.jobs import (
     InMemoryJobStore,
     JobRecord,
     JobState,
     generate_job_id,
 )
-from fitz_graveyard.tools.check_status import check_status
-from fitz_graveyard.tools.create_plan import create_plan
-from fitz_graveyard.tools.get_plan import get_plan
-from fitz_graveyard.tools.list_plans import list_plans
-from fitz_graveyard.tools.retry_job import retry_job
+from fitz_forge.tools.check_status import check_status
+from fitz_forge.tools.create_plan import create_plan
+from fitz_forge.tools.get_plan import get_plan
+from fitz_forge.tools.list_plans import list_plans
+from fitz_forge.tools.retry_job import retry_job
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +598,7 @@ class TestReplayPlan:
     async def sqlite_env(self, tmp_path):
         """Set up SQLite store and db_path for replay tests."""
         import aiosqlite
-        from fitz_graveyard.models.sqlite_store import SQLiteJobStore
+        from fitz_forge.models.sqlite_store import SQLiteJobStore
 
         db_path = str(tmp_path / "replay_test.db")
         store = SQLiteJobStore(db_path)
@@ -609,7 +609,7 @@ class TestReplayPlan:
     @pytest.mark.asyncio
     async def test_replay_happy_path(self, sqlite_env):
         """Replay copies agent context into a new job."""
-        from fitz_graveyard.tools.replay_plan import replay_plan
+        from fitz_forge.tools.replay_plan import replay_plan
 
         store, db_path = sqlite_env
         import aiosqlite
@@ -663,7 +663,7 @@ class TestReplayPlan:
     @pytest.mark.asyncio
     async def test_replay_not_found(self, sqlite_env):
         """Replaying nonexistent job raises ValueError."""
-        from fitz_graveyard.tools.replay_plan import replay_plan
+        from fitz_forge.tools.replay_plan import replay_plan
 
         store, db_path = sqlite_env
 
@@ -673,7 +673,7 @@ class TestReplayPlan:
     @pytest.mark.asyncio
     async def test_replay_no_checkpoint(self, sqlite_env):
         """Replaying job without checkpoint raises ValueError."""
-        from fitz_graveyard.tools.replay_plan import replay_plan
+        from fitz_forge.tools.replay_plan import replay_plan
 
         store, db_path = sqlite_env
 
@@ -698,7 +698,7 @@ class TestReplayPlan:
     @pytest.mark.asyncio
     async def test_replay_no_agent_context(self, sqlite_env):
         """Replaying job with checkpoint but no agent context raises ValueError."""
-        from fitz_graveyard.tools.replay_plan import replay_plan
+        from fitz_forge.tools.replay_plan import replay_plan
         import aiosqlite
 
         store, db_path = sqlite_env

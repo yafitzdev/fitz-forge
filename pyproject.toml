@@ -1,10 +1,10 @@
-# fitz-graveyard/pyproject.toml
+# fitz-forge/pyproject.toml
 [build-system]
 requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fitz-graveyard"
+name = "fitz-forge"
 version = "0.4.1"
 description = "MCP server for local-first AI architectural planning using local LLMs"
 readme = "README.md"
@@ -54,19 +54,19 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yafitzdev/fitz-graveyard"
-Repository = "https://github.com/yafitzdev/fitz-graveyard"
-Issues = "https://github.com/yafitzdev/fitz-graveyard/issues"
-Documentation = "https://github.com/yafitzdev/fitz-graveyard#readme"
+Homepage = "https://github.com/yafitzdev/fitz-forge"
+Repository = "https://github.com/yafitzdev/fitz-forge"
+Issues = "https://github.com/yafitzdev/fitz-forge/issues"
+Documentation = "https://github.com/yafitzdev/fitz-forge#readme"
 
 [project.scripts]
-fitz = "fitz_graveyard.cli:app"
+fitz = "fitz_forge.cli:app"
 
 [tool.pytest.ini_options]
-# -p fitz_graveyard: forces early import of fitz_graveyard/__init__.py which
+# -p fitz_forge: forces early import of fitz_forge/__init__.py which
 # patches platform._wmi_query before setuptools entry points (faker) load.
 # Without this, faker triggers a WMI deadlock on Windows (MS Store Python 3.12).
-addopts = "-p fitz_graveyard --cov=fitz_graveyard --cov-report=term-missing:skip-covered"
+addopts = "-p fitz_forge --cov=fitz_forge --cov-report=term-missing:skip-covered"
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may require LLM or database)",
@@ -74,4 +74,4 @@ markers = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["fitz_graveyard*"]
+include = ["fitz_forge*"]

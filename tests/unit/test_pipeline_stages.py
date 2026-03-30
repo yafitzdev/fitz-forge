@@ -11,28 +11,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_graveyard.planning.pipeline.stages.base import (
+from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
     StageResult,
     extract_json,
 )
-from fitz_graveyard.planning.pipeline.stages.context import ContextStage
-from fitz_graveyard.planning.pipeline.stages.architecture_design import (
+from fitz_forge.planning.pipeline.stages.context import ContextStage
+from fitz_forge.planning.pipeline.stages.architecture_design import (
     ArchitectureDesignStage,
 )
-from fitz_graveyard.planning.pipeline.stages.roadmap_risk import (
+from fitz_forge.planning.pipeline.stages.roadmap_risk import (
     RoadmapRiskStage,
     _remove_dependency_cycles,
 )
-from fitz_graveyard.planning.pipeline.stages.decision_decomposition import (
+from fitz_forge.planning.pipeline.stages.decision_decomposition import (
     DecisionDecompositionStage,
 )
-from fitz_graveyard.planning.pipeline.stages.decision_resolution import (
+from fitz_forge.planning.pipeline.stages.decision_resolution import (
     DecisionResolutionStage,
     _topological_sort,
 )
-from fitz_graveyard.planning.pipeline.stages.synthesis import SynthesisStage
-from fitz_graveyard.planning.pipeline.stages.artifact_resolution import (
+from fitz_forge.planning.pipeline.stages.synthesis import SynthesisStage
+from fitz_forge.planning.pipeline.stages.artifact_resolution import (
     resolve_artifacts,
     _find_relevant_resolutions,
     _format_decisions,

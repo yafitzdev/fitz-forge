@@ -1,0 +1,959 @@
+# fitz_forge/cli.py
+"""
+CLI interface for fitz-graveyard.
+
+Thin presentation layer over the tools/ service layer.
+All commands delegate to the same functions that MCP wraps.
+"""
+
+import asyncio
+import re
+import sys
+import time
+from collections import deque
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as human-readable duration (e.g. '5m17s', '42s')."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    return f"{m}m{s:02d}s"
+
+import typer
+
+app = typer.Typer(
+    name="fitz-graveyard",
+    help="Local-first AI architectural planning using local LLMs.",
+    no_args_is_help=True,
+)
+
+
+def _run(coro):
+    """Run async function from sync CLI context."""
+    return asyncio.run(coro)
+
+
+async def _get_store():
+    """Open SQLiteJobStore directly (no lifecycle needed for read-only ops)."""
+    from platformdirs import user_config_path
+
+    from fitz_forge.models.sqlite_store import SQLiteJobStore
+
+    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    store = SQLiteJobStore(str(config_dir / "jobs.db"))
+    await store.initialize()
+    return store
+
+
+async def _find_last_job(store) -> str | None:
+    """Find the most recently created job with agent context."""
+    import aiosqlite
+
+    async with aiosqlite.connect(store._db_path) as db:
+        cursor = await db.execute(
+            "SELECT id FROM jobs WHERE pipeline_state IS NOT NULL "
+            "AND pipeline_state LIKE '%_agent_context%' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+def _state_color(state: str) -> str:
+    """Return ANSI color for job state."""
+    colors = {
+        "complete": typer.colors.GREEN,
+        "running": typer.colors.YELLOW,
+        "queued": typer.colors.CYAN,
+        "awaiting_review": typer.colors.MAGENTA,
+        "failed": typer.colors.RED,
+        "interrupted": typer.colors.RED,
+    }
+    return colors.get(state, typer.colors.WHITE)
+
+
+# Stage list for live progress display: (display_name, progress_threshold_for_complete)
+_DISPLAY_STAGES = [
+    ("Health check",        0.05),
+    ("Codebase analysis",   0.09),
+    ("Requirements",        0.25),
+    ("Architecture+Design", 0.65),
+    ("Roadmap+Risk",        0.95),
+    ("Finalizing",          1.00),
+]
+
+
+# ASCII cooking animation frames — cycles during live progress
+_COOKING_FRAMES = [
+    # Frame 0: stir right, steam left
+    [
+        "      ┌──┐       ",
+        "     ╭┤  ├╮      ",
+        "    ( •  • )  ~  ",
+        "     ╰─┬┬─╯ ~   ",
+        "    ╭──┘└─╮      ",
+        "    │  ⟋  │      ",
+        "    │~≈~≈~│      ",
+        "    ╰─────╯      ",
+        "     ═════       ",
+    ],
+    # Frame 1: stir left, steam right
+    [
+        "      ┌──┐       ",
+        "     ╭┤  ├╮      ",
+        "   ~  ( •  • )   ",
+        "    ~  ╰─┬┬─╯    ",
+        "     ╭──┘└──╮    ",
+        "     │  ⟍   │    ",
+        "     │≈~≈~≈ │    ",
+        "     ╰──────╯    ",
+        "      ══════     ",
+    ],
+    # Frame 2: stir right, steam both
+    [
+        "      ┌──┐       ",
+        "     ╭┤  ├╮      ",
+        "    ( °  ° ) ~   ",
+        "   ~  ╰─┬┬─╯    ",
+        "    ╭──┘└─╮      ",
+        "    │  ⟋  │      ",
+        "    │≈~≈~≈│      ",
+        "    ╰─────╯      ",
+        "     ═════       ",
+    ],
+    # Frame 3: stir left, steam up
+    [
+        "      ┌──┐  ~    ",
+        "     ╭┤  ├╮      ",
+        "    ( °  ° )     ",
+        "     ╰─┬┬─╯ ~   ",
+        "     ╭─┘└──╮    ",
+        "     │  ⟍  │    ",
+        "     │~≈~≈~│    ",
+        "     ╰─────╯    ",
+        "      ═════     ",
+    ],
+]
+
+
+_PHASE_DESCRIPTIONS = {
+    "starting": "Starting up...",
+    "initializing": "Initializing...",
+    "health_check": "Checking LLM connectivity...",
+    "loading_model": "Loading LLM model...",
+    "agent:mapping": "Mapping codebase...",
+    "agent:expanding_query": "Expanding search query (LLM)...",
+    "agent:scanning_index": "Scanning structural index (LLM)...",
+    "agent:import_expand": "Expanding imports...",
+    "agent:neighbor_expand": "Expanding to neighboring files...",
+    "agent:reading": "Reading source files...",
+    "agent:screening": "BM25 screening...",
+    "agent:confirming": "Confirming files with LLM...",
+    "agent:selecting": "Selecting relevant files...",
+    "agent:selecting_dirs": "Selecting relevant directories...",
+    "agent:synthesizing": "Synthesizing context...",
+    "agent:checking_existing": "Checking for existing implementation...",
+    "agent_exploring_complete": "Codebase analysis complete",
+    "context:reasoning": "Analyzing requirements and constraints...",
+    "context_complete": "Requirements analysis complete",
+    "architecture_design:reasoning": "Exploring architecture and design...",
+    "architecture_design_complete": "Architecture+Design complete",
+    "roadmap_risk:reasoning": "Planning roadmap and assessing risks...",
+    "roadmap_risk_complete": "Roadmap+Risk complete",
+    "coherence_check": "Checking cross-stage coherence...",
+    "scoring": "Scoring plan quality...",
+    "rendering": "Rendering plan to markdown...",
+    "writing_file": "Saving plan to disk...",
+    "finalizing": "Finalizing...",
+}
+
+
+def _get_phase_description(phase: str | None) -> str:
+    """Map a current_phase string to a human-friendly description."""
+    if not phase:
+        return ""
+    # Direct lookup
+    if phase in _PHASE_DESCRIPTIONS:
+        return _PHASE_DESCRIPTIONS[phase]
+    # Agent confirming: "agent:confirming:3/50 file.py (42 tok/s)" → "Confirming 3/50 file.py (42 tok/s)"
+    if phase.startswith("agent:confirming:"):
+        detail = phase[len("agent:confirming:"):]
+        return f"Confirming {detail}"
+    # Agent summarizing: "agent:summarizing:path/to/file.py" → "Summarizing file.py..."
+    if phase.startswith("agent:summarizing:"):
+        filename = phase.split(":")[-1].rsplit("/", 1)[-1]
+        return f"Summarizing {filename}..."
+    # Self-critique: "architecture_design:critiquing" → "Reviewing analysis..."
+    if phase.endswith(":critiquing"):
+        return "Reviewing analysis for quality..."
+    # Field group extraction: "architecture_design:extracting:approaches" → "Extracting approaches..."
+    if ":extracting:" in phase:
+        group_label = phase.split(":")[-1]
+        return f"Extracting {group_label}..."
+    # Stage name without sub-step
+    if phase in ("context", "architecture_design", "roadmap_risk"):
+        return _PHASE_DESCRIPTIONS.get(f"{phase}:reasoning", f"Working on {phase}...")
+    return phase
+
+
+def _make_live_display(
+    description: str,
+    progress: float,
+    elapsed: float,
+    current_phase: str = "",
+    stage_durations: dict[int, float] | None = None,
+    stage_started: dict[int, float] | None = None,
+    log_lines: list[str] | None = None,
+    tick: int = 0,
+    model_name: str = "",
+):
+    """Build a rich renderable for the live progress display."""
+    from rich.table import Table
+    from rich.text import Text
+
+    stage_durations = stage_durations or {}
+    stage_started = stage_started or {}
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(width=3)
+    table.add_column()
+    table.add_column(justify="right", style="dim", width=7)
+
+    # Determine previous threshold to detect "active" stage
+    prev_threshold = 0.0
+    for i, (name, threshold) in enumerate(_DISPLAY_STAGES):
+        if progress >= threshold:
+            icon = Text("✓", style="green")
+            row_style = "dim"
+            if i in stage_durations:
+                duration = _fmt_duration(stage_durations[i])
+            else:
+                duration = ""
+        elif progress >= prev_threshold:
+            icon = Text("⟳", style="yellow")
+            row_style = "bold"
+            if i in stage_started:
+                duration = _fmt_duration(time.monotonic() - stage_started[i])
+            else:
+                duration = _fmt_duration(elapsed)
+        else:
+            icon = Text("○", style="dim")
+            row_style = "dim"
+            duration = ""
+
+        table.add_row(icon, Text(name, style=row_style), Text(duration, style="dim"))
+        prev_threshold = threshold
+
+    # Progress bar
+    bar_width = 36
+    filled = int(progress * bar_width)
+    bar = "█" * filled + "░" * (bar_width - filled)
+    pct = f"{progress * 100:.0f}%"
+
+    from rich.panel import Panel
+    from rich.console import Group
+    from rich.text import Text as RichText
+
+    title = RichText(f" {description[:60]}{'…' if len(description) > 60 else ''} ", style="bold")
+    bar_text = RichText(f"\n  {bar}  {pct}", style="cyan")
+
+    # Status line: current activity
+    status_desc = _get_phase_description(current_phase)
+    status_text = RichText(f"\n  {status_desc}", style="dim italic") if status_desc else RichText("")
+
+    # Left side: progress info
+    left_parts: list = [table, bar_text, status_text]
+    if log_lines:
+        left_parts.append(RichText(""))  # spacer
+        for line in log_lines:
+            left_parts.append(RichText(f"  {line}", style="dim"))
+    left_parts.append(RichText(""))  # bottom padding
+
+    # Right side: cooking animation
+    frame = _COOKING_FRAMES[tick % len(_COOKING_FRAMES)]
+    anim_text = RichText("\n".join(frame), style="bright_black")
+
+    # Combine left + right in a two-column layout
+    layout = Table.grid(padding=(0, 3))
+    layout.add_column()
+    layout.add_column()
+    layout.add_row(Group(*left_parts), anim_text)
+
+    subtitle = RichText(f" {model_name} ", style="dim italic") if model_name else None
+
+    return Panel(
+        layout,
+        title=title,
+        subtitle=subtitle,
+        border_style="bright_black",
+    )
+
+
+async def _gather_context_for_clarification(client, config, description: str, source_dir: str, console) -> str:
+    """Run agent context gathering standalone for use in clarification flow."""
+    from rich.status import Status
+    from fitz_forge.planning.agent import AgentContextGatherer
+    from pathlib import Path
+
+    if not Path(source_dir).is_dir():
+        return ""
+
+    agent = AgentContextGatherer(config=config.agent, source_dir=source_dir)
+    with Status("[dim]Reading project...[/dim]", console=console, spinner="dots"):
+        gathered = await agent.gather(client=client, job_description=description)
+    # gather() returns {"synthesized": str, "raw_summaries": str} — extract synthesized for clarification
+    if isinstance(gathered, dict):
+        return gathered.get("synthesized", "")
+    return gathered
+
+
+async def _run_inline(
+    job_id: str,
+    store,
+    config,
+    description: str,
+    pre_gathered_context: str | None = None,
+    resume: bool = False,
+    live=None,
+    console=None,
+) -> None:
+    """Run a job inline with live rich progress display, then print the plan.
+
+    If ``live`` is provided, uses the existing Live display instead of
+    creating a new one (allows the caller to show the GUI before setup).
+    """
+    from rich.live import Live
+    from rich.console import Console
+
+    from fitz_forge.background.worker import BackgroundWorker
+    from fitz_forge.llm.factory import create_llm_client
+
+    from fitz_forge.llm.llama_cpp import LlamaCppClient
+
+    client = create_llm_client(config)
+
+    # LlamaCppClient manages its own subprocess — start it before processing
+    if isinstance(client, LlamaCppClient):
+        await client.start()
+
+    worker = BackgroundWorker(
+        store,
+        config=config,
+        ollama_client=client,
+        memory_threshold=config.ollama.memory_threshold,
+    )
+
+    if console is None:
+        console = Console(stderr=True)
+    start = time.monotonic()
+
+    # Resolve display model name from active provider
+    if config.provider == "lm_studio":
+        model_name = config.lm_studio.model
+    elif config.provider == "llama_cpp":
+        model_name = config.llama_cpp.fast_model.path
+    else:
+        model_name = config.ollama.model
+
+    job_task = asyncio.create_task(
+        worker.process_job_direct(job_id, pre_gathered_context=pre_gathered_context, resume=resume)
+    )
+
+    # Per-stage timing tracking
+    stage_started: dict[int, float] = {}
+    stage_durations: dict[int, float] = {}
+    prev_thresholds = [0.0] + [t for _, t in _DISPLAY_STAGES[:-1]]
+
+    # Activity log
+    log_lines: deque[str] = deque(maxlen=5)
+    last_phase = ""
+    tick = 0
+
+    owns_live = live is None
+
+    try:
+        if owns_live:
+            live = Live(
+                _make_live_display(description, 0.0, 0.0, model_name=model_name),
+                console=console,
+                refresh_per_second=4,
+            )
+            live.start()
+
+        while not job_task.done():
+            job = await store.get(job_id)
+            if job:
+                elapsed = time.monotonic() - start
+                progress = job.progress or 0.0
+                phase = job.current_phase or ""
+
+                # Track stage transitions for timing
+                for i, (name, threshold) in enumerate(_DISPLAY_STAGES):
+                    if progress >= threshold and i not in stage_durations:
+                        if i in stage_started:
+                            stage_durations[i] = time.monotonic() - stage_started[i]
+                    elif progress >= prev_thresholds[i] and i not in stage_started and i not in stage_durations:
+                        stage_started[i] = time.monotonic()
+
+                # Track phase changes for activity log
+                if phase and phase != last_phase:
+                    desc = _get_phase_description(phase)
+                    if desc:
+                        log_lines.append(f"{time.strftime('%H:%M:%S')} {desc}")
+                    last_phase = phase
+
+                # Update model name dynamically for llama_cpp
+                if isinstance(client, LlamaCppClient):
+                    model_name = client.active_model
+
+                live.update(_make_live_display(
+                    description, progress, elapsed,
+                    current_phase=phase,
+                    stage_durations=stage_durations,
+                    stage_started=stage_started,
+                    log_lines=list(log_lines),
+                    tick=tick,
+                    model_name=model_name,
+                ))
+            tick += 1
+            await asyncio.sleep(0.3)
+
+        # Final update
+        job = await store.get(job_id)
+        if job:
+            elapsed = time.monotonic() - start
+            live.update(_make_live_display(
+                description, job.progress or 0.0, elapsed,
+                current_phase=job.current_phase or "",
+                stage_durations=stage_durations,
+                stage_started=stage_started,
+                log_lines=list(log_lines),
+                tick=tick,
+                model_name=model_name,
+            ))
+
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        job_task.cancel()
+        try:
+            await job_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        if isinstance(client, LlamaCppClient):
+            await client.stop()
+        if owns_live:
+            live.stop()
+        raise KeyboardInterrupt
+    finally:
+        if owns_live:
+            live.stop()
+        if isinstance(client, LlamaCppClient):
+            await client.stop()
+
+    # Check result
+    exc = job_task.exception()
+    if exc:
+        raise exc
+
+    # Print result
+    final_job = await store.get(job_id)
+    if not final_job:
+        return
+
+    state = final_job.state.value
+    quality = f"{final_job.quality_score:.2f}" if final_job.quality_score else "N/A"
+    elapsed = time.monotonic() - start
+
+    console.print()
+    if state == "complete":
+        console.print(f"[green]✓ Done[/green]  quality: {quality}  time: {_fmt_duration(elapsed)}")
+        if final_job.file_path:
+            console.print(f"[dim]Saved:[/dim] {final_job.file_path}")
+            console.print(f"[dim]View:[/dim]  fitz-graveyard get {job_id}")
+        console.print()
+    elif state == "awaiting_review":
+        console.print(f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-graveyard confirm {job_id}' to proceed.")
+    else:
+        error = final_job.error or "unknown error"
+        console.print(f"[red]✗ Failed[/red]: {error}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def plan(
+    description: str = typer.Argument(..., help="What you want to build or accomplish"),
+    timeline: str = typer.Option(None, "--timeline", "-t", help="Timeline constraints"),
+    context: str = typer.Option(None, "--context", "-c", help="Additional context"),
+    api_review: bool = typer.Option(False, "--api-review", help="Enable API review"),
+    source_dir: str = typer.Option(None, "--source-dir", help="Path to codebase for agent context"),
+    detach: bool = typer.Option(False, "--detach", "-d", help="Queue only, don't run inline"),
+    clarify: bool = typer.Option(False, "--clarify", help="Ask clarifying questions before planning"),
+):
+    """Queue and run a planning job with live progress. Use --detach to queue only."""
+    from fitz_forge.config.loader import load_config
+    from fitz_forge.tools.create_plan import create_plan
+
+    async def _plan():
+        import logging as _logging
+        from rich.console import Console as _Console
+        from rich.live import Live
+
+        config = load_config()
+        enriched_description = description
+        pre_gathered_context: str | None = None
+
+        # Clarification flow needs interactive terminal — runs before GUI
+        if clarify and not detach and sys.stdin.isatty():
+            try:
+                from fitz_forge.planning.clarification import get_clarifying_questions
+                from fitz_forge.llm.factory import create_llm_client
+
+                console = _Console(stderr=True)
+                client = create_llm_client(config)
+                if await client.health_check():
+                    effective_source_dir = source_dir or config.agent.source_dir or "."
+                    if config.agent.enabled:
+                        pre_gathered_context = await _gather_context_for_clarification(
+                            client, config, description, effective_source_dir, console
+                        )
+
+                    questions = await get_clarifying_questions(
+                        client, description, codebase_context=pre_gathered_context or ""
+                    )
+                    if questions:
+                        console.print("\n[bold]A few quick questions to sharpen the plan:[/bold]\n")
+                        answers = []
+                        for i, q in enumerate(questions, 1):
+                            answer = typer.prompt(f"  {i}. {q}", default="")
+                            if answer.strip():
+                                answers.append(f"Q: {q}\nA: {answer}")
+                        if answers:
+                            enriched_description = (
+                                description
+                                + "\n\n## Clarifications\n\n"
+                                + "\n\n".join(answers)
+                            )
+                        typer.echo()
+            except Exception as e:
+                _logging.getLogger(__name__).warning(f"Clarification skipped: {e}")
+
+        if detach:
+            store = await _get_store()
+            try:
+                result = await create_plan(
+                    description=enriched_description, timeline=timeline,
+                    context=context, integration_points=None,
+                    api_review=api_review, store=store, config=config,
+                    source_dir=source_dir,
+                )
+            finally:
+                await store.close()
+            typer.echo(f"Queued job {result['job_id']}. Run 'fitz-graveyard run' to start processing.")
+            return
+
+        # Resolve model name for display (sync, instant)
+        if config.provider == "lm_studio":
+            model_name = config.lm_studio.model
+        elif config.provider == "llama_cpp":
+            model_name = config.llama_cpp.fast_model.path
+        else:
+            model_name = config.ollama.model
+
+        # Show GUI immediately, do setup in background
+        console = _Console(stderr=True)
+        live = Live(
+            _make_live_display(enriched_description, 0.0, 0.0, model_name=model_name),
+            console=console,
+            refresh_per_second=4,
+        )
+        live.start()
+
+        try:
+            store = await _get_store()
+            result = await create_plan(
+                description=enriched_description, timeline=timeline,
+                context=context, integration_points=None,
+                api_review=api_review, store=store, config=config,
+                source_dir=source_dir,
+            )
+            job_id = result["job_id"]
+
+            await _run_inline(
+                job_id, store, config, enriched_description,
+                pre_gathered_context=pre_gathered_context,
+                live=live, console=console,
+            )
+        except Exception:
+            live.stop()
+            raise
+        finally:
+            await store.close()
+
+    try:
+        _run(_plan())
+    except KeyboardInterrupt:
+        typer.echo("\nCancelled.", err=True)
+        raise typer.Exit(130)
+    except RuntimeError as e:
+        msg = str(e)
+        if "Failed to load model" in msg:
+            model = msg.split('"')[1] if '"' in msg else "unknown"
+            typer.echo(
+                f"\nERROR: Could not load model '{model}'. "
+                f"Try restarting LM Studio and running again.",
+                err=True,
+            )
+        elif "Pipeline failed" in msg:
+            typer.echo(f"\nERROR: {msg}", err=True)
+        else:
+            typer.echo(f"\nERROR: {msg}", err=True)
+        raise typer.Exit(1)
+    except ConnectionError as e:
+        typer.echo(f"\nERROR: LLM server not reachable. Is LM Studio running?\n  {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"\nERROR: {type(e).__name__}: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("run")
+def run_worker():
+    """Start the worker to process queued jobs. Ctrl+C to stop."""
+    import logging
+    import sys
+
+    from fitz_forge.background.lifecycle import ServerLifecycle
+    from fitz_forge.config.loader import load_config
+    from platformdirs import user_config_path
+
+    # Simple human-readable logging to stderr for CLI mode
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S"))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+    config = load_config()
+    config_dir = user_config_path("fitz-graveyard", ensure_exists=True)
+    db_path = str(config_dir / "jobs.db")
+
+    async def _run_worker():
+        lifecycle = ServerLifecycle(db_path, config=config)
+        await lifecycle.startup()
+        typer.echo("Worker started. Processing queued jobs... (Ctrl+C to stop)\n")
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            typer.echo("\nShutting down...")
+            await lifecycle.shutdown()
+
+    try:
+        _run(_run_worker())
+    except KeyboardInterrupt:
+        pass
+
+
+@app.command("list")
+def list_jobs():
+    """List all planning jobs."""
+    from fitz_forge.tools.list_plans import list_plans
+
+    async def _list():
+        store = await _get_store()
+        try:
+            return await list_plans(store=store)
+        finally:
+            await store.close()
+
+    result = _run(_list())
+    plans = result["plans"]
+
+    if not plans:
+        typer.echo("No plans found.")
+        return
+
+    # Print table header
+    typer.echo(f"{'JOB ID':<14} {'STATE':<18} {'QUALITY':<9} DESCRIPTION")
+    typer.echo("-" * 80)
+
+    for p in plans:
+        state = p["state"]
+        quality = f"{p['quality_score']:.2f}" if p["quality_score"] is not None else "-"
+        desc = p["description"]
+
+        # Derive project name from plan file path (.../project/.fitz-graveyard/plans/plan_*.md)
+        project = ""
+        if p.get("file_path"):
+            from pathlib import Path as _Path
+            parts = _Path(p["file_path"]).parts
+            # Find the part before .fitz-graveyard
+            for i, part in enumerate(parts):
+                if part == ".fitz-graveyard" and i > 0:
+                    project = parts[i - 1]
+                    break
+
+        typer.echo(
+            typer.style(f"{p['job_id']:<14} ", fg=_state_color(state))
+            + typer.style(f"{state:<18} ", fg=_state_color(state))
+            + f"{quality:<9} {desc}"
+        )
+        if project:
+            typer.echo(f"{'':14} {'':18} {'':9} " + typer.style(f"↳ {project}", fg=typer.colors.BRIGHT_BLACK))
+
+
+@app.command()
+def status(job_id: str = typer.Argument(..., help="Job ID to check")):
+    """Check the status of a planning job."""
+    from fitz_forge.tools.check_status import check_status
+
+    async def _status():
+        store = await _get_store()
+        try:
+            return await check_status(job_id, store=store)
+        finally:
+            await store.close()
+
+    try:
+        result = _run(_status())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    state = result["state"]
+    typer.echo(f"Job:      {result['job_id']}")
+    typer.echo(typer.style(f"State:    {state}", fg=_state_color(state)))
+    typer.echo(f"Progress: {result['progress'] * 100:.0f}%")
+    if result.get("current_phase"):
+        typer.echo(f"Phase:    {result['current_phase']}")
+    if result.get("message"):
+        typer.echo(f"Message:  {result['message']}")
+    if result.get("error"):
+        typer.echo(typer.style(f"Error:    {result['error']}", fg=typer.colors.RED))
+
+
+@app.command()
+def get(
+    job_id: str = typer.Argument(..., help="Job ID to retrieve"),
+    format: str = typer.Option("full", "--format", "-f", help="Output format: full, summary, roadmap_only"),
+):
+    """Retrieve a completed plan."""
+    from fitz_forge.tools.get_plan import get_plan
+
+    async def _get():
+        store = await _get_store()
+        try:
+            return await get_plan(job_id, format, store=store)
+        finally:
+            await store.close()
+
+    try:
+        result = _run(_get())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    # Print raw markdown to stdout (pipeable)
+    typer.echo(result["content"])
+
+
+@app.command()
+def resume(job_id: str = typer.Argument(..., help="Job ID to resume")):
+    """Resume a failed or interrupted job with live progress display."""
+    from fitz_forge.config.loader import load_config
+    from fitz_forge.tools.retry_job import retry_job
+
+    async def _resume():
+        store = await _get_store()
+        config = load_config()
+
+        job = await store.get(job_id)
+        if not job:
+            await store.close()
+            typer.echo(f"Job '{job_id}' not found.", err=True)
+            raise typer.Exit(1)
+
+        # Re-queue if needed (failed/interrupted), skip if already queued
+        if job.state.value in ("failed", "interrupted"):
+            await retry_job(job_id, store=store)
+        elif job.state.value == "running":
+            # Stale running state from killed worker — reset to queued
+            from fitz_forge.models.jobs import JobState
+            await store.update(job_id, state=JobState.QUEUED, progress=0.0, error=None, current_phase=None)
+        elif job.state.value == "complete":
+            await store.close()
+            typer.echo(f"Job '{job_id}' is already complete. Use 'fitz-graveyard get {job_id}' to view.", err=True)
+            raise typer.Exit(1)
+        # queued / awaiting_review — just run it
+
+        description = job.description
+
+        try:
+            await _run_inline(job_id, store, config, description, resume=True)
+        finally:
+            await store.close()
+
+    try:
+        _run(_resume())
+    except KeyboardInterrupt:
+        typer.echo("\nCancelled.", err=True)
+        raise typer.Exit(130)
+
+
+@app.command()
+def retry(job_id: str = typer.Argument(..., help="Job ID to retry")):
+    """Retry a failed or interrupted job (queue only, use 'resume' for live UI)."""
+    from fitz_forge.tools.retry_job import retry_job
+
+    async def _retry():
+        store = await _get_store()
+        try:
+            return await retry_job(job_id, store=store)
+        finally:
+            await store.close()
+
+    try:
+        result = _run(_retry())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Job {result['job_id']} re-queued. Run 'fitz-graveyard resume {result['job_id']}' or 'fitz-graveyard run' to process.")
+
+
+@app.command()
+def confirm(job_id: str = typer.Argument(..., help="Job ID to approve API review")):
+    """Approve API review after seeing cost estimate."""
+    from fitz_forge.tools.confirm_review import confirm_review
+
+    async def _confirm():
+        store = await _get_store()
+        try:
+            return await confirm_review(job_id, store=store)
+        finally:
+            await store.close()
+
+    try:
+        result = _run(_confirm())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"API review approved for {result['job_id']}. Run 'fitz-graveyard run' to process.")
+
+
+@app.command()
+def cancel(job_id: str = typer.Argument(..., help="Job ID to skip API review")):
+    """Skip API review, finalize plan without it."""
+    from fitz_forge.tools.cancel_review import cancel_review
+
+    async def _cancel():
+        store = await _get_store()
+        try:
+            return await cancel_review(job_id, store=store)
+        finally:
+            await store.close()
+
+    try:
+        result = _run(_cancel())
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"API review skipped for {result['job_id']}. Plan finalized.")
+
+
+@app.command()
+def serve():
+    """Start the MCP server (for Claude Code integration)."""
+    from fitz_forge.__main__ import main
+
+    asyncio.run(main())
+
+
+@app.command()
+def replay(job_id: str = typer.Argument("last", help="Job ID to replay from, or 'last' for most recent")):
+    """Re-run planning stages using agent context from a completed job.
+
+    Skips the expensive codebase exploration (~15-20 min) and re-runs
+    only the planning stages (~10 min). Useful for testing pipeline
+    changes without re-gathering context.
+
+    Use 'fitz-graveyard replay last' (or just 'fitz-graveyard replay')
+    to replay the most recent completed job.
+    """
+    from fitz_forge.config.loader import load_config
+    from fitz_forge.tools.replay_plan import replay_plan
+
+    async def _replay():
+        store = await _get_store()
+        config = load_config()
+
+        resolved_id = job_id
+        if resolved_id == "last":
+            resolved_id = await _find_last_job(store)
+            if not resolved_id:
+                typer.echo("No completed jobs found.", err=True)
+                raise typer.Exit(1)
+
+        try:
+            result = await replay_plan(
+                source_job_id=resolved_id,
+                store=store,
+                db_path=store._db_path,
+            )
+            new_job_id = result["job_id"]
+            typer.echo(
+                f"Created replay job {new_job_id} from {resolved_id} "
+                f"(reusing agent context, re-running planning stages)",
+                err=True,
+            )
+
+            await _run_inline(new_job_id, store, config, result["description"], resume=True)
+        finally:
+            await store.close()
+
+    try:
+        _run(_replay())
+    except KeyboardInterrupt:
+        typer.echo("\nCancelled.", err=True)
+        raise typer.Exit(130)
+
+
+@app.command()
+def purge(
+    include_complete: bool = typer.Option(False, "--all", help="Also remove completed jobs"),
+):
+    """Kill all zombie jobs (interrupted, queued, running, failed)."""
+    async def _purge():
+        import aiosqlite
+        store = await _get_store()
+        try:
+            states = ["interrupted", "queued", "running", "failed"]
+            if include_complete:
+                states.append("complete")
+
+            placeholders = ",".join("?" for _ in states)
+            async with aiosqlite.connect(store._db_path) as db:
+                cursor = await db.execute(
+                    f"UPDATE jobs SET state='failed' WHERE state IN ({placeholders})",
+                    states,
+                )
+                await db.commit()
+                return cursor.rowcount
+        finally:
+            await store.close()
+
+    count = _run(_purge())
+    if count:
+        typer.echo(f"Purged {count} job(s).")
+    else:
+        typer.echo("No jobs to purge.")
+
+
+if __name__ == "__main__":
+    app()

@@ -4,7 +4,7 @@
 import pytest
 from datetime import datetime
 
-from fitz_graveyard.planning.schemas import (
+from fitz_forge.planning.schemas import (
     Assumption,
     ContextOutput,
     ArchitectureOutput,
@@ -19,7 +19,7 @@ from fitz_graveyard.planning.schemas import (
     Risk,
     PlanOutput,
 )
-from fitz_graveyard.planning.prompts import load_prompt
+from fitz_forge.planning.prompts import load_prompt
 
 
 class TestContextOutput:
@@ -404,8 +404,8 @@ class TestConfigValidation:
     def test_warn_unknown_top_level_key(self, caplog):
         """Unknown top-level key triggers warning."""
         import logging
-        from fitz_graveyard.config.loader import _warn_unknown_keys
-        from fitz_graveyard.config.schema import FitzPlannerConfig
+        from fitz_forge.config.loader import _warn_unknown_keys
+        from fitz_forge.config.schema import FitzPlannerConfig
 
         yaml_data = {"provider": "ollama", "tiemout": 600}
         with caplog.at_level(logging.WARNING):
@@ -415,8 +415,8 @@ class TestConfigValidation:
     def test_warn_unknown_nested_key(self, caplog):
         """Unknown nested key triggers warning with full path."""
         import logging
-        from fitz_graveyard.config.loader import _warn_unknown_keys
-        from fitz_graveyard.config.schema import FitzPlannerConfig
+        from fitz_forge.config.loader import _warn_unknown_keys
+        from fitz_forge.config.schema import FitzPlannerConfig
 
         yaml_data = {"ollama": {"base_url": "http://localhost:11434", "mdoel": "test"}}
         with caplog.at_level(logging.WARNING):
@@ -426,8 +426,8 @@ class TestConfigValidation:
     def test_no_warning_for_valid_keys(self, caplog):
         """Valid keys don't trigger warnings."""
         import logging
-        from fitz_graveyard.config.loader import _warn_unknown_keys
-        from fitz_graveyard.config.schema import FitzPlannerConfig
+        from fitz_forge.config.loader import _warn_unknown_keys
+        from fitz_forge.config.schema import FitzPlannerConfig
 
         yaml_data = {"provider": "ollama", "ollama": {"base_url": "http://localhost:11434"}}
         with caplog.at_level(logging.WARNING):

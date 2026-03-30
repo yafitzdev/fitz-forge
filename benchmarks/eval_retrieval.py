@@ -32,9 +32,9 @@ GROUND_TRUTH = Path(__file__).parent / "retrieval_ground_truth.json"
 
 async def _run_retrieval(source_dir: str, query: str) -> list[str]:
     """Run retrieval pipeline and return selected file paths."""
-    from fitz_graveyard.config import load_config
-    from fitz_graveyard.llm.factory import create_llm_client
-    from fitz_graveyard.planning.agent.gatherer import (
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.planning.agent.gatherer import (
         AgentContextGatherer,
         _make_chat_factory,
     )

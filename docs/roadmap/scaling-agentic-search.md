@@ -35,12 +35,12 @@ Infrastructure is half-built. `build_directory_clusters()` in `indexer.py` alrea
 Send directory-level summaries to the LLM:
 
 ```
-## fitz_graveyard/planning/agent/  (8 files)
+## fitz_forge/planning/agent/  (8 files)
 classes: AgentContextGatherer; EmbeddingModel; RerankerModel
 functions: build_structural_index, build_import_graph, compress_file
 imports: ast, json, pathlib, ollama, sentence_transformers
 
-## fitz_graveyard/llm/  (6 files)
+## fitz_forge/llm/  (6 files)
 classes: OllamaClient(LLMClient); LMStudioClient(LLMClient)
 functions: create_client, estimate_vram
 imports: ollama, openai, psutil

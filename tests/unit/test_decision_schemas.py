@@ -1,6 +1,6 @@
 # tests/unit/test_decision_schemas.py
 """Tests for decision schemas."""
-from fitz_graveyard.planning.schemas.decisions import (
+from fitz_forge.planning.schemas.decisions import (
     AtomicDecision,
     DecisionResolution,
     DecisionDecompositionOutput,

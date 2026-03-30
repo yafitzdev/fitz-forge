@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from fitz_graveyard.planning.agent.compressor import (
+from fitz_forge.planning.agent.compressor import (
     compress_file,
     compress_python,
     _strip_comments_and_blanks,

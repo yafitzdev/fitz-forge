@@ -10,7 +10,7 @@ import pytest
 
 from fastmcp.exceptions import ToolError
 
-from fitz_graveyard.validation.sanitize import (
+from fitz_forge.validation.sanitize import (
     sanitize_agent_path,
     sanitize_description,
     sanitize_job_id,
