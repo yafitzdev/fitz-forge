@@ -1,7 +1,7 @@
 # Benchmark Tracker: Query Result Streaming
 
 **Task:** Add query result streaming so answers are delivered token-by-token instead of waiting for the full response
-**Target codebase:** fitz-ai
+**Target codebase:** fitz-sage
 **Scoring:** Sonnet-as-Judge, 6 dimensions x 10 = 60 max
 
 ---
@@ -75,7 +75,7 @@
 | Quant | Quantization level |
 | Ctx | Context window size |
 | Pipeline SHA | fitz-graveyard commit hash (pipeline code) |
-| Codebase SHA | fitz-ai commit hash (target codebase being planned against) |
+| Codebase SHA | fitz-sage commit hash (target codebase being planned against) |
 | Pipeline | Pipeline variant (monolithic v1, decomposed v4, etc.) |
 | Decisions | Number of atomic decisions decomposed |
 | Time | Total wall clock time |
@@ -313,7 +313,7 @@ The model uses opaque special tokens for its cascade reasoning that are not mean
 
 Over runs 22-25, tool reliability went from 40% to 100%. Key changes:
 1. **Remove check_exists** (run 24) — eliminated the biggest degeneration source (15+ useless calls)
-2. **Module path stripping** (run 25) — `fitz_ai.sdk.fitz.Fitz` → `Fitz`, fixing wasted rounds on fully-qualified names
+2. **Module path stripping** (run 25) — `fitz_sage.sdk.fitz.Fitz` → `Fitz`, fixing wasted rounds on fully-qualified names
 3. **Pre-fill as tool history** (run 25) — inject key class lookups as fake tool-call messages, model starts in verification mode
 4. **Forced exit after N rounds** (runs 24-25) — prevents infinite research loop
 
@@ -323,7 +323,7 @@ But scores stayed at 37-38 avg despite 100% tool reliability. The bottleneck shi
 
 Tools give the model WHAT EXISTS (class structures, method signatures). But the model still fabricates IMPLEMENTATION DETAILS:
 - Wrong field names: `request.query` instead of `request.question`
-- Wrong imports: `from fitz_ai.api.models.query` instead of `schemas`
+- Wrong imports: `from fitz_sage.api.models.query` instead of `schemas`
 - Fabricated helpers: `self._build_messages()`, `self._retrieve()`
 - Wrong constructor params
 
@@ -374,7 +374,7 @@ Results across all runs with this config:
 The prompt fix addresses this partially ("trace the call chain"). The coverage retry catches missing artifacts. But when the decisions themselves are self-contradicting (e.g., d9 contradicts d2), no amount of artifact retry can fix the plan. This is a model capability limitation at 40B Q5_K_S.
 
 **Key engineering in production:**
-1. `_strip_module()` — handles fully-qualified names (fitz_ai.sdk.fitz.Fitz → Fitz)
+1. `_strip_module()` — handles fully-qualified names (fitz_sage.sdk.fitz.Fitz → Fitz)
 2. `_find_source` disk fallback with filename matching
 3. check_exists removed from tool list — eliminated degeneration
 4. Normalized dedup cache keys — module-path variants caught
@@ -391,10 +391,10 @@ The prompt fix addresses this partially ("trace the call chain"). The coverage r
 # Use --parallel 2 for concurrent benchmark runs (see below)
 lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536 --parallel 2
 
-# Run N plans, 2 at a time (streaming task against fitz-ai codebase)
+# Run N plans, 2 at a time (streaming task against fitz-sage codebase)
 .venv/Scripts/python -m benchmarks.plan_factory decomposed \
   --runs 5 -p 2 \
-  --source-dir ../fitz-ai \
+  --source-dir ../fitz-sage \
   --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
@@ -447,7 +447,7 @@ IMPORTANT: The `--query` MUST be the streaming task above. The default query is 
 
 1. **Grounding repair** (`repair_violations()` in `grounding.py`): one LLM call per affected artifact, fed exact AST violation messages ("Method '_prepare_query' not found"), asks for replacements. Wired in `orchestrator.py` after `validate_grounding()`. Updates `prior_outputs["design"]["artifacts"]` in-place.
 2. **False-positive fix**: HTTPException + FastAPI form/body classes added to `_SKIP_NAMES` in grounding.py.
-3. **fitz_ai → fitz_sage rename**: all imports and path references updated for the fitz-ai package rebrand.
+3. **fitz_sage → fitz_sage rename**: all imports and path references updated for the fitz-sage package rebrand.
 
 **What was tried and reverted:**
 

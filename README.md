@@ -33,7 +33,7 @@ Solo project by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/
 - ~8k lines of Python
 - 550+ tests
 - Zero LangChain/LlamaIndex dependencies — built from scratch
-- Code retrieval powered by [fitz-ai](https://github.com/yafitzdev/fitz-ai)
+- Code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage)
 
 ---
 
@@ -157,7 +157,7 @@ pip install "fitz-forge[dev]"          # pytest, build tools
 **Prerequisites:**
 - Python 3.10+
 - [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) with a loaded model
-- [fitz-ai](https://github.com/yafitzdev/fitz-ai) for code retrieval
+- [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval
 
 </details>
 
@@ -319,7 +319,7 @@ fitz_forge/
 ├── llm/                       # LLM clients (Ollama, LM Studio, llama.cpp), retry
 ├── planning/
 │   ├── pipeline/stages/       # 3 stages (split or combined) + orchestrator + checkpoints
-│   ├── agent/                 # Code retrieval bridge to fitz-ai
+│   ├── agent/                 # Code retrieval bridge to fitz-sage
 │   ├── prompts/               # Externalized .txt prompt templates
 │   └── confidence/            # Per-section confidence scoring
 ├── api_review/                # Anthropic review client + cost calculator

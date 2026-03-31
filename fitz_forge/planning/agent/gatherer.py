@@ -1,9 +1,9 @@
 # fitz_forge/planning/agent/gatherer.py
 """
-AgentContextGatherer — powered by fitz-ai[code] retrieval.
+AgentContextGatherer — powered by fitz-sage[code] retrieval.
 
 Core retrieval (file indexing, LLM selection, import expansion, neighbor
-expansion, compression) is delegated to fitz-ai's CodeRetriever.  This module
+expansion, compression) is delegated to fitz-sage's CodeRetriever.  This module
 adds planning-specific post-processing:
 
   - Interface / library signature extraction
@@ -12,7 +12,7 @@ adds planning-specific post-processing:
   - Provenance tracking
   - Planning-optimised compression (test file body collapse)
 
-One retrieval engine, centrally maintained in fitz-ai.
+One retrieval engine, centrally maintained in fitz-sage.
 """
 
 import asyncio
@@ -40,7 +40,7 @@ _DEFAULT_MAX_SEED_FILES = 50
 
 
 def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable:
-    """Bridge fitz-forge's async LLM client to fitz-ai's sync ChatFactory.
+    """Bridge fitz-forge's async LLM client to fitz-sage's sync ChatFactory.
 
     Returns a factory ``(tier: str) -> ChatProvider`` where ChatProvider.chat()
     schedules the async ``client.generate()`` on *loop* and blocks for the result.
@@ -74,9 +74,9 @@ def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable
 
 
 class AgentContextGatherer:
-    """Retrieval pipeline powered by fitz-ai's CodeRetriever.
+    """Retrieval pipeline powered by fitz-sage's CodeRetriever.
 
-    Bridges fitz-forge's async LLM client to fitz-ai's sync interface,
+    Bridges fitz-forge's async LLM client to fitz-sage's sync interface,
     runs retrieval, then adds planning-specific post-processing.
     """
 
@@ -91,7 +91,7 @@ class AgentContextGatherer:
         progress_callback: Callable[[float, str], None] | None = None,
         override_files: list[str] | None = None,
     ) -> dict[str, str]:
-        """Run fitz-ai retrieval and return context dict.
+        """Run fitz-sage retrieval and return context dict.
 
         Args:
             client: LLM client for retrieval calls.
@@ -156,7 +156,7 @@ class AgentContextGatherer:
                 loop = asyncio.get_running_loop()
                 chat_factory = _make_chat_factory(client, loop)
 
-                # Step 2: Run fitz-ai CodeRetriever (in thread — it's sync)
+                # Step 2: Run fitz-sage CodeRetriever (in thread — it's sync)
                 await self._report(progress_callback, 0.065, "agent:scanning_index")
                 retriever = CodeRetriever(
                     source_dir=self._source_dir,
@@ -173,7 +173,7 @@ class AgentContextGatherer:
                 return empty
 
             logger.info(
-                f"AgentContextGatherer: fitz-ai retrieved {len(results)} files "
+                f"AgentContextGatherer: fitz-sage retrieved {len(results)} files "
                 f"from {len(file_paths)} indexed"
             )
 

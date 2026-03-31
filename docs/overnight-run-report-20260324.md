@@ -4,7 +4,7 @@
 - **Task:** "Add query result streaming so answers are delivered token-by-token"
 - **Ideal plan:** Written by Claude Sonnet 4.5 (200K context) — Generator Wrapper pattern
 - **Model:** Qwen3-Coder-30B MoE (3B active) via LM Studio at 32K context
-- **Context:** 30 files from fitz-ai, pre-gathered ideal context (no retrieval variance)
+- **Context:** 30 files from fitz-sage, pre-gathered ideal context (no retrieval variance)
 - **Scoring:** 5 dimensions × 10 points each = 50 max, scored by Claude Opus against ideal plan
 - **Runs:** 10 plans per iteration, 4 iterations total (40 plans)
 

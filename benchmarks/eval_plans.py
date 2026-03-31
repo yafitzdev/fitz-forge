@@ -9,7 +9,7 @@ Usage:
     # Prepare scoring prompts
     python -m benchmarks.plan_factory prepare-scoring \
         --results-dir benchmarks/results/decomposed_20260324_180926 \
-        --source-dir ../fitz-ai \
+        --source-dir ../fitz-sage \
         --context-file benchmarks/ideal_context.json
 
     # Then score via Claude Code conversation or subagents

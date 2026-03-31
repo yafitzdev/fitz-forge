@@ -68,7 +68,7 @@ def sample_job() -> JobRecord:
         description="Test planning job",
         timeline="Q1 2024",
         context="Test context for planning",
-        integration_points=["fitz-ai", "local-llm"],
+        integration_points=["fitz-sage", "local-llm"],
         state=JobState.QUEUED,
         progress=0.0,
         current_phase=None,

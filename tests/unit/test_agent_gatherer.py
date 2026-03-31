@@ -1,5 +1,5 @@
 # tests/unit/test_agent_gatherer.py
-"""Unit tests for AgentContextGatherer (fitz-ai powered retrieval)."""
+"""Unit tests for AgentContextGatherer (fitz-sage powered retrieval)."""
 
 import json
 from pathlib import Path
@@ -33,7 +33,7 @@ def mock_client():
 
 
 def _make_read_result(file_path, content, origin="selected"):
-    """Build a mock ReadResult matching fitz-ai's ReadResult shape."""
+    """Build a mock ReadResult matching fitz-sage's ReadResult shape."""
     address = MagicMock()
     address.metadata = {"origin": origin}
     address.score = {"selected": 1.0, "import": 0.9, "neighbor": 0.8}.get(origin, 0.8)
@@ -73,14 +73,14 @@ class TestPrioritizeForSummary:
     def test_code_before_docs(self):
         paths = [
             "docs/ARCHITECTURE.md",
-            "fitz_ai/llm/providers/openai.py",
+            "fitz_sage/llm/providers/openai.py",
             "docs/CONFIG.md",
-            "fitz_ai/core/answer.py",
+            "fitz_sage/core/answer.py",
         ]
         result = AgentContextGatherer._prioritize_for_summary(paths)
         assert result[:2] == [
-            "fitz_ai/llm/providers/openai.py",
-            "fitz_ai/core/answer.py",
+            "fitz_sage/llm/providers/openai.py",
+            "fitz_sage/core/answer.py",
         ]
         assert set(result[2:]) == {"docs/ARCHITECTURE.md", "docs/CONFIG.md"}
 
@@ -88,39 +88,39 @@ class TestPrioritizeForSummary:
         paths = [
             "docs/README.md",
             "tests/unit/test_foo.py",
-            "fitz_ai/engine.py",
+            "fitz_sage/engine.py",
         ]
         result = AgentContextGatherer._prioritize_for_summary(paths)
-        assert result[0] == "fitz_ai/engine.py"
+        assert result[0] == "fitz_sage/engine.py"
         assert result[1] == "tests/unit/test_foo.py"
         assert result[2] == "docs/README.md"
 
     def test_preserves_order_within_tier(self):
         paths = [
-            "fitz_ai/b.py",
-            "fitz_ai/a.py",
-            "fitz_ai/c.py",
+            "fitz_sage/b.py",
+            "fitz_sage/a.py",
+            "fitz_sage/c.py",
         ]
         result = AgentContextGatherer._prioritize_for_summary(paths)
-        assert result == ["fitz_ai/b.py", "fitz_ai/a.py", "fitz_ai/c.py"]
+        assert result == ["fitz_sage/b.py", "fitz_sage/a.py", "fitz_sage/c.py"]
 
     def test_examples_and_github_are_low_priority(self):
         paths = [
             "examples/01_quickstart.py",
             ".github/workflows/ci.yml",
-            "fitz_ai/core.py",
+            "fitz_sage/core.py",
         ]
         result = AgentContextGatherer._prioritize_for_summary(paths)
-        assert result[0] == "fitz_ai/core.py"
+        assert result[0] == "fitz_sage/core.py"
 
     def test_config_files_between_code_and_tests(self):
         paths = [
             "tests/test_x.py",
             "pyproject.toml",
-            "fitz_ai/main.py",
+            "fitz_sage/main.py",
         ]
         result = AgentContextGatherer._prioritize_for_summary(paths)
-        assert result[0] == "fitz_ai/main.py"
+        assert result[0] == "fitz_sage/main.py"
         assert result[1] == "pyproject.toml"
         assert result[2] == "tests/test_x.py"
 

@@ -3,9 +3,9 @@
 Evaluate retrieval quality against ground truth.
 
 Usage:
-    python -m benchmarks.eval_retrieval --source-dir ../fitz-ai
-    python -m benchmarks.eval_retrieval --source-dir ../fitz-ai --category retrieval
-    python -m benchmarks.eval_retrieval --source-dir ../fitz-ai --ids 1,2,3
+    python -m benchmarks.eval_retrieval --source-dir ../fitz-sage
+    python -m benchmarks.eval_retrieval --source-dir ../fitz-sage --category retrieval
+    python -m benchmarks.eval_retrieval --source-dir ../fitz-sage --ids 1,2,3
 """
 
 import asyncio
@@ -38,7 +38,7 @@ async def _run_retrieval(source_dir: str, query: str) -> list[str]:
         AgentContextGatherer,
         _make_chat_factory,
     )
-    from fitz_ai.code import CodeRetriever
+    from fitz_sage.code import CodeRetriever
 
     config = load_config()
     client = create_llm_client(config)

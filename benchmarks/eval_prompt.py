@@ -124,7 +124,7 @@ def build_scoring_prompt(
     return "\n\n".join(parts)
 
 
-# Pattern to match file paths like fitz_ai/core/answer.py
+# Pattern to match file paths like fitz_sage/core/answer.py
 _FILE_PATH_RE = re.compile(r"[a-zA-Z_][\w/\\.-]*\.(?:py|yaml|yml|json|toml|txt|md)")
 
 

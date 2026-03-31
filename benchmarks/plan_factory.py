@@ -3,10 +3,10 @@
 Benchmark factory for rapid retrieval and reasoning evaluation.
 
 Retrieval benchmark:
-    python -m benchmarks.plan_factory retrieval --runs 10 --source-dir ../fitz-ai
+    python -m benchmarks.plan_factory retrieval --runs 10 --source-dir ../fitz-sage
 
 Reasoning benchmark (uses pre-gathered "perfect" context):
-    python -m benchmarks.plan_factory reasoning --runs 3 --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json
+    python -m benchmarks.plan_factory reasoning --runs 3 --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json
 
 Both write results to benchmarks/results/<timestamp>/.
 """

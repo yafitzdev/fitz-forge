@@ -50,7 +50,7 @@ Replace substring matching with entity-set validation:
 
 1. Build a known-entities set from `prior_outputs`:
    - Component names from architecture output (e.g., "GovernanceEngine", "WebhookDispatcher")
-   - File paths from deliverables (e.g., "fitz_ai/governance/engine.py")
+   - File paths from deliverables (e.g., "fitz_sage/governance/engine.py")
    - Module names from the structural index
    - API/class names from design output
 2. For each risk, check if it references at least one known entity (exact match or

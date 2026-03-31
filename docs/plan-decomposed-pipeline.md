@@ -2625,10 +2625,10 @@ Run both benchmarks with the same context file and query:
 
 ```bash
 # Baseline (classic pipeline)
-python -m benchmarks.plan_factory reasoning --runs 10 --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json
+python -m benchmarks.plan_factory reasoning --runs 10 --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json
 
 # Decomposed pipeline
-python -m benchmarks.plan_factory decomposed --runs 10 --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json
+python -m benchmarks.plan_factory decomposed --runs 10 --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json
 ```
 
 Score both sets of plans with the same rubric (architecture choice, key files,

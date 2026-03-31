@@ -11,7 +11,7 @@ lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536 --parallel 2
 # 2. Run 5 plans, 2 at a time
 .venv/Scripts/python -m benchmarks.plan_factory decomposed \
   --runs 5 -p 2 \
-  --source-dir ../fitz-ai \
+  --source-dir ../fitz-sage \
   --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
@@ -32,7 +32,7 @@ Runs the decomposed pipeline (decision decomposition + resolution + synthesis).
 ```
 Options:
   --runs N           Number of plans to generate (default: 3)
-  --source-dir PATH  Target codebase (e.g. ../fitz-ai)
+  --source-dir PATH  Target codebase (e.g. ../fitz-sage)
   --context-file F   JSON with pre-gathered retrieval context
   --query TEXT       Task description
   --score            Generate scoring prompts after runs
@@ -119,13 +119,13 @@ Commands:
 ```bash
 # Plans 1, 2, 3 (run one at a time, score and assess after each)
 .venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 1 \
-  --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json \
+  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
 
 # Plans 4-5 (run together)
 .venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 2 \
-  --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json \
+  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
 ```
@@ -149,7 +149,7 @@ After all 5 plans, synthesize: compare to baseline avg, note floor/ceiling shift
 
 ```bash
 .venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 5 -p 2 \
-  --source-dir ../fitz-ai --context-file benchmarks/ideal_context.json \
+  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
 ```

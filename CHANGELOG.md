@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-decision resolution with full-signature codebase evidence (`53c4fe46`)
 - Tool-assisted artifact building: lookup_method, lookup_class, read_method_source (`37e70d4f`)
 - Tool-enriched template: tool results → "VERIFIED CODEBASE INFO" context for template extraction (`4ed3b16d`)
-- `_strip_module()` in codebase tools — handles fully-qualified names like `fitz_ai.sdk.fitz.Fitz` → `Fitz` (`e17c64e9`)
+- `_strip_module()` in codebase tools — handles fully-qualified names like `fitz_sage.sdk.fitz.Fitz` → `Fitz` (`e17c64e9`)
 - Pydantic field extraction in lookup_class — returns annotated fields for BaseModel subclasses (`707b13e8`)
 - Normalized dedup cache keys — module-path variants caught as duplicates (`4ed3b16d`)
 - Early stale exit — 2 consecutive all-duplicate tool rounds → template fallback (`4ed3b16d`)
@@ -100,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Highlights
 
-**fitz-ai Powered Retrieval** — Code retrieval now delegates to fitz-ai's `CodeRetriever`, replacing the internal retrieval implementation. Single maintained retrieval mechanism across both projects.
+**fitz-sage Powered Retrieval** — Code retrieval now delegates to fitz-sage's `CodeRetriever`, replacing the internal retrieval implementation. Single maintained retrieval mechanism across both projects.
 
 **Hybrid Model Pipeline** — Qwen3.5-4B for code retrieval, Qwen3-Coder-30B for planning. The orchestrator auto-switches between models via LM Studio CLI (`lms load`/`lms unload`). Smart model switching checks what's already loaded to avoid CUDA context destruction on consumer GPUs.
 
@@ -118,8 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Artifact duplicate check: searches full structural index for existing files matching proposed deliverables (`f80a965a`)
 - Full structural index stored in agent output for downstream duplicate checking (`162dcd8b`)
-- Hub import expansion: hub files' imports are now followed to catch orchestrated subsystems (`fitz-ai 6085578`)
-- Post-limit facade swap: `__init__.py` files replaced with actual implementations in final selection (`fitz-ai 6085578`)
+- Hub import expansion: hub files' imports are now followed to catch orchestrated subsystems (`fitz-sage 6085578`)
+- Post-limit facade swap: `__init__.py` files replaced with actual implementations in final selection (`fitz-sage 6085578`)
 - Split reasoning mode for arch+design stage: `ArchitectureDesignStage(split_reasoning=True)` (`ae7ecaa7`)
 - Split reasoning mode for roadmap+risk stage: `RoadmapRiskStage(split_reasoning=True)` (`f50dfec3`)
 - `create_stages(split_reasoning=True)` factory function for both splits (`f50dfec3`)
@@ -147,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Investigations use `gathered_context` (32K cap) instead of `raw_summaries` (100K+) — 70% input reduction per call (`23ca676a`)
 - Health check loads `smart_model` first when configured, avoiding redundant model switches (`c7ba836e`)
 - Critique length threshold uses absolute floor (2000 chars) for focused critiques (`ba61ffe9`)
-- Replaced internal retrieval with fitz-ai `CodeRetriever` — single maintained retrieval mechanism (`a47f11b3`)
+- Replaced internal retrieval with fitz-sage `CodeRetriever` — single maintained retrieval mechanism (`a47f11b3`)
 
 ### 🗑️ Removed
 
@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Fixed
 
-- Relative imports (`from .X import Y`) now resolved in import graph — previously silently dropped (`fitz-ai 0e7ed8b`)
+- Relative imports (`from .X import Y`) now resolved in import graph — previously silently dropped (`fitz-sage 0e7ed8b`)
 - `switch_model` no longer unloads a model that's already the target (`b3b6a9c1`)
 - Health check no longer loads the wrong model first when hybrid setup is configured (`c7ba836e`)
 
