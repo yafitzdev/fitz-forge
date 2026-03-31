@@ -275,19 +275,109 @@ def _extract_class_fields(
     return []
 
 
+def _build_type_attr_map(
+    source: str,
+) -> dict[str, str]:
+    """Build reverse map: type_name -> attr_name from init assignments.
+
+    Parses __init__/_init_components to find self._xxx = ClassName(...)
+    and returns {ClassName: _xxx}. Used by type-aware repair to resolve
+    semantic renames like _governance_decider -> _governor (via GovernanceDecider).
+    """
+    import ast as _ast
+    import re as _re
+
+    if not source:
+        return {}
+
+    try:
+        tree = _ast.parse(source)
+    except SyntaxError:
+        return {}
+
+    result: dict[str, str] = {}  # type_name -> attr_name
+    for cls_node in _ast.iter_child_nodes(tree):
+        if not isinstance(cls_node, _ast.ClassDef):
+            continue
+        for method in _ast.iter_child_nodes(cls_node):
+            if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            if method.name not in ("__init__", "_init_components", "setup", "_setup"):
+                continue
+            for node in _ast.walk(method):
+                if not isinstance(node, _ast.Assign):
+                    continue
+                for target in node.targets:
+                    if (isinstance(target, _ast.Attribute)
+                            and isinstance(target.value, _ast.Name)
+                            and target.value.id == "self"
+                            and target.attr.startswith("_")
+                            and not target.attr.startswith("__")):
+                        rhs = ""
+                        if isinstance(node.value, _ast.Call):
+                            if isinstance(node.value.func, _ast.Name):
+                                rhs = node.value.func.id
+                            elif isinstance(node.value.func, _ast.Attribute):
+                                rhs = node.value.func.attr
+                        if rhs and rhs[0].isupper():  # Only CamelCase type names
+                            result[rhs] = target.attr
+
+    return result
+
+
+def _type_aware_resolve(
+    fabricated: str,
+    type_attr_map: dict[str, str],
+) -> str | None:
+    """Try to resolve a fabricated attr name via type name matching.
+
+    Splits the fabricated name into word parts and checks if any part
+    matches a CamelCase component of a known type name.
+
+    Example: _governance_decider -> [governance, decider]
+             GovernanceDecider -> [Governance, Decider]
+             'governance' matches -> real attr is _governor
+    """
+    import re as _re
+
+    fab_parts = set(fabricated.lstrip("_").lower().split("_"))
+    if not fab_parts:
+        return None
+
+    best_match: str | None = None
+    best_overlap = 0
+
+    for type_name, attr_name in type_attr_map.items():
+        # Split CamelCase into lowercase parts
+        type_parts = [p.lower() for p in _re.findall(r"[A-Z][a-z]+", type_name)]
+        if not type_parts:
+            continue
+        overlap = len(fab_parts & set(type_parts))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_match = attr_name
+
+    return best_match if best_overlap > 0 else None
+
+
 def _repair_fabricated_refs(
     content: str,
     prior_outputs: dict[str, Any],
+    type_attr_map: dict[str, str] | None = None,
+    filename: str = "",
 ) -> tuple[str, int]:
     """Deterministic post-generation repair of fabricated method references.
 
-    AST-parses the artifact content, checks every self.method() call against
-    the structural index, and auto-corrects fabricated names using fuzzy
-    matching. No LLM calls — pure string substitution.
+    Three repair strategies, applied in order:
+    1. Type-aware resolution: match fabricated name against known type names
+       (catches semantic renames like _governance_decider -> _governor)
+    2. Test method leak filter: remove self.test_*() calls in non-test files
+    3. Fuzzy string matching: difflib similarity >= 0.65
 
     Returns (repaired_content, number_of_fixes).
     """
     import ast as _ast
+    import re as _re
 
     agent_ctx = prior_outputs.get("_agent_context", {})
     full_index = agent_ctx.get("full_structural_index", "")
@@ -312,71 +402,92 @@ def _repair_fabricated_refs(
     if tree is None:
         return content, 0
 
-    # Collect self.method() calls that don't exist
+    # Pre-collect artifact-defined methods
+    artifact_methods = set()
+    for n in _ast.walk(tree):
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            artifact_methods.add(n.name)
+
+    is_test_file = "test" in filename.lower()
     fixes: dict[str, str] = {}  # fabricated_name -> corrected_name
+    removals: list[str] = []  # refs to strip entirely (test leaks)
+
     for node in _ast.walk(tree):
+        ref_name = None
+        is_call = False
+
         # self.method() calls
         if (isinstance(node, _ast.Call)
                 and isinstance(node.func, _ast.Attribute)
                 and isinstance(node.func.value, _ast.Name)
                 and node.func.value.id == "self"):
-            method_name = node.func.attr
-            if method_name.startswith("__"):
-                continue
-            if lookup.method_exists_anywhere(method_name):
-                continue
-            # Check if it's defined in this artifact itself
-            artifact_methods = set()
-            for n in _ast.walk(tree):
-                if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                    artifact_methods.add(n.name)
-            if method_name in artifact_methods:
-                continue
-            # Fabricated — try fuzzy match
-            suggestions = lookup.suggest_method(method_name)
-            if suggestions:
-                best = suggestions[0]
-                # Only auto-fix if similarity is high enough
-                ratio = difflib.SequenceMatcher(
-                    None, method_name, best,
-                ).ratio()
-                if ratio >= 0.65:
-                    fixes[method_name] = best
+            ref_name = node.func.attr
+            is_call = True
 
-        # self._attr references (not calls) — check private attrs
+        # self._attr references (not calls)
         elif (isinstance(node, _ast.Attribute)
               and isinstance(node.value, _ast.Name)
               and node.value.id == "self"
-              and node.attr.startswith("_")
-              and not node.attr.startswith("__")
               and not isinstance(node.ctx, _ast.Store)):
-            attr_name = node.attr
-            if lookup.method_exists_anywhere(attr_name):
+            ref_name = node.attr
+
+        if not ref_name or ref_name.startswith("__"):
+            continue
+        if ref_name in fixes or ref_name in removals:
+            continue  # Already handled
+
+        # Test method leak: self.test_xxx() in non-test file
+        if ref_name.startswith("test_") and is_call and not is_test_file:
+            removals.append(ref_name)
+            continue
+
+        # Skip if it actually exists
+        if lookup.method_exists_anywhere(ref_name):
+            continue
+        if ref_name in artifact_methods:
+            continue
+
+        # Strategy 1: Type-aware resolution
+        if type_attr_map and ref_name.startswith("_"):
+            resolved = _type_aware_resolve(ref_name, type_attr_map)
+            if resolved and resolved != ref_name:
+                fixes[ref_name] = resolved
                 continue
-            suggestions = lookup.suggest_method(attr_name)
-            if suggestions:
-                best = suggestions[0]
-                ratio = difflib.SequenceMatcher(
-                    None, attr_name, best,
-                ).ratio()
-                if ratio >= 0.65:
-                    fixes[attr_name] = best
 
-    if not fixes:
-        return content, 0
+        # Strategy 2: Fuzzy string matching
+        suggestions = lookup.suggest_method(ref_name)
+        if suggestions:
+            best = suggestions[0]
+            ratio = difflib.SequenceMatcher(
+                None, ref_name, best,
+            ).ratio()
+            if ratio >= 0.82:
+                fixes[ref_name] = best
 
-    # Apply fixes via string replacement (preserves formatting)
+    # Apply fixes via string replacement
     repaired = content
     for fabricated, corrected in fixes.items():
-        # Replace self.fabricated with self.corrected (word-boundary safe)
         repaired = repaired.replace(
             f"self.{fabricated}", f"self.{corrected}",
         )
         logger.info(
-            f"  repair: self.{fabricated} → self.{corrected}"
+            f"  repair: self.{fabricated} -> self.{corrected}"
         )
 
-    return repaired, len(fixes)
+    # Remove test method leak lines entirely
+    for test_ref in removals:
+        # Remove lines containing self.test_xxx(
+        lines = repaired.split("\n")
+        repaired = "\n".join(
+            line for line in lines
+            if f"self.{test_ref}" not in line
+        )
+        logger.info(
+            f"  repair: removed test leak self.{test_ref}()"
+        )
+
+    total_fixes = len(fixes) + len(removals)
+    return repaired, total_fixes
 
 
 def _build_attribute_template(
@@ -1229,10 +1340,12 @@ class SynthesisStage(PipelineStage):
         # Resolve class interfaces BEFORE compression — compressed source
         # may have indentation issues that break AST parsing.
         class_interfaces = ""
+        type_attr_map: dict[str, str] = {}
         if prior_outputs:
             class_interfaces = self._resolve_class_interfaces(
                 source, prior_outputs,
             )
+            type_attr_map = _build_type_attr_map(source)
 
         # Compress source if it's very large
         if len(source) > 8000:
@@ -1324,6 +1437,8 @@ class SynthesisStage(PipelineStage):
             if prior_outputs:
                 content, n_fixes = _repair_fabricated_refs(
                     content, prior_outputs,
+                    type_attr_map=type_attr_map,
+                    filename=filename,
                 )
                 if n_fixes:
                     logger.info(
