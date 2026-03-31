@@ -474,11 +474,53 @@ These errors enter at `decision_resolution`, not synthesis. No post-synthesis re
 3. **Full codebase index for grounding**: the structural index only covers 30 files. A full index would eliminate false positives in chain call checking. Requires changes to `build_structural_index` or a separate full-scan pass.
 4. **Decision-level architecture sanity check**: after decomposition, verify key claims ("does synthesizer.py exist?") against structural index before resolution proceeds. Could prevent the most common floor-plan failure.
 
+### Session 2026-03-31 — Per-Artifact Generation + Deterministic Scorer
+
+**What shipped:**
+
+1. **Per-artifact generation** (`synthesis.py:_build_artifacts_per_file`): each needed artifact gets its own `generate()` call with the target file's real source code. Replaces the monolithic tool-enriched template fallback path. Produces 2x more detailed artifacts (2.3K vs 1K chars) with higher coverage (98% vs 77%).
+
+2. **Init preservation** (`compressor.py:_keep_init_assignments`): `__init__`/`_init_components` bodies now keep `self._xxx = ClassName(...)` assignment lines instead of collapsing to `... # N lines`. Model sees real attribute names. Capped at 25 assignments.
+
+3. **Schema field injection** (`synthesis.py:_resolve_schema_fields`): before each per-artifact call, deterministically extract Pydantic model fields via AST and inject a compact cheat sheet (e.g., "QueryRequest fields: question, source, top_k"). Eliminated field errors (3.5 → 0.2 per plan).
+
+4. **Deterministic scorer** (`benchmarks/eval_deterministic.py`): zero-variance, reproducible plan scoring via AST. Checks `self.method()` calls, `self._attr` references, `request.field` names, syntax validity, coverage, and roadmap consistency. Essential because LLM scorer variance is ±5-12 points per plan.
+
+5. **Full fitz-sage pivot**: all fitz_ai/fitz-ai references → fitz_sage/fitz-sage across source, tests, benchmarks, docs.
+
+**Benchmark results (deterministic scorer, 10 plans each):**
+
+```
+┌───────────────────────────────────────────────┬────┬───────┬─────┬───────┬─────┬──────┬───────┐
+│ Config                                        │  N │ Score │ Fab │ Field │ Syn │ Cov  │ Chars │
+├───────────────────────────────────────────────┼────┼───────┼─────┼───────┼─────┼──────┼───────┤
+│ BASELINE (monolithic template)                │ 10 │  73.0 │ 1.7 │   0.3 │ 0.5 │  77% │  1069 │
+│ PER-ARTIFACT (no init, no schema)             │ 10 │  59.6 │ 2.0 │   3.5 │ 1.1 │  98% │  2323 │
+│ PER-ARTIFACT + INIT FIX (no schema)           │ 10 │  66.1 │ 2.6 │   1.2 │ 0.9 │  98% │  2339 │
+│ PER-ARTIFACT + INIT + SCHEMA                  │ 10 │  63.5 │ 3.5 │   0.2 │ 1.1 │  88% │  2640 │
+└───────────────────────────────────────────────┴────┴───────┴─────┴───────┴─────┴──────┴───────┘
+```
+
+Key: Score=deterministic composite (0-100), Fab=fabricated self.xxx refs, Field=wrong request.xxx fields, Syn=syntax errors, Cov=needed_artifacts coverage, Chars=avg artifact size.
+
+**Trade-off:** Baseline scores higher on det-score because it writes less code (fewer chances to fabricate). Per-artifact writes 2x more code with near-complete coverage — more useful plans but more fabrication surface.
+
+**What was tried and failed:**
+
+1. **write_artifact as creation tool** (model writes Python in tool call `content` param): REGRESSED. Model writes worse Python inside JSON tool args than in regular text generation.
+2. **Decomposed synthesis reasoning** (split by decision category or two-pass chain): CATASTROPHIC REGRESSION (15/60, 26/60). Model loses architectural coherence when reasoning is split. Needs all decisions in one call.
+3. **Post-hoc attribute rejection** (write_artifact validates then rejects): Too many rejections, model can't fix from feedback. Same failure as enriched repair (run 51).
+4. **Haiku x3 scoring**: avg spread 7.9 points across 3 runs on same plan (WORSE than Sonnet). Unreliable.
+
+**Remaining fabrication source:** Engine helper method fabrication — the model invents `self._retrieve_chunks()`, `self._run_constraints()` etc. from import paths and training priors. Structural index lists method names but model invents new ones. This is the model capability ceiling at 40B.
+
+**LLM scorer variance finding:** Same plan scored 36 vs 48 by different Sonnet calls. Root cause: one scorer evaluated planning text (generous), other evaluated code artifacts (harsh). Deterministic scorer is essential for reliable comparison.
+
 **Critical files to read first in new session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
-- `benchmarks/BENCHMARK.md` — how to run benchmarks, sequential 1-1-1-2 assessment protocol
-- `fitz_graveyard/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup` + `repair_violations()`. The `_SKIP_NAMES` set prevents false positives for framework classes.
-- `fitz_graveyard/planning/pipeline/orchestrator.py` — repair hook after `validate_grounding()` at ~line 917.
-- `fitz_graveyard/planning/pipeline/stages/synthesis.py` — synthesis stage. P4 was deleted from here. Key methods: `_build_artifacts_with_tools`, `execute`.
-- `fitz_graveyard/planning/pipeline/stages/decision_decomposition.py` — P1 coverage gate.
-- `fitz_graveyard/planning/pipeline/stages/decision_resolution.py` — P3 contradiction detection.
+- `docs/decomposition-analysis.md` — full experiment results and what worked/failed
+- `benchmarks/eval_deterministic.py` — zero-variance deterministic scorer
+- `benchmarks/BENCHMARK.md` — how to run benchmarks
+- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation (`_build_artifacts_per_file`, `_generate_single_artifact`, `_resolve_schema_fields`)
+- `fitz_forge/planning/agent/compressor.py` — init preservation (`_keep_init_assignments`)
+- `fitz_forge/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup`
