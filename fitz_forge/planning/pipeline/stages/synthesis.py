@@ -1337,15 +1337,37 @@ class SynthesisStage(PipelineStage):
         prior_outputs: dict[str, Any] | None = None,
     ) -> dict | None:
         """Generate a single artifact with the target file's real source."""
-        # Resolve class interfaces BEFORE compression — compressed source
-        # may have indentation issues that break AST parsing.
+        # Resolve class interfaces from DISK source (uncompressed).
+        # The `source` param may come from file_contents which is
+        # pre-compressed and strips init bodies — making init attr
+        # extraction fail. Read uncompressed from disk instead.
         class_interfaces = ""
         type_attr_map: dict[str, str] = {}
         if prior_outputs:
+            source_dir = prior_outputs.get("_source_dir", "")
+            disk_source = ""
+            if source_dir:
+                from pathlib import Path as _Path
+                disk_path = _Path(source_dir) / filename
+                if disk_path.is_file():
+                    try:
+                        disk_source = disk_path.read_text(
+                            encoding="utf-8", errors="replace",
+                        )
+                    except OSError:
+                        pass
+            # Use disk source for interface extraction, fall back to source param
+            interface_source = disk_source or source
             class_interfaces = self._resolve_class_interfaces(
-                source, prior_outputs,
+                interface_source, prior_outputs,
             )
-            type_attr_map = _build_type_attr_map(source)
+            type_attr_map = _build_type_attr_map(interface_source)
+            logger.info(
+                f"Stage 'synthesis': {filename} source={len(source)} chars, "
+                f"disk={len(disk_source)} chars, "
+                f"interfaces={len(class_interfaces)} chars, "
+                f"type_map={len(type_attr_map)} entries"
+            )
 
         # Compress source if it's very large
         if len(source) > 8000:
