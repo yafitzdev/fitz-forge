@@ -446,6 +446,9 @@ def _repair_fabricated_refs(
             continue
         if ref_name in artifact_methods:
             continue
+        # Skip if it's a known init attribute (not a method, but real)
+        if type_attr_map and ref_name in type_attr_map.values():
+            continue
 
         # Strategy 1: Type-aware resolution
         if type_attr_map and ref_name.startswith("_"):
