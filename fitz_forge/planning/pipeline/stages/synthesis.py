@@ -217,6 +217,64 @@ _RISK_FIELD_GROUPS = [
 ]
 
 
+def _extract_class_fields(
+    class_name: str,
+    file_contents: dict[str, str],
+    source_dir: str,
+) -> list[str]:
+    """Extract Pydantic/dataclass field names from a class definition.
+
+    Returns list of field names like ['question', 'source', 'top_k'].
+    Works by finding the class in source and extracting annotated assignments.
+    """
+    import ast as _ast
+    from pathlib import Path as _Path
+
+    # Find source containing this class
+    class_marker = f"class {class_name}"
+    src = None
+    for path, content in (file_contents or {}).items():
+        if class_marker in content:
+            src = content
+            break
+
+    if not src and source_dir:
+        cn_lower = class_name.lower()
+        for py in _Path(source_dir).rglob("*.py"):
+            if ".venv" in str(py) or "__pycache__" in str(py):
+                continue
+            stem = py.stem.lower()
+            if len(stem) >= 4 and (cn_lower in stem or stem in cn_lower
+                                    or "schema" in stem or "model" in stem):
+                try:
+                    content = py.read_text(encoding="utf-8", errors="replace")
+                    if class_marker in content:
+                        src = content
+                        break
+                except OSError:
+                    continue
+
+    if not src:
+        return []
+
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        return []
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef) and node.name == class_name:
+            fields = []
+            for child in _ast.iter_child_nodes(node):
+                if isinstance(child, _ast.AnnAssign) and isinstance(child.target, _ast.Name):
+                    name = child.target.id
+                    if not name.startswith("_"):
+                        fields.append(name)
+            return fields
+
+    return []
+
+
 def _build_attribute_template(
     referenced_files: set[str],
     prior_outputs: dict[str, Any],
@@ -691,6 +749,339 @@ class SynthesisStage(PipelineStage):
         )
         return messages, seen
 
+    async def _build_artifacts_per_file(
+        self,
+        client: Any,
+        reasoning: str,
+        prior_outputs: dict[str, Any],
+        context_merged: dict[str, Any],
+    ) -> list[dict]:
+        """Build artifacts one per file with focused generate() calls.
+
+        The main synthesis reasoning already decided WHAT artifacts are needed
+        and WHY. This method handles the HOW — for each needed artifact, it
+        makes a separate LLM call with the target file's real source code,
+        so the model sees actual self._xxx attributes, real method signatures,
+        and real field names.
+
+        Falls back to template extraction if no source is available.
+        """
+        needed = context_merged.get("needed_artifacts", [])
+        if not needed:
+            # No needed_artifacts extracted — fall back to template
+            logger.info(
+                "Stage 'synthesis': no needed_artifacts, "
+                "falling back to template extraction"
+            )
+            return await self._artifacts_template_fallback(
+                client, reasoning, prior_outputs,
+            )
+
+        # Parse needed_artifacts into (filename, purpose) pairs
+        artifact_specs: list[tuple[str, str]] = []
+        for entry in needed[:8]:  # cap at 8 artifacts
+            # Format: "path/to/file.py -- purpose description"
+            if " -- " in entry:
+                fname, purpose = entry.split(" -- ", 1)
+                artifact_specs.append((fname.strip(), purpose.strip()))
+            else:
+                artifact_specs.append((entry.strip(), ""))
+
+        if not artifact_specs:
+            return await self._artifacts_template_fallback(
+                client, reasoning, prior_outputs,
+            )
+
+        # Get source code pool and relevant decisions
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        file_contents = agent_ctx.get("file_contents", {})
+        source_dir = prior_outputs.get("_source_dir", "")
+        resolution_output = prior_outputs.get("decision_resolution", {})
+        resolutions = resolution_output.get("resolutions", [])
+
+        # Build compact decision summary for injection
+        decision_summary = self._format_resolutions(resolutions)
+
+        artifacts: list[dict] = []
+        t0 = time.monotonic()
+
+        for filename, purpose in artifact_specs:
+            # Find the real source code for this file
+            source = self._find_file_source(
+                filename, file_contents, source_dir,
+            )
+
+            # Filter decisions relevant to this file
+            relevant_decisions = self._filter_decisions_for_file(
+                filename, resolutions,
+            )
+
+            artifact = await self._generate_single_artifact(
+                client, filename, purpose, source,
+                relevant_decisions, reasoning, prior_outputs,
+            )
+            if artifact:
+                artifacts.append(artifact)
+
+        elapsed = time.monotonic() - t0
+        logger.info(
+            f"Stage 'synthesis': per-file artifacts complete — "
+            f"{len(artifacts)}/{len(artifact_specs)} artifacts "
+            f"in {elapsed:.1f}s"
+        )
+
+        if not artifacts:
+            logger.warning(
+                "Stage 'synthesis': per-file artifacts produced 0, "
+                "falling back to template"
+            )
+            return await self._artifacts_template_fallback(
+                client, reasoning, prior_outputs,
+            )
+
+        return artifacts
+
+    @staticmethod
+    def _find_file_source(
+        filename: str,
+        file_contents: dict[str, str],
+        source_dir: str,
+    ) -> str:
+        """Find source code for a file from the agent pool or disk."""
+        # Direct match in file_contents
+        for path, content in (file_contents or {}).items():
+            if path == filename or path.endswith(filename):
+                return content
+            # Try matching just the basename
+            if filename.split("/")[-1] == path.split("/")[-1]:
+                return content
+
+        # Disk fallback
+        if source_dir:
+            from pathlib import Path
+            candidates = [
+                Path(source_dir) / filename,
+            ]
+            # Also try with/without package prefix
+            basename = filename.split("/", 1)[-1] if "/" in filename else filename
+            for py in Path(source_dir).rglob(basename):
+                parts_str = str(py)
+                if ".venv" not in parts_str and "__pycache__" not in parts_str:
+                    candidates.append(py)
+
+            for candidate in candidates:
+                if candidate.exists():
+                    try:
+                        return candidate.read_text(
+                            encoding="utf-8", errors="replace",
+                        )
+                    except OSError:
+                        continue
+
+        return ""
+
+    @staticmethod
+    def _filter_decisions_for_file(
+        filename: str,
+        resolutions: list[dict],
+    ) -> str:
+        """Filter and format decisions relevant to a specific file."""
+        basename = filename.split("/")[-1].replace(".py", "")
+        relevant = []
+        for r in resolutions:
+            # Check if this file is mentioned in evidence or decision text
+            evidence_text = " ".join(r.get("evidence", []))
+            decision_text = r.get("decision", "")
+            reasoning_text = r.get("reasoning", "")
+            combined = f"{evidence_text} {decision_text} {reasoning_text}"
+            if filename in combined or basename in combined.lower():
+                relevant.append(r)
+
+        if not relevant:
+            # If no specific match, include all decisions (better than none)
+            relevant = resolutions
+
+        lines = []
+        for r in relevant[:6]:  # cap to keep context short
+            did = r.get("decision_id", "?")
+            decision = r.get("decision", "")
+            constraints = r.get("constraints_for_downstream", [])
+            lines.append(f"[{did}] {decision}")
+            for c in constraints[:2]:
+                lines.append(f"  constraint: {c}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _resolve_schema_fields(
+        relevant_decisions: str,
+        reasoning: str,
+        prior_outputs: dict[str, Any],
+    ) -> str:
+        """Extract Pydantic model fields referenced in decisions/reasoning.
+
+        Deterministically looks up class fields from the structural index
+        for any CamelCase class names found in the text. Returns a compact
+        cheat sheet like:
+            QueryRequest fields: question, source, top_k, conversation_context
+            ChatRequest fields: message, history, collection
+        """
+        import re as _re
+
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        full_index = agent_ctx.get("full_structural_index", "")
+        if not full_index:
+            full_index = prior_outputs.get("_gathered_context", "")
+        if not full_index:
+            return ""
+
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+        lookup = StructuralIndexLookup(full_index)
+
+        # Find CamelCase names that look like schemas/models
+        text = relevant_decisions + " " + reasoning[:3000]
+        candidates = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text))
+        # Also include common request/response patterns
+        candidates.update(
+            name for name in lookup.classes
+            if any(kw in name.lower() for kw in ("request", "response", "query", "chat", "answer"))
+        )
+
+        lines = []
+        for name in sorted(candidates):
+            cls = lookup.find_class(name)
+            if not cls:
+                continue
+            # Get fields from AST if source available
+            file_contents = agent_ctx.get("file_contents", {})
+            source_dir = prior_outputs.get("_source_dir", "")
+            fields = _extract_class_fields(name, file_contents, source_dir)
+            if fields:
+                lines.append(f"{name} fields: {', '.join(fields)}")
+
+        return "\n".join(lines)
+
+    async def _generate_single_artifact(
+        self,
+        client: Any,
+        filename: str,
+        purpose: str,
+        source: str,
+        relevant_decisions: str,
+        reasoning: str,
+        prior_outputs: dict[str, Any] | None = None,
+    ) -> dict | None:
+        """Generate a single artifact with the target file's real source."""
+        # Compress source if it's very large
+        if len(source) > 8000:
+            from fitz_forge.planning.agent.compressor import compress_file
+            source = compress_file(source, filename)
+
+        # Resolve schema fields deterministically
+        schema_fields = ""
+        if prior_outputs:
+            schema_fields = self._resolve_schema_fields(
+                relevant_decisions, reasoning, prior_outputs,
+            )
+
+        # Build a focused prompt
+        source_section = ""
+        if source:
+            source_section = (
+                f"\n\n## CURRENT SOURCE CODE of {filename}\n"
+                f"Use ONLY the attributes, methods, and field names you "
+                f"see below. Do NOT invent methods that aren't here.\n\n"
+                f"```python\n{source[:6000]}\n```"
+            )
+        else:
+            source_section = (
+                f"\n\n(Source code for {filename} not available. "
+                f"Use method names from the decisions above.)"
+            )
+
+        schema_section = ""
+        if schema_fields:
+            schema_section = (
+                f"\n\n## DATA MODEL FIELDS (use these exact field names)\n"
+                f"{schema_fields}"
+            )
+
+        schema = json.dumps({
+            "filename": filename,
+            "content": "ONLY the new methods/classes to add — not the entire file",
+            "purpose": "why this artifact exists",
+        }, indent=2)
+
+        prompt = (
+            f"Write a code artifact for: {filename}\n"
+            f"Purpose: {purpose}\n\n"
+            f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
+            f"## PLAN CONTEXT (what this artifact is part of)\n"
+            f"{reasoning[:3000]}"
+            f"{source_section}"
+            f"{schema_section}\n\n"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
+            f"Rules:\n"
+            f"- Write ONLY the new or modified code (not the entire file)\n"
+            f"- Use exact attribute names from the source code above\n"
+            f"- When adding a parallel method (e.g. generate_stream), "
+            f"match the original method's parameters\n"
+            f"- Do NOT fabricate method names — if unsure, omit the call\n"
+        )
+
+        messages = self._make_messages(prompt)
+
+        try:
+            t0 = time.monotonic()
+            raw = await client.generate(
+                messages=messages, max_tokens=4096,
+            )
+            elapsed = time.monotonic() - t0
+
+            data = extract_json(raw)
+            content = data.get("content", "")
+            if not content:
+                logger.warning(
+                    f"Stage 'synthesis': artifact for {filename} "
+                    f"had empty content ({elapsed:.1f}s)"
+                )
+                return None
+
+            logger.info(
+                f"Stage 'synthesis': artifact for {filename} "
+                f"({len(content)} chars, {elapsed:.1f}s)"
+            )
+            return {
+                "filename": data.get("filename", filename),
+                "content": content,
+                "purpose": data.get("purpose", purpose),
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"Stage 'synthesis': artifact for {filename} failed: {e}"
+            )
+            return None
+
+    async def _artifacts_template_fallback(
+        self,
+        client: Any,
+        reasoning: str,
+        prior_outputs: dict[str, Any],
+    ) -> list[dict]:
+        """Fallback: extract all artifacts from reasoning in one call."""
+        extract_context = self._get_gathered_context(prior_outputs)
+        artifact_source_context = self._build_artifact_source_context(
+            prior_outputs,
+        )
+        extra = artifact_source_context if artifact_source_context else extract_context
+        partial = await self._extract_field_group(
+            client, reasoning, ["artifacts"],
+            _DESIGN_FIELD_GROUPS[-1]["schema"],
+            "artifacts",
+            extra_context=extra,
+        )
+        return partial.get("artifacts", [])
+
     async def _build_artifacts_with_tools(
         self,
         client: Any,
@@ -998,111 +1389,13 @@ class SynthesisStage(PipelineStage):
                 )
                 design_merged.update(partial)
 
-            # Artifact building: tool loop gathers verified codebase info,
-            # then template extraction uses it for grounded artifacts.
-            tool_artifacts, tool_context = await self._build_artifacts_with_tools(
-                client, reasoning, prior_outputs, extract_context,
+            # Artifact building: per-artifact focused generation.
+            # Each artifact gets its own generate() call with the target
+            # file's real source code, so the model sees actual method
+            # names, attributes, and signatures — not just an index.
+            design_merged["artifacts"] = await self._build_artifacts_per_file(
+                client, reasoning, prior_outputs, context_merged,
             )
-            if tool_artifacts is not None:
-                design_merged["artifacts"] = tool_artifacts
-            else:
-                # Template extraction enriched with tool-verified info
-                artifact_source_context = self._build_artifact_source_context(
-                    prior_outputs,
-                )
-                # Combine: cheat sheet + tool-verified signatures
-                extra_parts = [
-                    p for p in [artifact_source_context, tool_context]
-                    if p
-                ]
-                extra = "\n\n".join(extra_parts) if extra_parts else extract_context
-                partial = await self._extract_field_group(
-                    client, reasoning, ["artifacts"],
-                    _DESIGN_FIELD_GROUPS[-1]["schema"],
-                    "artifacts",
-                    extra_context=extra,
-                )
-                design_merged.update(partial)
-
-                # Retry if artifact coverage is thin: compare extracted
-                # artifacts against needed_artifacts from context section.
-                # If the model produced far fewer artifacts than needed,
-                # the extraction missed files — retry with the gaps.
-                needed = context_merged.get("needed_artifacts", [])
-                extracted = design_merged.get("artifacts", [])
-                extracted_files = {
-                    a.get("filename", "") for a in extracted
-                }
-                if needed and len(extracted) < max(len(needed) // 2, 2):
-                    missing = [
-                        n for n in needed
-                        if not any(
-                            n.split(" -- ")[0].strip() in ef
-                            or ef in n
-                            for ef in extracted_files
-                        )
-                    ]
-                    if missing:
-                        missing_hint = "\n".join(
-                            f"- {m}" for m in missing[:5]
-                        )
-                        logger.info(
-                            f"Stage 'synthesis': artifact retry — "
-                            f"extracted {len(extracted)}/{len(needed)} "
-                            f"needed artifacts, retrying for "
-                            f"{len(missing)} missing"
-                        )
-                        # Include component interfaces from the design
-                        # section so the retry has concrete method
-                        # signatures to base artifacts on.
-                        comp_hint = ""
-                        components = design_merged.get("components", [])
-                        if components:
-                            comp_lines = []
-                            for c in components:
-                                name = c.get("name", "")
-                                ifaces = c.get("interfaces", [])
-                                if ifaces:
-                                    sigs = "; ".join(ifaces[:3])
-                                    comp_lines.append(
-                                        f"- {name}: {sigs}"
-                                    )
-                            if comp_lines:
-                                comp_hint = (
-                                    "\n\n## COMPONENT INTERFACES\n"
-                                    "Use these real method signatures:\n"
-                                    + "\n".join(comp_lines)
-                                )
-
-                        retry_extra = (
-                            f"{extra}\n\n"
-                            f"## MISSING ARTIFACTS\n"
-                            f"The following files were identified as "
-                            f"needed but no artifact was extracted for "
-                            f"them. Write artifacts for these files:\n"
-                            f"{missing_hint}"
-                            f"{comp_hint}"
-                        )
-                        retry_partial = await self._extract_field_group(
-                            client, reasoning, ["artifacts"],
-                            _DESIGN_FIELD_GROUPS[-1]["schema"],
-                            "artifacts",
-                            extra_context=retry_extra,
-                        )
-                        retry_arts = retry_partial.get("artifacts", [])
-                        if retry_arts:
-                            # Merge: keep originals + add new ones
-                            existing = design_merged.get("artifacts", [])
-                            seen = {a.get("filename") for a in existing}
-                            for a in retry_arts:
-                                if a.get("filename") not in seen:
-                                    existing.append(a)
-                            design_merged["artifacts"] = existing
-                            logger.info(
-                                f"Stage 'synthesis': artifact retry "
-                                f"added {len(retry_arts)} artifacts "
-                                f"(total now {len(existing)})"
-                            )
 
             # Roadmap fields
             roadmap_merged: dict[str, Any] = {}
