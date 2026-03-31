@@ -7,5 +7,5 @@ dist/
 build/
 .venv/
 docs/qwen3-coder-next-assessment/
-.fitz-graveyard
+.fitz-forge
 benchmarks
