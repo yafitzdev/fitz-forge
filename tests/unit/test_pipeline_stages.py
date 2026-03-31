@@ -678,12 +678,12 @@ class TestSynthesisExecute:
             json.dumps({
                 "integration_points": ["SQLite database"],
             }),
-            # Artifacts (tool-assisted fails, falls back to extraction)
+            # Design: artifacts are now generated per-file (one call per needed artifact)
+            # This replaces the old monolithic extraction
             json.dumps({
-                "artifacts": [
-                    {"filename": "routes.py", "content": "from fastapi import APIRouter",
-                     "purpose": "API routes"},
-                ],
+                "filename": "routes.py",
+                "content": "from fastapi import APIRouter",
+                "purpose": "API routes",
             }),
             # Roadmap groups
             json.dumps({

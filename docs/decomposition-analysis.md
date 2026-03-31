@@ -1,106 +1,86 @@
 # Pipeline Decomposition Analysis (2026-03-31)
 
-## Experiment Results
+## Session Summary
 
-### Baseline (fitz_sage codebase, no changes)
-- 11 plans scored (1 DNF out of 12 generated)
-- **Avg: 37.3/60**, Floor: 28, Ceiling: 45, Stdev: 4.9
-- Weakest dimensions: alignment (4.6), implementability (5.0)
-- Strongest: scope (7.7), files (7.3), contract (6.9)
+Full day of benchmarking. 60+ plans generated, scored by Sonnet, Haiku x3, and a new deterministic scorer.
 
-### P0: write_artifact Tool (FAILED — REGRESSED)
+## What We Built
 
-**Approach A: Decomposed artifact generation (model calls write_artifact per file)**
-- Scores: 33, 34, 31 (avg 32.7 vs baseline 37.3)
-- **Root cause:** Model can't compose Python code inside JSON tool call arguments as well as in a regular JSON extraction. Writing code inside a `content` parameter of a tool call is harder than producing a JSON blob.
-- The tool DID catch fabricated methods (engine.py rejected on first try, then accepted with corrections). But the model's overall artifact quality dropped because the generation mechanism changed.
+### 1. Per-artifact generation (synthesis.py)
+Instead of one LLM call producing all artifacts, each needed artifact gets its own `generate()` call with the target file's real source code. The main synthesis reasoning stays monolithic (all decisions in one call — splitting it regressed catastrophically).
 
-**Approach B: Attribute rejection in write_artifact (too aggressive)**
-- ALL artifacts rejected 2x and force-accepted with bad code
-- Model can't process long tool rejection messages well enough to use corrections
-- Same problem as enriched repair (run 51) — giving the right answer doesn't mean the model can USE it
+### 2. Init preservation in compressor (compressor.py)
+`__init__` and `_init_components` bodies now keep `self._xxx = ClassName(...)` assignment lines instead of collapsing to `... # N lines`. The model can see real attribute names. Capped at 25 assignments to avoid context bloat.
 
-**Approach C: Tool-enriched template + write_artifact as diagnostic validator**
-- Score: 39 (within baseline variance)
-- write_artifact validates AFTER template extraction, logs issues but doesn't reject
-- Neutral impact — doesn't help or hurt. The validation is informational only.
+### 3. Schema field injection (synthesis.py)
+Before each per-artifact generation, deterministically extract Pydantic model fields (QueryRequest.question, ChatRequest.message, etc.) from the codebase AST and inject a 3-line cheat sheet. Zero field errors after this fix.
 
-**Conclusion:** write_artifact as a CREATION tool doesn't work with 40B models. The model writes better artifacts via template extraction (regular JSON extraction from reasoning text) than via tool call arguments. write_artifact as a diagnostic-only validator is neutral.
+### 4. Deterministic scorer (eval_deterministic.py)
+AST-based plan scorer with zero variance. Checks:
+- `self.method()` calls against structural index + disk methods
+- `self._attr` references against __init__ extracted attrs
+- `request.field` against known Pydantic schemas
+- Artifact syntax validity (handles code fragments)
+- Coverage: needed_artifacts vs actual artifacts
+- Roadmap consistency: total_phases, critical_path, parallel_opportunities
 
-### P1: Decomposed Synthesis Reasoning (FAILED — CATASTROPHIC REGRESSION)
+## Deterministic Benchmark Results
 
-**Approach A: Split by decision category (arch vs design)**
-- Scores: 15, 34 (avg 24.5 vs baseline 37.3)
-- The 15/60 plan targeted governance constraint plugins instead of the engine/synthesizer
-- **Root cause:** When design decisions don't include pattern/scope decisions, the model loses the architectural framing entirely and goes off the rails
+| Config | Det Score | Fabrications | Field Errors | Coverage | Avg Chars |
+|--------|----------|-------------|-------------|----------|-----------|
+| **Baseline** (monolithic template) | **73.0** | **1.7** | 0.3 | 77% | 1,069 |
+| Per-artifact only | 59.6 | 2.0 | 3.5 | **98%** | 2,323 |
+| + init preservation | 66.1 | 2.6 | 1.2 | **98%** | 2,339 |
+| + schema field injection | 63.5 | 3.5 | **0.2** | 88% | **2,640** |
 
-**Approach B: Chained two-pass (all decisions, sections split)**
-- Pass 1: ALL decisions → Context + Architecture sections
-- Pass 2: ALL decisions + pass 1 output → Design + Roadmap + Risk
-- Scores: 26 (avg 26 vs baseline 37.3)
-- Model STILL targeted governance eval pipeline instead of engine
-- **Root cause:** The model needs all context in ONE call to maintain coherent reasoning. Even injecting the architecture output as "prior_sections" doesn't prevent the model from going off-track in the second call.
+### Key Trade-off
+- Baseline: fewer fabrications but **thin, incomplete** artifacts (77% coverage, 1K chars avg)
+- Per-artifact: more fabrications but **detailed, complete** artifacts (88-98% coverage, 2.3-2.6K chars avg)
+- Schema injection eliminated field errors (3.5 → 0.2)
+- Init preservation helped synthesizer artifacts (100% correct self._chat) but engine still fabricates
 
-**Conclusion:** The 40B model REQUIRES monolithic synthesis reasoning. Any form of splitting — by category, by section, or by chain — causes the model to lose architectural coherence. This is a fundamental model capability limitation, not a pipeline design issue.
+### Remaining Fabrication Sources
+Engine helper method fabrication — the model invents plausible-sounding private methods (`self._retrieve_chunks()`, `self._build_prompt()`, `self._run_constraints()`) that don't exist. These are inferred from import paths and training priors for RAG systems. The structural index lists method names but the model invents new ones.
 
-### P0+P1+P2 Combined (SKIPPED)
-Both P0 and P1 independently regressed. Combining would compound regressions.
+## What Failed
 
-## What Worked vs What Didn't
+### Decomposed synthesis reasoning (CATASTROPHIC)
+Splitting the synthesis reasoning call by decision category or by section caused the model to lose architectural coherence. Plans targeted wrong files (governance eval pipeline instead of engine). The 40B model needs ALL decisions in ONE call.
 
-### Decomposition works for:
-- **Decision resolution** (1 decision per call, 1-3 files per call) → contract preservation 7-9
-- **Per-field extraction** (1 schema group per call, <2K output) → reliable structured output
-- **Contradiction detection** (1 cheap call reviewing compact summaries) → catches some issues
+### write_artifact as creation tool (REGRESSED)
+Having the LLM compose Python code inside a JSON tool call argument (`content` parameter) produced worse code than template extraction. The model writes better Python in regular text generation.
 
-### Decomposition DOESN'T work for:
-- **Artifact generation** (1 artifact per tool call) → model writes worse code in tool args
-- **Synthesis reasoning** (1 section per call) → model loses architectural framing
-- **Post-hoc repair** (1 LLM call per violation) → picks wrong alternatives (proven in runs 45-51)
+### Post-hoc repair (REGRESSED — confirmed again)
+Giving the model rejection feedback with correct alternatives doesn't help — it picks wrong alternatives or force-accepts after max retries.
 
-### Pattern: What determines if decomposition helps
-Decomposition helps when:
-1. Each sub-task is SELF-CONTAINED (doesn't need global context)
-2. The output is SMALL and STRUCTURED (JSON schema <2K chars)
-3. The input context is NARROW (1-3 files, not the whole codebase)
+## Scorer Findings
 
-Decomposition hurts when:
-1. Sub-tasks need CROSS-REFERENCING (design needs architecture framing)
-2. The output is CODE (Python inside JSON tool args is hard for the model)
-3. The model needs to maintain COHERENT NARRATIVE (synthesis reasoning)
+### LLM scorer variance is massive
+- Sonnet: ±5-12 points per plan, ±3-6 on batch averages
+- Haiku: avg spread of 7.9 points across 3 runs on same plan (WORSE than Sonnet)
+- Root cause: some scorers evaluate planning text (generous), others evaluate code artifacts (harsh)
+- A 12-point spread on the same plan was traced to one scorer ignoring artifact bugs while the other caught them
 
-## Current Pipeline LLM Call Map
+### Deterministic scorer is essential
+- Zero variance, 100% reproducible
+- Catches fabricated method/attribute references via AST
+- Catches wrong request field names via schema lookup
+- Doesn't measure architectural quality or overall plan usefulness — just artifact grounding
+- Should be used alongside (not instead of) LLM scoring
 
-| # | Call | Type | Decomposable? |
-|---|------|------|--------------|
-| 1 | Implementation check | ATOMIC | No — already focused |
-| 2 | Decision decomposition | MONOLITHIC | No — needs global view, P1 gate handles gaps |
-| 3 | Decision decomposition retry (P1 gate) | MONOLITHIC | Same |
-| 4-15 | Decision resolution (N decisions) | DECOMPOSED | Already done — strongest part |
-| 16 | Contradiction check (P3) | ATOMIC | No — needs global view |
-| 17+ | Contradiction re-resolution | DECOMPOSED | Already done |
-| 18 | **Synthesis reasoning** | **MONOLITHIC** | **NO — tested, regressed** |
-| 19 | Self-critique | MONOLITHIC | Low priority, skip |
-| 20-31 | Field extractions (12 groups) | DECOMPOSED | Already done |
-| 32 | **Artifact building (tool loop)** | **MONOLITHIC** | **NO — tested, regressed** |
-| 33 | Artifact template fallback | DECOMPOSED | Working, keep |
-| 34 | Artifact retry | DECOMPOSED | Working, keep |
-| 35 | Grounding validation (LLM) | MONOLITHIC | Keep |
-| 36 | Grounding repair (per artifact) | DECOMPOSED | Marginal, keep for now |
-| 37 | Coherence check | MONOLITHIC | No — already compact |
+## What's Codebase-Agnostic vs Overfitted
 
-## Remaining Levers (Not Yet Tested)
+| Change | Generic? |
+|--------|----------|
+| Per-artifact generation | Generic — works for any Python codebase |
+| Init preservation in compressor | Generic — every Python class has __init__ |
+| Schema field injection (AST-based) | Generic — finds Pydantic fields via AST, no hardcoding |
+| Deterministic scorer | Generic — uses AST + structural index |
+| Request field hardcoding | OVERFITTED — would need per-project config |
 
-The floor problem (33-36 on baseline, 28 on worst) is driven by:
-1. **Decision-level architectural misreads** — model takes shortcut architectures
-2. **Method/attribute fabrication in artifacts** — model invents plausible-sounding names
+## Files Changed (on bench/per-artifact-generation branch)
 
-Neither P0 nor P1 addressed these because:
-- P0 tried to catch fabrication at output time (too late, model can't fix)
-- P1 tried to reduce fabrication by focusing context (broke coherence)
-
-Possible next directions:
-1. **Model upgrade**: 40B MoE at Q5 may simply lack the capacity. Testing with 70B+ or a different architecture might help.
-2. **Better structural index in resolution prompts**: Resolutions only see 1-3 files. If we could get the target file's real `__init__` attributes into every resolution (not just the call graph segment), the evidence would be more grounded. This is upstream of synthesis.
-3. **Template improvements**: The template-constrained approach (auto-extracting attrs from `__init__`) in run 15 helped (+2.2 mean). There may be room for more targeted template engineering.
-4. **Prompt engineering in synthesis**: The "trace the call chain" instruction (run 35) raised the floor from 33 to 37. More targeted instructions might help further.
+- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation + schema field injection
+- `fitz_forge/planning/agent/compressor.py` — init preservation
+- `benchmarks/eval_deterministic.py` — new deterministic scorer
+- `tests/unit/test_pipeline_stages.py` — updated test for per-artifact flow

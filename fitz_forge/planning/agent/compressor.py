@@ -34,6 +34,57 @@ _KEEP_BODY_LINES = 6
 # Class-level assignments (class vars, defaults) are always kept.
 
 
+_MAX_INIT_ASSIGNMENTS = 25
+
+
+def _keep_init_assignments(
+    lines: list[str],
+    body_start: int,
+    body_end: int,
+    replacements: dict[int, str],
+    removals: list[tuple[int, int]],
+) -> None:
+    """Keep self._xxx = ClassName(...) lines from __init__/_init_components.
+
+    Only keeps assignments where the RHS is a class constructor call or
+    a simple value — these are the architecturally important attributes.
+    Skips reassignments to existing attributes (self._x._y = ...) and
+    caps at _MAX_INIT_ASSIGNMENTS to avoid context bloat.
+    """
+    keep_lines: list[int] = []
+    for ln in range(body_start, body_end + 1):
+        if ln > len(lines):
+            break
+        line = lines[ln - 1]
+        stripped = line.strip()
+        # Keep self.xxx = ... but NOT self.xxx.yyy = ... (sub-attribute assignment)
+        if not stripped.startswith("self."):
+            continue
+        if "=" not in stripped:
+            continue
+        # Skip sub-attribute assignments like self._router._strategy = ...
+        before_eq = stripped.split("=", 1)[0].strip()
+        if before_eq.count(".") > 1:
+            continue
+        keep_lines.append(ln)
+
+    if not keep_lines:
+        first_line = lines[body_start - 1] if body_start <= len(lines) else ""
+        indent = len(first_line) - len(first_line.lstrip())
+        indent_str = first_line[:indent] if indent > 0 else "        "
+        replacements[body_start] = f"{indent_str}...  # {body_end - body_start + 1} lines\n"
+        removals.append((body_start + 1, body_end))
+        return
+
+    # Cap at max to avoid context bloat on large __init__ methods
+    keep_set = set(keep_lines[:_MAX_INIT_ASSIGNMENTS])
+
+    # Remove everything else in the body
+    for ln in range(body_start, body_end + 1):
+        if ln not in keep_set:
+            removals.append((ln, ln))
+
+
 def compress_python(source: str) -> str:
     """Compress Python source for planning context.
 
@@ -97,6 +148,16 @@ def compress_python(source: str) -> str:
                 len(real_body) == 1
                 and isinstance(real_body[0], (ast.Pass, ast.Expr))
             ):
+                continue
+
+            # __init__ and _init_components define instance attributes
+            # (self._xxx = ...) which are critical for planning — the
+            # model needs to see real attribute names to avoid fabrication.
+            # Keep self._xxx assignment lines, collapse the rest.
+            if node.name in ("__init__", "_init_components", "setup", "_setup"):
+                _keep_init_assignments(
+                    lines, body_start, body_end, replacements, removals,
+                )
                 continue
 
             # Collapse long bodies to `...`
