@@ -275,6 +275,110 @@ def _extract_class_fields(
     return []
 
 
+def _repair_fabricated_refs(
+    content: str,
+    prior_outputs: dict[str, Any],
+) -> tuple[str, int]:
+    """Deterministic post-generation repair of fabricated method references.
+
+    AST-parses the artifact content, checks every self.method() call against
+    the structural index, and auto-corrects fabricated names using fuzzy
+    matching. No LLM calls — pure string substitution.
+
+    Returns (repaired_content, number_of_fixes).
+    """
+    import ast as _ast
+
+    agent_ctx = prior_outputs.get("_agent_context", {})
+    full_index = agent_ctx.get("full_structural_index", "")
+    if not full_index:
+        full_index = prior_outputs.get("_gathered_context", "")
+    if not full_index:
+        return content, 0
+
+    from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+    lookup = StructuralIndexLookup(full_index)
+
+    # Try parsing — handle code fragments via dedent + class wrapper
+    import textwrap as _tw
+    tree = None
+    for attempt in [content, _tw.dedent(content), f"class _:\n    " + content.replace("\n", "\n    ")]:
+        try:
+            tree = _ast.parse(attempt)
+            break
+        except SyntaxError:
+            continue
+
+    if tree is None:
+        return content, 0
+
+    # Collect self.method() calls that don't exist
+    fixes: dict[str, str] = {}  # fabricated_name -> corrected_name
+    for node in _ast.walk(tree):
+        # self.method() calls
+        if (isinstance(node, _ast.Call)
+                and isinstance(node.func, _ast.Attribute)
+                and isinstance(node.func.value, _ast.Name)
+                and node.func.value.id == "self"):
+            method_name = node.func.attr
+            if method_name.startswith("__"):
+                continue
+            if lookup.method_exists_anywhere(method_name):
+                continue
+            # Check if it's defined in this artifact itself
+            artifact_methods = set()
+            for n in _ast.walk(tree):
+                if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    artifact_methods.add(n.name)
+            if method_name in artifact_methods:
+                continue
+            # Fabricated — try fuzzy match
+            suggestions = lookup.suggest_method(method_name)
+            if suggestions:
+                best = suggestions[0]
+                # Only auto-fix if similarity is high enough
+                ratio = difflib.SequenceMatcher(
+                    None, method_name, best,
+                ).ratio()
+                if ratio >= 0.65:
+                    fixes[method_name] = best
+
+        # self._attr references (not calls) — check private attrs
+        elif (isinstance(node, _ast.Attribute)
+              and isinstance(node.value, _ast.Name)
+              and node.value.id == "self"
+              and node.attr.startswith("_")
+              and not node.attr.startswith("__")
+              and not isinstance(node.ctx, _ast.Store)):
+            attr_name = node.attr
+            if lookup.method_exists_anywhere(attr_name):
+                continue
+            suggestions = lookup.suggest_method(attr_name)
+            if suggestions:
+                best = suggestions[0]
+                ratio = difflib.SequenceMatcher(
+                    None, attr_name, best,
+                ).ratio()
+                if ratio >= 0.65:
+                    fixes[attr_name] = best
+
+    if not fixes:
+        return content, 0
+
+    # Apply fixes via string replacement (preserves formatting)
+    repaired = content
+    for fabricated, corrected in fixes.items():
+        # Replace self.fabricated with self.corrected (word-boundary safe)
+        repaired = repaired.replace(
+            f"self.{fabricated}", f"self.{corrected}",
+        )
+        logger.info(
+            f"  repair: self.{fabricated} → self.{corrected}"
+        )
+
+    return repaired, len(fixes)
+
+
 def _build_attribute_template(
     referenced_files: set[str],
     prior_outputs: dict[str, Any],
@@ -960,6 +1064,157 @@ class SynthesisStage(PipelineStage):
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _resolve_class_interfaces(
+        source: str,
+        prior_outputs: dict[str, Any],
+    ) -> str:
+        """Extract available methods on instance attributes for a target file.
+
+        Parses __init__/_init_components to find self._xxx = ClassName(...)
+        assignments, then looks up each ClassName's public methods via the
+        structural index and source AST. Returns a compact cheat sheet like:
+
+            self._router → RetrievalRouter: route(query, top_k), get_strategy()
+            self._chat → ChatClient: generate(prompt, **kwargs)
+
+        This prevents the model from fabricating method names on referenced
+        objects (e.g. inventing self._router.retrieve_chunks() when the real
+        method is self._router.route()).
+        """
+        import ast as _ast
+
+        if not source:
+            return ""
+
+        try:
+            tree = _ast.parse(source)
+        except SyntaxError:
+            return ""
+
+        # Extract self._xxx = ClassName(...) from init methods
+        attrs: dict[str, str] = {}  # attr_name -> type_name
+        for cls_node in _ast.iter_child_nodes(tree):
+            if not isinstance(cls_node, _ast.ClassDef):
+                continue
+            for method in _ast.iter_child_nodes(cls_node):
+                if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    continue
+                if method.name not in ("__init__", "_init_components", "setup", "_setup"):
+                    continue
+                for node in _ast.walk(method):
+                    if not isinstance(node, _ast.Assign):
+                        continue
+                    for target in node.targets:
+                        if (isinstance(target, _ast.Attribute)
+                                and isinstance(target.value, _ast.Name)
+                                and target.value.id == "self"
+                                and target.attr.startswith("_")
+                                and not target.attr.startswith("__")):
+                            rhs = ""
+                            if isinstance(node.value, _ast.Call):
+                                if isinstance(node.value.func, _ast.Name):
+                                    rhs = node.value.func.id
+                                elif isinstance(node.value.func, _ast.Attribute):
+                                    rhs = node.value.func.attr
+                            if rhs:
+                                attrs[target.attr] = rhs
+
+        if not attrs:
+            return ""
+
+        # Look up public methods for each component type
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        full_index = agent_ctx.get("full_structural_index", "")
+        if not full_index:
+            full_index = prior_outputs.get("_gathered_context", "")
+
+        # Use StructuralIndexLookup if we have an index
+        component_methods: dict[str, list[str]] = {}  # type_name -> [method sigs]
+        if full_index:
+            from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+            lookup = StructuralIndexLookup(full_index)
+            for type_name in set(attrs.values()):
+                cls = lookup.find_class(type_name)
+                if cls and cls.methods:
+                    meths = []
+                    for mname, minfo in cls.methods.items():
+                        if mname.startswith("__"):
+                            continue
+                        sig = mname
+                        if minfo.return_type:
+                            sig += f" -> {minfo.return_type}"
+                        meths.append(sig)
+                    if meths:
+                        component_methods[type_name] = meths
+
+        # Fallback: parse source files for types not found in index
+        missing_types = set(attrs.values()) - set(component_methods.keys())
+        if missing_types:
+            file_contents = agent_ctx.get("file_contents", {})
+            source_dir = prior_outputs.get("_source_dir", "")
+            all_sources = list((file_contents or {}).values())
+
+            if source_dir:
+                from pathlib import Path as _Path
+                for _py in _Path(source_dir).rglob("*.py"):
+                    if not missing_types:
+                        break
+                    _stem = _py.stem.lower()
+                    if not any(t.lower() in _stem or _stem in t.lower()
+                               for t in missing_types):
+                        continue
+                    if ".venv" in str(_py) or "__pycache__" in str(_py):
+                        continue
+                    try:
+                        all_sources.append(
+                            _py.read_text(encoding="utf-8", errors="replace"),
+                        )
+                    except OSError:
+                        continue
+
+            for _src in all_sources:
+                if not missing_types:
+                    break
+                try:
+                    _tree = _ast.parse(_src)
+                except SyntaxError:
+                    continue
+                for _node in _ast.walk(_tree):
+                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
+                        meths = []
+                        for _child in _ast.iter_child_nodes(_node):
+                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                                if _child.name.startswith("__"):
+                                    continue
+                                params = [a.arg for a in _child.args.args
+                                          if a.arg != "self"]
+                                sig = f"{_child.name}({', '.join(params)})"
+                                if _child.returns:
+                                    try:
+                                        sig += f" -> {_ast.unparse(_child.returns)}"
+                                    except Exception:
+                                        pass
+                                meths.append(sig)
+                        if meths:
+                            component_methods[_node.name] = meths
+                            missing_types.discard(_node.name)
+
+        # Build compact cheat sheet
+        lines = []
+        for attr_name, type_name in sorted(attrs.items()):
+            meths = component_methods.get(type_name, [])
+            if meths:
+                sig_str = ", ".join(meths[:8])
+                lines.append(f"self.{attr_name} → {type_name}: {sig_str}")
+            else:
+                lines.append(f"self.{attr_name} → {type_name}")
+
+        if not lines:
+            return ""
+
+        return "\n".join(lines)
+
     async def _generate_single_artifact(
         self,
         client: Any,
@@ -971,6 +1226,14 @@ class SynthesisStage(PipelineStage):
         prior_outputs: dict[str, Any] | None = None,
     ) -> dict | None:
         """Generate a single artifact with the target file's real source."""
+        # Resolve class interfaces BEFORE compression — compressed source
+        # may have indentation issues that break AST parsing.
+        class_interfaces = ""
+        if prior_outputs:
+            class_interfaces = self._resolve_class_interfaces(
+                source, prior_outputs,
+            )
+
         # Compress source if it's very large
         if len(source) > 8000:
             from fitz_forge.planning.agent.compressor import compress_file
@@ -1005,6 +1268,14 @@ class SynthesisStage(PipelineStage):
                 f"{schema_fields}"
             )
 
+        interface_section = ""
+        if class_interfaces:
+            interface_section = (
+                f"\n\n## AVAILABLE METHODS ON INSTANCE ATTRIBUTES\n"
+                f"When calling methods on self._xxx, use ONLY these:\n"
+                f"{class_interfaces}"
+            )
+
         schema = json.dumps({
             "filename": filename,
             "content": "ONLY the new methods/classes to add — not the entire file",
@@ -1018,11 +1289,14 @@ class SynthesisStage(PipelineStage):
             f"## PLAN CONTEXT (what this artifact is part of)\n"
             f"{reasoning[:3000]}"
             f"{source_section}"
-            f"{schema_section}\n\n"
+            f"{schema_section}"
+            f"{interface_section}\n\n"
             f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
             f"Rules:\n"
             f"- Write ONLY the new or modified code (not the entire file)\n"
             f"- Use exact attribute names from the source code above\n"
+            f"- When calling self._xxx.method(), use ONLY methods listed "
+            f"in AVAILABLE METHODS above\n"
             f"- When adding a parallel method (e.g. generate_stream), "
             f"match the original method's parameters\n"
             f"- Do NOT fabricate method names — if unsure, omit the call\n"
@@ -1045,6 +1319,17 @@ class SynthesisStage(PipelineStage):
                     f"had empty content ({elapsed:.1f}s)"
                 )
                 return None
+
+            # Post-generation repair: auto-correct fabricated method refs
+            if prior_outputs:
+                content, n_fixes = _repair_fabricated_refs(
+                    content, prior_outputs,
+                )
+                if n_fixes:
+                    logger.info(
+                        f"Stage 'synthesis': repaired {n_fixes} fabricated "
+                        f"refs in {filename}"
+                    )
 
             logger.info(
                 f"Stage 'synthesis': artifact for {filename} "
