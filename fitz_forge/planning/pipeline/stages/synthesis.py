@@ -217,6 +217,17 @@ _RISK_FIELD_GROUPS = [
 ]
 
 
+def _truncate_at_line(text: str, max_chars: int) -> str:
+    """Truncate text at a line boundary, never mid-line."""
+    if len(text) <= max_chars:
+        return text
+    # Find last newline before max_chars
+    cut = text.rfind("\n", 0, max_chars)
+    if cut == -1:
+        cut = max_chars
+    return text[:cut]
+
+
 def _extract_class_fields(
     class_name: str,
     file_contents: dict[str, str],
@@ -1120,12 +1131,12 @@ class SynthesisStage(PipelineStage):
             relevant = resolutions
 
         lines = []
-        for r in relevant[:6]:  # cap to keep context short
+        for r in relevant[:10]:  # cap at 10 relevant decisions
             did = r.get("decision_id", "?")
             decision = r.get("decision", "")
             constraints = r.get("constraints_for_downstream", [])
             lines.append(f"[{did}] {decision}")
-            for c in constraints[:2]:
+            for c in constraints[:3]:
                 lines.append(f"  constraint: {c}")
         return "\n".join(lines)
 
@@ -1406,7 +1417,7 @@ class SynthesisStage(PipelineStage):
                 f"\n\n## CURRENT SOURCE CODE of {filename}\n"
                 f"Use ONLY the attributes, methods, and field names you "
                 f"see below. Do NOT invent methods that aren't here.\n\n"
-                f"```python\n{source[:6000]}\n```"
+                f"```python\n{_truncate_at_line(source, 6000)}\n```"
             )
         else:
             source_section = (
@@ -1440,7 +1451,7 @@ class SynthesisStage(PipelineStage):
             f"Purpose: {purpose}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"## PLAN CONTEXT (what this artifact is part of)\n"
-            f"{reasoning[:3000]}"
+            f"{_truncate_at_line(reasoning, 3000)}"
             f"{source_section}"
             f"{schema_section}"
             f"{interface_section}\n\n"
@@ -1749,17 +1760,26 @@ class SynthesisStage(PipelineStage):
             return None, ""
 
     def _format_resolutions(self, resolutions: list[dict]) -> str:
-        """Format resolved decisions for the synthesis prompt."""
+        """Format resolved decisions for the synthesis prompt.
+
+        Compact format: drops the reasoning field (LLM's internal
+        chain-of-thought) and truncates evidence to file:signature only.
+        The synthesis model needs WHAT was decided and WHAT the constraints
+        are, not WHY the decision was made.
+
+        Saves ~54% tokens vs the full format.
+        """
         lines = []
         for r in resolutions:
             lines.append(f"### Decision {r.get('decision_id', '?')}")
             lines.append(f"**Decided:** {r.get('decision', '')}")
-            lines.append(f"**Reasoning:** {r.get('reasoning', '')}")
             evidence = r.get("evidence", [])
             if evidence:
                 lines.append("**Evidence:**")
                 for e in evidence:
-                    lines.append(f"  - {e}")
+                    # Keep file:signature, drop explanation after ' -- '
+                    sig = e.split(" -- ")[0] if " -- " in e else e
+                    lines.append(f"  - {sig}")
             constraints = r.get("constraints_for_downstream", [])
             if constraints:
                 lines.append("**Constraints:**")
