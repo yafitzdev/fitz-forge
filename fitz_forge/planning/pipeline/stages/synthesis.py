@@ -228,6 +228,69 @@ def _truncate_at_line(text: str, max_chars: int) -> str:
     return text[:cut]
 
 
+def _compress_reasoning_for_artifact(reasoning: str) -> str:
+    """Compress synthesis reasoning for per-artifact prompts.
+
+    The full reasoning covers 5 sections (context, architecture, design,
+    roadmap, risk). Artifacts only need architecture + design context.
+    Extracts relevant sections and drops roadmap/risk/preamble.
+
+    Typical compression: 12K -> 5K chars.
+    """
+    if len(reasoning) <= 4000:
+        return reasoning  # Short enough, keep everything
+
+    lines = reasoning.split("\n")
+    sections: dict[str, list[str]] = {}
+    current_section = "_preamble"
+    sections[current_section] = []
+
+    # Split into sections by markdown headers
+    for line in lines:
+        stripped = line.strip().lower()
+        if stripped.startswith("### ") or stripped.startswith("## "):
+            header = stripped.lstrip("#").strip()
+            if any(kw in header for kw in ("context", "requirement", "scope")):
+                current_section = "context"
+            elif any(kw in header for kw in ("architect", "approach", "pattern")):
+                current_section = "architecture"
+            elif any(kw in header for kw in ("design", "component", "interface",
+                                              "artifact", "adr", "integration",
+                                              "data model")):
+                current_section = "design"
+            elif any(kw in header for kw in ("roadmap", "phase", "milestone",
+                                              "implementation plan")):
+                current_section = "roadmap"
+            elif any(kw in header for kw in ("risk", "mitigation")):
+                current_section = "risk"
+            else:
+                current_section = "other"
+            sections.setdefault(current_section, [])
+        sections.setdefault(current_section, []).append(line)
+
+    # Keep: architecture + design (essential for artifacts)
+    # Summarize: context (first 5 lines only)
+    # Drop: roadmap, risk, preamble
+    parts = []
+
+    ctx_lines = sections.get("context", [])
+    if ctx_lines:
+        parts.append("## Context (summary)")
+        parts.extend(ctx_lines[:5])
+
+    for key in ("architecture", "design", "other"):
+        section_lines = sections.get(key, [])
+        if section_lines:
+            parts.extend(section_lines)
+
+    result = "\n".join(parts)
+    if len(result) < 200:
+        # Section detection failed — fall back to first half of reasoning
+        return _truncate_at_line(reasoning, len(reasoning) // 2)
+
+    return result
+
+
 def _extract_class_fields(
     class_name: str,
     file_contents: dict[str, str],
@@ -1454,6 +1517,9 @@ class SynthesisStage(PipelineStage):
                 relevant_decisions, reasoning, prior_outputs,
             )
 
+        # Compress reasoning: keep architecture + design, drop roadmap/risk
+        reasoning_compressed = _compress_reasoning_for_artifact(reasoning)
+
         # Build prompt sections — priority order for truncation:
         # 1. decisions (must keep), 2. source (must keep),
         # 3. interfaces (must keep), 4. schema fields (must keep),
@@ -1524,12 +1590,12 @@ class SynthesisStage(PipelineStage):
         if reasoning_budget < 500:
             reasoning_budget = 500  # minimum to be useful
 
-        reasoning_trimmed = _truncate_at_line(reasoning, reasoning_budget)
-        if len(reasoning_trimmed) < len(reasoning):
+        reasoning_final = _truncate_at_line(reasoning_compressed, reasoning_budget)
+        if len(reasoning_final) < len(reasoning):
             logger.info(
-                f"Stage 'synthesis': {filename} reasoning trimmed "
-                f"{len(reasoning)} -> {len(reasoning_trimmed)} chars "
-                f"(budget {reasoning_budget})"
+                f"Stage 'synthesis': {filename} reasoning "
+                f"{len(reasoning)} -> {len(reasoning_compressed)} compressed "
+                f"-> {len(reasoning_final)} final"
             )
 
         prompt = (
@@ -1537,7 +1603,7 @@ class SynthesisStage(PipelineStage):
             f"Purpose: {purpose}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"## PLAN CONTEXT (what this artifact is part of)\n"
-            f"{reasoning_trimmed}"
+            f"{reasoning_final}"
             f"{source_section}"
             f"{schema_section}"
             f"{interface_section}\n\n"
