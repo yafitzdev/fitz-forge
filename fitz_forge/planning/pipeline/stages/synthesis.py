@@ -1131,12 +1131,12 @@ class SynthesisStage(PipelineStage):
             relevant = resolutions
 
         lines = []
-        for r in relevant[:10]:  # cap at 10 relevant decisions
+        for r in relevant:
             did = r.get("decision_id", "?")
             decision = r.get("decision", "")
             constraints = r.get("constraints_for_downstream", [])
             lines.append(f"[{did}] {decision}")
-            for c in constraints[:3]:
+            for c in constraints:
                 lines.append(f"  constraint: {c}")
         return "\n".join(lines)
 
@@ -1410,14 +1410,19 @@ class SynthesisStage(PipelineStage):
                 relevant_decisions, reasoning, prior_outputs,
             )
 
-        # Build a focused prompt
+        # Build prompt sections — priority order for truncation:
+        # 1. decisions (must keep), 2. source (must keep),
+        # 3. interfaces (must keep), 4. schema fields (must keep),
+        # 5. reasoning (truncate first if over budget)
+        _TOKEN_BUDGET_CHARS = 32000 * 4  # ~32K tokens in chars
+
         source_section = ""
         if source:
             source_section = (
                 f"\n\n## CURRENT SOURCE CODE of {filename}\n"
                 f"Use ONLY the attributes, methods, and field names you "
                 f"see below. Do NOT invent methods that aren't here.\n\n"
-                f"```python\n{_truncate_at_line(source, 6000)}\n```"
+                f"```python\n{source}\n```"
             )
         else:
             source_section = (
@@ -1446,16 +1451,7 @@ class SynthesisStage(PipelineStage):
             "purpose": "why this artifact exists",
         }, indent=2)
 
-        prompt = (
-            f"Write a code artifact for: {filename}\n"
-            f"Purpose: {purpose}\n\n"
-            f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
-            f"## PLAN CONTEXT (what this artifact is part of)\n"
-            f"{_truncate_at_line(reasoning, 3000)}"
-            f"{source_section}"
-            f"{schema_section}"
-            f"{interface_section}\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
+        rules = (
             f"Rules:\n"
             f"- Write ONLY the new or modified code (not the entire file)\n"
             f"- Use exact attribute names from the source code above\n"
@@ -1464,6 +1460,45 @@ class SynthesisStage(PipelineStage):
             f"- When adding a parallel method (e.g. generate_stream), "
             f"match the original method's parameters\n"
             f"- Do NOT fabricate method names — if unsure, omit the call\n"
+        )
+
+        # Measure fixed sections (everything except reasoning)
+        fixed = (
+            f"Write a code artifact for: {filename}\n"
+            f"Purpose: {purpose}\n\n"
+            f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
+            f"{source_section}"
+            f"{schema_section}"
+            f"{interface_section}\n\n"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
+            f"{rules}"
+        )
+        fixed_chars = len(fixed)
+
+        # Reasoning gets whatever budget remains
+        reasoning_budget = _TOKEN_BUDGET_CHARS - fixed_chars - 200  # 200 for header
+        if reasoning_budget < 500:
+            reasoning_budget = 500  # minimum to be useful
+
+        reasoning_trimmed = _truncate_at_line(reasoning, reasoning_budget)
+        if len(reasoning_trimmed) < len(reasoning):
+            logger.info(
+                f"Stage 'synthesis': {filename} reasoning trimmed "
+                f"{len(reasoning)} -> {len(reasoning_trimmed)} chars "
+                f"(budget {reasoning_budget})"
+            )
+
+        prompt = (
+            f"Write a code artifact for: {filename}\n"
+            f"Purpose: {purpose}\n\n"
+            f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
+            f"## PLAN CONTEXT (what this artifact is part of)\n"
+            f"{reasoning_trimmed}"
+            f"{source_section}"
+            f"{schema_section}"
+            f"{interface_section}\n\n"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
+            f"{rules}"
         )
 
         messages = self._make_messages(prompt)
