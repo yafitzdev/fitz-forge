@@ -516,11 +516,67 @@ Key: Score=deterministic composite (0-100), Fab=fabricated self.xxx refs, Field=
 
 **LLM scorer variance finding:** Same plan scored 36 vs 48 by different Sonnet calls. Root cause: one scorer evaluated planning text (generous), other evaluated code artifacts (harsh). Deterministic scorer is essential for reliable comparison.
 
-**Critical files to read first in new session:**
+---
+
+## Session 2026-04-01: Class Interface Injection + Type-Aware Repair
+
+### What Shipped
+
+1. **Class interface injection** (`_resolve_class_interfaces`): Before each artifact generation, extracts `self._xxx = ClassName(...)` from init methods, looks up each ClassName's public methods via structural index + source AST, injects compact cheat sheet (5216 chars for engine.py with 24 type mappings). Model sees `self._router -> RetrievalRouter: route(query, top_k), ...` instead of guessing.
+
+2. **Disk source fix** (root cause): `file_contents` pool stores pre-compressed source with init bodies stripped. `_resolve_class_interfaces` was receiving 3780-char compressed source instead of 58K-char full source. Fix: read uncompressed source from disk via `_source_dir` for interface extraction.
+
+3. **Type-aware deterministic repair** (`_repair_fabricated_refs`): Three strategies applied post-generation:
+   - Type-aware resolution: reverse map `ClassName -> attr_name`, match fabricated names against CamelCase type parts (e.g. `_governance_decider` matches `GovernanceDecider` -> real attr `_governor`)
+   - Test method leak filter: strip `self.test_*()` calls from non-test artifacts
+   - Fuzzy matching (threshold 0.82, raised from 0.65 to prevent false positives like `_build_prompt -> _build_row`)
+   - Also skips known init attrs in `type_attr_map.values()` to prevent false repairs (e.g. `_chat_factory` is real)
+
+4. **Schema field injection** (from previous session, retained)
+
+### Benchmark Results (Deterministic Scorer)
+
+```
+┌───────────────────────────────────────────────┬────┬───────┬─────┬───────┬─────┬──────┬───────┐
+│ Config                                        │  N │ Score │ Fab │ Field │ Syn │ Cov  │ Chars │
+├───────────────────────────────────────────────┼────┼───────┼─────┼───────┼─────┼──────┼───────┤
+│ BASELINE (monolithic template)                │ 10 │  73.0 │ 1.7 │   0.3 │ 0.5 │  77% │  1069 │
+│ PER-ARTIFACT + INIT + SCHEMA (prev session)   │ 10 │  63.5 │ 3.5 │   0.2 │ 1.1 │  88% │  2640 │
+│ + CLASS INTERFACES + TYPE REPAIR + DISK FIX   │ 10 │  75.5 │ 1.0 │   0.6 │ 0.9 │  95% │  2236 │
+└───────────────────────────────────────────────┴────┴───────┴─────┴───────┴─────┴──────┴───────┘
+```
+
+**Key gains vs per-artifact baseline:**
+- Fabrications: 3.5 -> 1.0 (-71%)
+- Score: 63.5 -> 75.5 (+12 points, now surpasses monolithic baseline)
+- Coverage: 88% -> 95%
+- Best single run: 95/100 with zero fabrications
+- Zero-fab runs: 0% -> 30%
+
+### What Failed
+
+1. **Part B: Reference declaration step** (extra short LLM call before generation): Declaration only fired for files with class_interfaces populated. For engine.py (the main target), the disk source fix hadn't been applied yet so interfaces were empty. Even when it fired (sdk/fitz.py), all declared refs were rejected. Reverted — zero value added.
+
+2. **Fuzzy matching at 0.65 threshold**: False positive — `_build_prompt -> _build_row` (0.78 similarity). Raised to 0.82.
+
+3. **Type-aware repair on init attrs**: `_chat_factory` flagged as fabricated and "fixed" to `mock_chat_factory`. Fixed by checking `type_attr_map.values()`.
+
+### Remaining Fabrication Patterns (1.0 avg across 10 runs)
+
+- `self._assembler()` — correct attr name but called as function instead of `self._assembler.assemble()`
+- `self._reranker` — doesn't exist, real name `_address_reranker`
+- `self._build_conflict_instruction()` — invented helper on synthesizer
+- `self.generate()` / `self._synthesizer` on hallucinated `services.py`
+
+### Root Cause Chain (Critical Finding)
+
+`file_contents` in agent pool -> pre-compressed (init bodies stripped) -> `_resolve_class_interfaces` receives 3780 chars -> finds 0 init attrs -> empty interfaces -> no type map -> repairs can't fire. Fix: read from disk instead. This was the single biggest bottleneck — everything else was already implemented correctly but starved of data.
+
+**Critical files for next session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
 - `docs/decomposition-analysis.md` — full experiment results and what worked/failed
 - `benchmarks/eval_deterministic.py` — zero-variance deterministic scorer
 - `benchmarks/BENCHMARK.md` — how to run benchmarks
-- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation (`_build_artifacts_per_file`, `_generate_single_artifact`, `_resolve_schema_fields`)
+- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation, class interface injection (`_resolve_class_interfaces`), type-aware repair (`_repair_fabricated_refs`, `_build_type_attr_map`, `_type_aware_resolve`), schema field injection (`_resolve_schema_fields`)
 - `fitz_forge/planning/agent/compressor.py` — init preservation (`_keep_init_assignments`)
 - `fitz_forge/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup`
