@@ -1315,6 +1315,8 @@ class SynthesisStage(PipelineStage):
                             missing_types.discard(_node.name)
 
         # Build compact cheat sheet
+        _MAX_INTERFACE_LINES = 50
+
         lines = []
         for attr_name, type_name in sorted(attrs.items()):
             meths = component_methods.get(type_name, [])
@@ -1327,7 +1329,20 @@ class SynthesisStage(PipelineStage):
         if not lines:
             return ""
 
-        return "\n".join(lines)
+        if len(lines) <= _MAX_INTERFACE_LINES:
+            return "\n".join(lines)
+
+        # Too many interfaces — truncate to cap.
+        # Prioritize entries that have resolved methods (more useful)
+        # over bare "self._xxx → TypeName" entries.
+        with_methods = [l for l in lines if ": " in l]
+        without_methods = [l for l in lines if ": " not in l]
+        capped = (with_methods + without_methods)[:_MAX_INTERFACE_LINES]
+        logger.info(
+            f"Stage 'synthesis': interface cap {len(lines)}"
+            f" → {len(capped)} (limit {_MAX_INTERFACE_LINES})"
+        )
+        return "\n".join(capped)
 
     async def _generate_single_artifact(
         self,
