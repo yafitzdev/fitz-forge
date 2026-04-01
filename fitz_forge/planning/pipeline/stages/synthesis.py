@@ -336,6 +336,46 @@ def _build_type_attr_map(
     return result
 
 
+def _extract_init_attr_names(source: str) -> set[str]:
+    """Extract ALL self._xxx attribute names from init methods.
+
+    Unlike _build_type_attr_map which only captures CamelCase-typed attrs,
+    this captures every self._xxx assignment regardless of RHS pattern.
+    Used to prevent false repairs on real attrs like _chat_factory.
+    """
+    import ast as _ast
+
+    if not source:
+        return set()
+
+    try:
+        tree = _ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    attrs: set[str] = set()
+    for cls_node in _ast.iter_child_nodes(tree):
+        if not isinstance(cls_node, _ast.ClassDef):
+            continue
+        for method in _ast.iter_child_nodes(cls_node):
+            if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            if method.name not in ("__init__", "_init_components", "setup", "_setup"):
+                continue
+            for node in _ast.walk(method):
+                if not isinstance(node, _ast.Assign):
+                    continue
+                for target in node.targets:
+                    if (isinstance(target, _ast.Attribute)
+                            and isinstance(target.value, _ast.Name)
+                            and target.value.id == "self"
+                            and target.attr.startswith("_")
+                            and not target.attr.startswith("__")):
+                        attrs.add(target.attr)
+
+    return attrs
+
+
 def _type_aware_resolve(
     fabricated: str,
     type_attr_map: dict[str, str],
@@ -375,6 +415,7 @@ def _repair_fabricated_refs(
     content: str,
     prior_outputs: dict[str, Any],
     type_attr_map: dict[str, str] | None = None,
+    init_attrs: set[str] | None = None,
     filename: str = "",
 ) -> tuple[str, int]:
     """Deterministic post-generation repair of fabricated method references.
@@ -459,6 +500,8 @@ def _repair_fabricated_refs(
             continue
         # Skip if it's a known init attribute (not a method, but real)
         if type_attr_map and ref_name in type_attr_map.values():
+            continue
+        if init_attrs and ref_name in init_attrs:
             continue
 
         # Strategy 1: Type-aware resolution
@@ -1391,6 +1434,7 @@ class SynthesisStage(PipelineStage):
                 interface_source, prior_outputs,
             )
             type_attr_map = _build_type_attr_map(interface_source)
+            init_attrs = _extract_init_attr_names(interface_source)
             logger.info(
                 f"Stage 'synthesis': {filename} source={len(source)} chars, "
                 f"disk={len(disk_source)} chars, "
@@ -1524,6 +1568,7 @@ class SynthesisStage(PipelineStage):
                 content, n_fixes = _repair_fabricated_refs(
                     content, prior_outputs,
                     type_attr_map=type_attr_map,
+                    init_attrs=init_attrs,
                     filename=filename,
                 )
                 if n_fixes:
