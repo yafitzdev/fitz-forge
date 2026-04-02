@@ -18,13 +18,13 @@ User Request
 [Call Graph Extraction]  ---------> Deterministic AST import/call graph (0 LLM calls)
     |
     v
-[Decision Decomposition]  -------> Break task into atomic decisions (1-2 LLM calls)
+[Decision Decomposition]  -------> Best-of-2 decomposition + optional coverage retry (2-3 LLM calls)
     |                               Output: 10-15 decisions with evidence requirements
     v
 [Decision Resolution]  ----------> Resolve each decision against source code (1 LLM call per decision)
     |                               Output: decided + reasoning + evidence + constraints
     v
-[Synthesis]  ---------------------> Narrate decisions into plan (1 reasoning + 1 critique + 13 extractions)
+[Synthesis]  ---------------------> Best-of-2 reasoning + 1 critique + 13 extractions
     |   |                           Per-field extraction: context(4) + arch(2) + design(3) + roadmap(1) + risk(2)
     |   |
     |   +--[Per-Artifact Generation]  --> 1 generate() call per artifact file
@@ -116,7 +116,13 @@ User Request
 - Implementation check result
 - Call graph
 
-**LLM calls**: 1-2 (reasoning + optional retry if < 5 decisions)
+**LLM calls**: 2-3 (best-of-2 selection + optional coverage retry)
+
+**Best-of-2 selection** (temperature=0.3):
+- Generate 2 decomposition candidates
+- Score each deterministically: decision count, call-graph coverage, question specificity, category diversity, dependency coherence
+- Pick the higher-scoring candidate
+- Eliminates weak decompositions that would compound through all downstream stages
 
 **Output**: 10-15 decisions, each with:
 ```python
@@ -131,7 +137,7 @@ User Request
 
 **Post-processing**:
 - Coverage gate: checks if interior call-graph layers have decisions
-- If gaps found, retries with explicit layer warning
+- If gaps found, retries with explicit layer warning (temperature=0)
 
 ---
 
@@ -161,13 +167,19 @@ User Request
 
 **The model is NOT discovering anything new** — it's organizing pre-solved answers into a coherent architectural document.
 
-#### 3a. Synthesis Reasoning (1 LLM call)
+#### 3a. Synthesis Reasoning (2 LLM calls — best-of-2)
 
 **Prompt** (compact format, ~44K chars):
 - All resolved decisions (decision text + evidence signatures + constraints, NO reasoning)
 - Gathered context (structural overview, ~20K chars)
 - Call graph
 - Template instructions: write Context + Architecture + Design + Roadmap + Risk as prose
+
+**Best-of-2 selection** (temperature=0.7):
+- Generate 2 reasoning candidates
+- Score each deterministically: file path references, section coverage, decision ID coverage, length, concreteness (identifier density)
+- Pick the higher-scoring candidate, then self-critique the winner
+- Prevents weak reasoning from poisoning all 13 downstream extractions
 
 **Output**: 15-20K chars of free-form architectural narrative
 
@@ -285,16 +297,16 @@ For each needed artifact file (capped at 8):
 | Agent context gathering | 6-8 | LLM-powered retrieval |
 | Implementation check | 1 | Early exit signal |
 | Call graph | 0 | Deterministic AST |
-| Decision decomposition | 1-2 | + optional retry |
+| Decision decomposition | 2-3 | Best-of-2 + optional coverage retry |
 | Decision resolution | 10-15 | 1 per decision |
-| Synthesis reasoning | 1 | Compact prompt (~44K chars) |
-| Self-critique | 1 | |
+| Synthesis reasoning | 2 | Best-of-2 selection |
+| Self-critique | 1 | On winning reasoning |
 | Field extraction | 13 | 4+2+3+1+2+1(scheduling) |
 | Per-artifact generation | 3-5 | 1 per needed file |
 | Grounding repair | 0-5 | 1 per violated artifact |
 | Coherence check | 1 | |
 | Confidence scoring | 1 | |
-| **Total** | **~38-52** | **~6-8 min on RTX 5090** |
+| **Total** | **~40-55** | **~7-9 min on RTX 5090** |
 
 ## Token Budget (32K target)
 

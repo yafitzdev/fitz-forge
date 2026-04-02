@@ -14,6 +14,7 @@ import difflib
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -2078,6 +2079,61 @@ class SynthesisStage(PipelineStage):
                     lines.append(f"  - {c}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _score_reasoning(
+        reasoning: str, resolutions: list[dict[str, Any]],
+    ) -> tuple[float, dict[str, float]]:
+        """Score synthesis reasoning for best-of-2 selection.
+
+        Criteria: file references, section coverage, decision coverage,
+        length, concreteness (identifier density).
+        """
+        breakdown: dict[str, float] = {}
+
+        # File path references (0-25)
+        file_refs = re.findall(r'\b[\w/]+\.py\b', reasoning)
+        breakdown["files"] = min(len(set(file_refs)) * 2.5, 25.0)
+
+        # Section coverage (0-20)
+        section_patterns = {
+            "arch": r'(?i)(architecture|approach|pattern)',
+            "design": r'(?i)(component|interface|data.?model|class)',
+            "roadmap": r'(?i)(phase|milestone|step\s+\d|deliverable)',
+            "risk": r'(?i)(risk|mitigation|fallback|concern)',
+        }
+        found = sum(
+            1 for p in section_patterns.values()
+            if re.search(p, reasoning)
+        )
+        breakdown["sections"] = found * 5.0
+
+        # Decision coverage (0-25)
+        decision_ids = {r.get("decision_id", "") for r in resolutions}
+        decision_ids.discard("")
+        if decision_ids:
+            mentioned = sum(1 for did in decision_ids if did in reasoning)
+            breakdown["decisions"] = (mentioned / len(decision_ids)) * 25.0
+        else:
+            breakdown["decisions"] = 12.5
+
+        # Length (0-15)
+        chars = len(reasoning)
+        if chars >= 10_000:
+            breakdown["length"] = 15.0
+        elif chars >= 5_000:
+            breakdown["length"] = 10.0
+        elif chars >= 2_000:
+            breakdown["length"] = 5.0
+        else:
+            breakdown["length"] = 0.0
+
+        # Concreteness: identifier density (0-15)
+        camel = set(re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', reasoning))
+        snake = set(re.findall(r'\b[a-z]+(?:_[a-z]+){1,}\b', reasoning))
+        breakdown["concrete"] = min(len(camel | snake) * 0.3, 15.0)
+
+        return sum(breakdown.values()), breakdown
+
     def _format_resolutions(self, resolutions: list[dict]) -> str:
         """Format resolved decisions for the synthesis prompt.
 
@@ -2114,18 +2170,55 @@ class SynthesisStage(PipelineStage):
         prior_outputs: dict[str, Any],
     ) -> StageResult:
         try:
-            # 1. Synthesis reasoning -- narrate pre-solved decisions
+            # 1. Best-of-2 synthesis reasoning
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("synthesizing")
-            t0 = time.monotonic()
-            reasoning = await client.generate(messages=messages)
-            t1 = time.monotonic()
-            logger.info(
-                f"Stage '{self.name}': synthesis took "
-                f"{t1 - t0:.1f}s ({len(reasoning)} chars)"
-            )
 
-            # 2. Self-critique (catches formatting issues, not architectural)
+            resolution_output = prior_outputs.get("decision_resolution", {})
+            resolutions = resolution_output.get("resolutions", [])
+
+            candidates: list[tuple[float, str, dict[str, float]]] = []
+            last_error: Exception | None = None
+            for i in range(2):
+                try:
+                    t0 = time.monotonic()
+                    r = await client.generate(
+                        messages=messages, temperature=0.7,
+                    )
+                    t1 = time.monotonic()
+                    logger.info(
+                        f"Stage '{self.name}': reasoning candidate {i+1} "
+                        f"took {t1 - t0:.1f}s ({len(r)} chars)"
+                    )
+                    score, breakdown = self._score_reasoning(r, resolutions)
+                    candidates.append((score, r, breakdown))
+                    logger.info(
+                        f"Stage '{self.name}': candidate {i+1} "
+                        f"score={score:.1f} {breakdown}"
+                    )
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Stage '{self.name}': reasoning candidate "
+                        f"{i+1} failed: {e}"
+                    )
+
+            if not candidates:
+                raise last_error or RuntimeError(
+                    "Both synthesis reasoning candidates failed"
+                )
+
+            candidates.sort(key=lambda c: c[0], reverse=True)
+            reasoning = candidates[0][1]
+
+            if len(candidates) > 1:
+                margin = candidates[0][0] - candidates[1][0]
+                logger.info(
+                    f"Stage '{self.name}': selected reasoning "
+                    f"(score={candidates[0][0]:.1f}, margin={margin:.1f})"
+                )
+
+            # 2. Self-critique the winner
             krag_context = self._get_gathered_context(prior_outputs)
             reasoning = await self._self_critique(
                 client, reasoning, job_description, krag_context=krag_context,
@@ -2180,8 +2273,6 @@ class SynthesisStage(PipelineStage):
             # raw codebase context. Roadmap needs to know WHAT was designed
             # (components, interfaces, artifacts) and decision ordering
             # constraints — not the raw codebase files.
-            resolution_output = prior_outputs.get("decision_resolution", {})
-            resolutions = resolution_output.get("resolutions", [])
             roadmap_risk_context = (
                 self._format_slim_design(design_merged)
                 + "\n"

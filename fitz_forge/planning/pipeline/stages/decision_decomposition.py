@@ -9,6 +9,7 @@ Output: ordered list of AtomicDecision objects with dependencies
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -124,6 +125,75 @@ class DecisionDecompositionStage(PipelineStage):
         output = DecisionDecompositionOutput(**data)
         return output.model_dump()
 
+    @staticmethod
+    def _score_decomposition(
+        parsed: dict[str, Any], prior_outputs: dict[str, Any],
+    ) -> tuple[float, dict[str, float]]:
+        """Score a decomposition for best-of-2 selection.
+
+        Criteria: decision count, call-graph coverage, question specificity,
+        category diversity, dependency coherence.
+        """
+        decisions = parsed.get("decisions", [])
+        breakdown: dict[str, float] = {}
+        n = len(decisions)
+
+        # Decision count: 8-18 is ideal
+        if 8 <= n <= 18:
+            breakdown["count"] = 10.0
+        elif 5 <= n < 8 or 18 < n <= 25:
+            breakdown["count"] = 5.0
+        else:
+            breakdown["count"] = 0.0
+
+        # Call-graph coverage
+        call_graph = prior_outputs.get("_call_graph")
+        if call_graph and call_graph.nodes:
+            graph_files = {nd.file_path for nd in call_graph.nodes}
+            decision_files: set[str] = set()
+            for d in decisions:
+                for f in d.get("relevant_files", []):
+                    decision_files.add(f)
+            covered = 0
+            for gf in graph_files:
+                gf_base = os.path.basename(gf)
+                for df in decision_files:
+                    if gf in df or df in gf or os.path.basename(df) == gf_base:
+                        covered += 1
+                        break
+            ratio = covered / len(graph_files) if graph_files else 0
+            breakdown["graph_cov"] = ratio * 30.0
+        else:
+            breakdown["graph_cov"] = 15.0
+
+        # Question specificity: concrete file/class refs in question text
+        specific = 0
+        for d in decisions:
+            q = d.get("question", "")
+            if re.search(r'[\w/]+\.py|[A-Z][a-z]+[A-Z]\w+|_\w+_', q):
+                specific += 1
+        breakdown["specificity"] = (specific / max(n, 1)) * 25.0
+
+        # Category diversity
+        categories = {d.get("category", "") for d in decisions}
+        categories.discard("")
+        breakdown["categories"] = min(len(categories) * 3.0, 15.0)
+
+        # Dependency coherence
+        ids = {d.get("id", "") for d in decisions}
+        total_deps = sum(len(d.get("depends_on", [])) for d in decisions)
+        valid_deps = sum(
+            1 for d in decisions
+            for dep in d.get("depends_on", [])
+            if dep in ids
+        )
+        if total_deps > 0:
+            breakdown["deps"] = (valid_deps / total_deps) * 15.0 + 5.0
+        else:
+            breakdown["deps"] = 5.0
+
+        return sum(breakdown.values()), breakdown
+
     async def execute(
         self,
         client: Any,
@@ -133,9 +203,10 @@ class DecisionDecompositionStage(PipelineStage):
         try:
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("decomposing")
+
             t0 = time.monotonic()
             raw = await client.generate(
-                messages=messages, temperature=0, max_tokens=4096,
+                messages=messages, temperature=0, max_tokens=16384,
             )
             t1 = time.monotonic()
             logger.info(
@@ -160,7 +231,7 @@ class DecisionDecompositionStage(PipelineStage):
                 )
                 t0 = time.monotonic()
                 retry_raw = await client.generate(
-                    messages=retry_messages, temperature=0, max_tokens=4096,
+                    messages=retry_messages, temperature=0, max_tokens=16384,
                 )
                 t1 = time.monotonic()
                 logger.info(

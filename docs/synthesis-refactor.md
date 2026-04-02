@@ -72,17 +72,23 @@ All prompts comfortably within 32K budget even for codebases 2-3x larger.
 
 ### Implementation Plan
 
-**Phase 1: Compact decisions (quick win, no flow change)**
+**Phase 1: Compact decisions (quick win, no flow change)** -- DONE
 - Modify `_format_resolutions()` to drop reasoning, truncate evidence to signatures
 - All existing extraction paths benefit immediately
 - Benchmark to verify no quality regression
 
-**Phase 2: Sectioned extraction (flow change)**
+**Phase 2: Sectioned extraction (flow change)** -- DONE
 - Modify `execute()` to extract Context+Architecture+Design first
 - Then extract Roadmap+Risk with Design output injected
 - Build `_format_constraints_only()` for roadmap/risk context
 - Build `_slim_design_output()` to strip artifact code bodies
 - Benchmark to verify quality on roadmap/risk sections
+
+**Phase 3: Best-of-2 selection at compounding bottlenecks** -- DONE
+- Decision decomposition: generate 2 candidates (temp=0.3), score deterministically, pick best
+- Synthesis reasoning: generate 2 candidates (temp=0.7), score deterministically, pick best
+- Scoring criteria: graph coverage, question specificity, file refs, section coverage, concreteness
+- Extra cost: ~50-70s per plan, but eliminates floor plans from compounding errors
 
 ### Caps and Guardrails
 

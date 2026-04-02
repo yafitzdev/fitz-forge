@@ -619,10 +619,12 @@ class TestSynthesisExecute:
         # Design: adrs, components, integrations (3) + artifacts (1)
         # Roadmap: phases, scheduling (2)
         # Risk: risks (1)
-        # Total: 1 synthesis + 1 critique + 4 + 2 + 3 + 1 + 2 + 1 = 15
+        # Total: 2 synthesis (best-of-2) + 1 critique + 4 + 2 + 3 + 1 + 2 + 1 = 16
         mock_client.generate = AsyncMock(side_effect=[
-            # 1. Synthesis reasoning
+            # 1a. Synthesis reasoning candidate 1
             "Comprehensive synthesis of all decisions into a coherent plan...",
+            # 1b. Synthesis reasoning candidate 2
+            "Alternative synthesis reasoning for best-of-2 selection...",
             # 2. Self-critique
             "Reviewed and refined synthesis...",
             # Context groups

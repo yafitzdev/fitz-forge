@@ -18,6 +18,10 @@ The following decisions were made by analyzing the actual source code. Each deci
 
 Write a complete architectural analysis covering ALL of the following sections. For each section, use the resolved decisions above as your primary source. Do not discover new things -- organize what has already been decided.
 
+CITATION RULES:
+- Reference each decision by its ID when you use it (e.g., "Per [d3], the streaming interface returns AsyncIterator[str]").
+- Always name specific classes, methods, and files (e.g., "`FitzKragEngine.answer()` in `engine.py`" not "the engine's answer method").
+
 ### Section 1: Context
 - Project description (what is being built, based on the task and decisions)
 - Key requirements (derived from the decisions and their constraints)
