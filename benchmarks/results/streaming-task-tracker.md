@@ -73,6 +73,7 @@
 | 56a-j | 2026-04-01 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `b538c970` | fitz-sage main | + DISK SOURCE FIX (final: interfaces + type-aware + disk) | 12-15 | 319-474s | 75.5 | 1.0 | 0.6 | 0.9 | 95% | 2236 | **75.5 det** | Root cause fix: file_contents stores compressed source with init bodies stripped. Now reads uncompressed source from disk for interface extraction. engine.py: 3780→58251 chars, interfaces 0→5216 chars, type_map 0→24. Fabrications 3.5→1.0 (-71%). Score surpasses monolithic baseline. Best run: 95/100. Zero-fab: 30%. |
 | 57a-j | 2026-04-01 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `9c23a62b` | fitz-sage main | + compact synth prompt + uncapped decisions/reasoning | 12-15 | 338-474s | 74.4 | 2.0 | 0.7 | 0.2 | 94% | 2165 | **74.4 det** | Compact resolution format (drop reasoning, -29% tokens). Remove source[:6000]/reasoning[:3000] caps + decision cap. Budget-aware truncation. Fabs rose 1.0→2.0 (too much uncapped reasoning hurt attention). Syntax errors nearly eliminated 0.9→0.2. Ceiling rose to 90. |
 | 58a-j | 2026-04-02 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `bbc6cf9a` | fitz-sage main | + compressed reasoning (arch+design only, drop roadmap/risk) | 12-15 | 355-470s | 72.6 | 1.6 | 0.2 | 1.1 | 96% | — | **72.6 det** | Intelligent reasoning compression: extract arch+design sections, summarize context, drop roadmap/risk. 20K→15.5K reasoning. Fabs 2.0→1.6. Field errors 0.7→0.2. One outlier (7 fabs) pulls avg; without it: 1.0 fab, 75.0 score. Best run: 93/100. Init attrs false-positive fix (_chat_factory). |
+| 59a-j | 2026-04-02 | qwen3-coder-next-reap (40B) | Q5_K_S | 65K | `58aa3591` | fitz-sage main | + sectioned extraction (roadmap/risk get design output + constraints) | 13-15 | 360-470s | 76.0 | 1.4 | 0.4 | 0.9 | 96% | — | **76.0 det** | NEW BEST. Roadmap/Risk extraction now uses slim Design output (components, interfaces, artifact filenames, ADR titles — no code) + decision constraints, instead of raw codebase context. Score 72.6→76.0. Best run: 92/100. Coverage 96%. Median in 80s. Floor still 60 (variance). |
 
 
 ### Column Key
@@ -121,6 +122,10 @@ Track pipeline or codebase changes that affect comparability between runs.
 | 2026-04-01 | synthesis.py | `7e079300` | Type-aware repair: ClassName→attr_name reverse map + test leak filter | Fabrications 2.3→1.7 (-26%), zero-fab 22%→43%. |
 | 2026-04-01 | synthesis.py | `68cc4219` | DISK SOURCE FIX: read uncompressed source for interface extraction | ROOT CAUSE: file_contents was pre-compressed (init bodies stripped). Fabrications 1.7→1.0 (-71% total). Score surpasses baseline. |
 | 2026-04-01 | synthesis.py | `b538c970` | Skip known init attrs in type-aware repair | False positive fix: _chat_factory is real but not in index. |
+| 2026-04-01 | synthesis.py | `8804d1e3` | Compact synthesis prompt: drop reasoning from resolutions, -29% tokens | Synth prompt 62K→44K chars. Needed for 32K token budget. |
+| 2026-04-01 | synthesis.py | `9c23a62b` | Remove artificial caps (source 6K, reasoning 3K, decisions 6). Budget-aware truncation. | Reasoning gets full budget minus fixed sections. |
+| 2026-04-02 | synthesis.py | `bbc6cf9a` | Compress reasoning for artifacts: keep arch+design, drop roadmap/risk sections | 20K→15.5K reasoning. Prevents attention dilution from irrelevant sections. |
+| 2026-04-02 | synthesis.py | `58aa3591` | Sectioned extraction: roadmap/risk use slim Design output + constraints | Right-sized context per section. Score 72.6→76.0. |
 
 ## Conclusions (as of 2026-03-28)
 
@@ -588,11 +593,35 @@ Key: Score=deterministic composite (0-100), Fab=fabricated self.xxx refs, Field=
 
 `file_contents` in agent pool -> pre-compressed (init bodies stripped) -> `_resolve_class_interfaces` receives 3780 chars -> finds 0 init attrs -> empty interfaces -> no type map -> repairs can't fire. Fix: read from disk instead. This was the single biggest bottleneck — everything else was already implemented correctly but starved of data.
 
+### Session 2026-04-02 Continuation: Prompt Compaction + Sectioned Extraction
+
+**What shipped (4 commits):**
+
+1. **Compact synthesis prompt** (`8804d1e3`): Drop LLM reasoning from resolution format, truncate evidence to signatures. Synth prompt 62K→44K chars (-29%).
+2. **Remove artificial caps** (`9c23a62b`): No more source[:6000], reasoning[:3000], decisions-per-artifact cap. Budget-aware reasoning truncation instead (32K token limit, reasoning truncated last).
+3. **Compressed reasoning for artifacts** (`bbc6cf9a`): Extract arch+design sections from reasoning, summarize context to 5 lines, drop roadmap/risk. 20K→15.5K reasoning per artifact.
+4. **Sectioned extraction** (`58aa3591`): Roadmap/Risk extraction gets slim Design output (components, interfaces, artifact filenames — no code) + decision constraints, instead of raw codebase context.
+
+**Benchmark results (runs 57-59):**
+
+```
+┌───────────────────────────────────────────────┬────┬───────┬─────┬───────┬─────┬──────┐
+│ Config                                        │  N │ Score │ Fab │ Field │ Syn │ Cov  │
+├───────────────────────────────────────────────┼────┼───────┼─────┼───────┼─────┼──────┤
+│ + CLASS INTERFACES + TYPE REPAIR + DISK FIX   │ 10 │  75.5 │ 1.0 │   0.6 │ 0.9 │  95% │
+│ + compact synth + uncapped (run 57)           │ 10 │  74.4 │ 2.0 │   0.7 │ 0.2 │  94% │
+│ + compressed reasoning (run 58)               │ 10 │  72.6 │ 1.6 │   0.2 │ 1.1 │  96% │
+│ + sectioned extraction (run 59)               │ 10 │  76.0 │ 1.4 │   0.4 │ 0.9 │  96% │
+└───────────────────────────────────────────────┴────┴───────┴─────┴───────┴─────┴──────┘
+```
+
+**Key finding:** Uncapping reasoning (run 57) hurt fabrications (1.0→2.0) — too much context diluted attention. Compressing to arch+design only (run 58) brought it back down (1.6). Sectioned extraction (run 59) is the new best: 76.0 score, 1.4 fab. Best single run: 92/100.
+
 **Critical files for next session:**
 - This file (streaming-task-tracker.md) — the run log tells the full story
-- `docs/decomposition-analysis.md` — full experiment results and what worked/failed
+- `docs/synthesis-refactor.md` — prompt compaction + sectioned extraction design doc
 - `benchmarks/eval_deterministic.py` — zero-variance deterministic scorer
 - `benchmarks/BENCHMARK.md` — how to run benchmarks
-- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation, class interface injection (`_resolve_class_interfaces`), type-aware repair (`_repair_fabricated_refs`, `_build_type_attr_map`, `_type_aware_resolve`), schema field injection (`_resolve_schema_fields`)
+- `fitz_forge/planning/pipeline/stages/synthesis.py` — everything: per-artifact generation, class interface injection, type-aware repair, reasoning compression, sectioned extraction, compact resolution format
 - `fitz_forge/planning/agent/compressor.py` — init preservation (`_keep_init_assignments`)
 - `fitz_forge/planning/validation/grounding.py` — AST grounding validator + `StructuralIndexLookup`
