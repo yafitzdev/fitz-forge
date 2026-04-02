@@ -1905,6 +1905,76 @@ class SynthesisStage(PipelineStage):
             )
             return None, ""
 
+    @staticmethod
+    def _format_slim_design(design_merged: dict[str, Any]) -> str:
+        """Format Design output for Roadmap/Risk extraction context.
+
+        Includes components, interfaces, integration points, ADR titles,
+        and artifact filenames — but NOT artifact code bodies.
+        """
+        lines = ["## Design Summary\n"]
+
+        adrs = design_merged.get("adrs", [])
+        if adrs:
+            lines.append("### Key Decisions (ADRs)")
+            for adr in adrs:
+                title = adr.get("title", adr.get("decision", ""))
+                lines.append(f"- {title}")
+            lines.append("")
+
+        components = design_merged.get("components", [])
+        if components:
+            lines.append("### Components")
+            for comp in components:
+                name = comp.get("name", "")
+                responsibility = comp.get("responsibility", "")
+                lines.append(f"- **{name}**: {responsibility}")
+                for iface in comp.get("interfaces", []):
+                    if isinstance(iface, dict):
+                        lines.append(f"  - {iface.get('name', '')}: {iface.get('description', '')}")
+                    else:
+                        lines.append(f"  - {iface}")
+            lines.append("")
+
+        integrations = design_merged.get("integration_points", [])
+        if integrations:
+            lines.append("### Integration Points")
+            for ip in integrations:
+                if isinstance(ip, dict):
+                    lines.append(f"- {ip.get('point', ip.get('name', ''))}: {ip.get('description', '')}")
+                else:
+                    lines.append(f"- {ip}")
+            lines.append("")
+
+        artifacts = design_merged.get("artifacts", [])
+        if artifacts:
+            lines.append("### Artifacts (files to create/modify)")
+            for art in artifacts:
+                fname = art.get("filename", "")
+                purpose = art.get("purpose", "")
+                lines.append(f"- {fname}: {purpose}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_constraints_only(resolutions: list[dict]) -> str:
+        """Format decision constraints for Roadmap/Risk extraction.
+
+        Decision ID + constraints only. No decision text, no reasoning,
+        no evidence. Used to provide ordering/dependency info without
+        the full decision bulk.
+        """
+        lines = ["## Decision Constraints\n"]
+        for r in resolutions:
+            did = r.get("decision_id", "?")
+            constraints = r.get("constraints_for_downstream", [])
+            if constraints:
+                lines.append(f"[{did}]")
+                for c in constraints:
+                    lines.append(f"  - {c}")
+        return "\n".join(lines)
+
     def _format_resolutions(self, resolutions: list[dict]) -> str:
         """Format resolved decisions for the synthesis prompt.
 
@@ -2003,14 +2073,25 @@ class SynthesisStage(PipelineStage):
                 client, reasoning, prior_outputs, context_merged,
             )
 
+            # Roadmap + Risk: use Design output + constraints instead of
+            # raw codebase context. Roadmap needs to know WHAT was designed
+            # (components, interfaces, artifacts) and decision ordering
+            # constraints — not the raw codebase files.
+            resolution_output = prior_outputs.get("decision_resolution", {})
+            resolutions = resolution_output.get("resolutions", [])
+            roadmap_risk_context = (
+                self._format_slim_design(design_merged)
+                + "\n"
+                + self._format_constraints_only(resolutions)
+            )
+
             # Roadmap fields
             roadmap_merged: dict[str, Any] = {}
             for group in _ROADMAP_FIELD_GROUPS:
-                extra = extract_context if group["label"] == "phases" else ""
                 partial = await self._extract_field_group(
                     client, reasoning, group["fields"],
                     group["schema"], group["label"],
-                    extra_context=extra,
+                    extra_context=roadmap_risk_context,
                 )
                 roadmap_merged.update(partial)
 
@@ -2020,7 +2101,7 @@ class SynthesisStage(PipelineStage):
                 partial = await self._extract_field_group(
                     client, reasoning, group["fields"],
                     group["schema"], group["label"],
-                    extra_context=extract_context,
+                    extra_context=roadmap_risk_context,
                 )
                 risk_merged.update(partial)
 
