@@ -439,6 +439,89 @@ def _extract_init_attr_names(source: str) -> set[str]:
     return attrs
 
 
+def _build_attr_methods(
+    type_attr_map: dict[str, str],
+    prior_outputs: dict[str, Any],
+) -> dict[str, str]:
+    """Map each init attribute to its first public method.
+
+    Uses the structural index or source AST to find the first non-dunder
+    method on each component class. Used to fix attr-as-function calls:
+    self._assembler() -> self._assembler.assemble()
+
+    Returns {attr_name: first_method_name}.
+    """
+    import ast as _ast
+
+    if not type_attr_map:
+        return {}
+
+    # Try structural index first
+    agent_ctx = prior_outputs.get("_agent_context", {})
+    full_index = agent_ctx.get("full_structural_index", "")
+    if not full_index:
+        full_index = prior_outputs.get("_gathered_context", "")
+
+    from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+    lookup = StructuralIndexLookup(full_index) if full_index else None
+
+    result: dict[str, str] = {}
+    remaining = dict(type_attr_map)  # type_name -> attr_name
+
+    # Strategy 1: structural index
+    if lookup:
+        for type_name, attr_name in list(remaining.items()):
+            cls = lookup.find_class(type_name)
+            if cls and cls.methods:
+                for mname in cls.methods:
+                    if not mname.startswith("_"):
+                        result[attr_name] = mname
+                        remaining.pop(type_name, None)
+                        break
+
+    # Strategy 2: parse source files for remaining types
+    if remaining:
+        file_contents = agent_ctx.get("file_contents", {})
+        source_dir = prior_outputs.get("_source_dir", "")
+        all_sources = list((file_contents or {}).values())
+
+        if source_dir:
+            from pathlib import Path as _Path
+            for _py in _Path(source_dir).rglob("*.py"):
+                if not remaining:
+                    break
+                _stem = _py.stem.lower()
+                if not any(t.lower() in _stem or _stem in t.lower()
+                           for t in remaining):
+                    continue
+                if ".venv" in str(_py) or "__pycache__" in str(_py):
+                    continue
+                try:
+                    all_sources.append(
+                        _py.read_text(encoding="utf-8", errors="replace"),
+                    )
+                except OSError:
+                    continue
+
+        for _src in all_sources:
+            if not remaining:
+                break
+            try:
+                _tree = _ast.parse(_src)
+            except SyntaxError:
+                continue
+            for _node in _ast.walk(_tree):
+                if isinstance(_node, _ast.ClassDef) and _node.name in remaining:
+                    for _child in _ast.iter_child_nodes(_node):
+                        if (isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                                and not _child.name.startswith("_")):
+                            attr_name = remaining.pop(_node.name)
+                            result[attr_name] = _child.name
+                            break
+
+    return result
+
+
 def _type_aware_resolve(
     fabricated: str,
     type_attr_map: dict[str, str],
@@ -479,6 +562,7 @@ def _repair_fabricated_refs(
     prior_outputs: dict[str, Any],
     type_attr_map: dict[str, str] | None = None,
     init_attrs: set[str] | None = None,
+    attr_methods: dict[str, str] | None = None,
     filename: str = "",
 ) -> tuple[str, int]:
     """Deterministic post-generation repair of fabricated method references.
@@ -562,6 +646,16 @@ def _repair_fabricated_refs(
         if ref_name in artifact_methods:
             continue
         # Skip if it's a known init attribute (not a method, but real)
+        # BUT if it's being called as a function, fix the calling pattern
+        if init_attrs and ref_name in init_attrs and is_call and attr_methods:
+            first_method = attr_methods.get(ref_name)
+            if first_method:
+                fixes[f"{ref_name}("] = f"{ref_name}.{first_method}("
+                logger.info(
+                    f"  repair: self.{ref_name}() -> "
+                    f"self.{ref_name}.{first_method}()"
+                )
+            continue
         if type_attr_map and ref_name in type_attr_map.values():
             continue
         if init_attrs and ref_name in init_attrs:
@@ -571,6 +665,12 @@ def _repair_fabricated_refs(
         if type_attr_map and ref_name.startswith("_"):
             resolved = _type_aware_resolve(ref_name, type_attr_map)
             if resolved and resolved != ref_name:
+                # If resolving to an init attr AND it's a call, route through method
+                if is_call and attr_methods and resolved in (init_attrs or set()):
+                    first_method = attr_methods.get(resolved)
+                    if first_method:
+                        fixes[f"{ref_name}("] = f"{resolved}.{first_method}("
+                        continue
                 fixes[ref_name] = resolved
                 continue
 
@@ -1498,6 +1598,8 @@ class SynthesisStage(PipelineStage):
             )
             type_attr_map = _build_type_attr_map(interface_source)
             init_attrs = _extract_init_attr_names(interface_source)
+            # Map attr_name -> first public method (for attr-as-function repair)
+            attr_methods = _build_attr_methods(type_attr_map, prior_outputs)
             logger.info(
                 f"Stage 'synthesis': {filename} source={len(source)} chars, "
                 f"disk={len(disk_source)} chars, "
@@ -1635,6 +1737,7 @@ class SynthesisStage(PipelineStage):
                     content, prior_outputs,
                     type_attr_map=type_attr_map,
                     init_attrs=init_attrs,
+                    attr_methods=attr_methods,
                     filename=filename,
                 )
                 if n_fixes:
