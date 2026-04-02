@@ -169,9 +169,11 @@ def extract_json(raw_output: str) -> dict[str, Any]:
     """
     sanitized = _sanitize_json_strings(raw_output)
 
-    # Fix unquoted identifiers in arrays: [d1, d2] -> ["d1", "d2"]
+    # Fix unquoted identifiers in JSON arrays: [d1, d2] -> ["d1", "d2"]
+    # Only match after colon+whitespace (JSON value position) to avoid
+    # corrupting string values like "per [d2]."
     sanitized = re.sub(
-        r'\[\s*([a-zA-Z]\w*(?:\s*,\s*[a-zA-Z]\w*)*)\s*\]',
+        r'(?<=:\s)\[\s*([a-zA-Z]\w*(?:\s*,\s*[a-zA-Z]\w*)*)\s*\]',
         lambda m: '[' + ', '.join(
             f'"{x.strip()}"' for x in m.group(1).split(',')
         ) + ']',

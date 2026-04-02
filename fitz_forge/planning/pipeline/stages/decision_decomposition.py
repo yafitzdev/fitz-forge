@@ -204,17 +204,55 @@ class DecisionDecompositionStage(PipelineStage):
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("decomposing")
 
-            t0 = time.monotonic()
-            raw = await client.generate(
-                messages=messages, temperature=0, max_tokens=16384,
-            )
-            t1 = time.monotonic()
-            logger.info(
-                f"Stage '{self.name}': decomposition took "
-                f"{t1 - t0:.1f}s ({len(raw)} chars)"
-            )
+            # Best-of-2: generate two decompositions, pick the better one.
+            # Also provides resilience against parse failures.
+            candidates: list[tuple[float, dict, str, dict]] = []
+            last_error: Exception | None = None
+            for i in range(2):
+                try:
+                    t0 = time.monotonic()
+                    raw = await client.generate(
+                        messages=messages, temperature=0.3, max_tokens=16384,
+                    )
+                    t1 = time.monotonic()
+                    logger.info(
+                        f"Stage '{self.name}': candidate {i+1} took "
+                        f"{t1 - t0:.1f}s ({len(raw)} chars)"
+                    )
+                    parsed = self.parse_output(raw)
+                    score, breakdown = self._score_decomposition(
+                        parsed, prior_outputs,
+                    )
+                    candidates.append((score, parsed, raw, breakdown))
+                    logger.info(
+                        f"Stage '{self.name}': candidate {i+1} "
+                        f"score={score:.1f} "
+                        f"({len(parsed.get('decisions', []))} decisions) "
+                        f"{breakdown}"
+                    )
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Stage '{self.name}': candidate {i+1} "
+                        f"failed: {e}"
+                    )
 
-            parsed = self.parse_output(raw)
+            if not candidates:
+                raise last_error or RuntimeError(
+                    "Both decomposition candidates failed"
+                )
+
+            # Pick highest scoring candidate
+            candidates.sort(key=lambda c: c[0], reverse=True)
+            best_score, parsed, raw, _ = candidates[0]
+
+            if len(candidates) > 1:
+                margin = candidates[0][0] - candidates[1][0]
+                logger.info(
+                    f"Stage '{self.name}': selected candidate "
+                    f"(score={best_score:.1f}, margin={margin:.1f})"
+                )
+
             decisions = parsed.get("decisions", [])
             logger.info(
                 f"Stage '{self.name}': produced {len(decisions)} decisions"
