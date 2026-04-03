@@ -43,5 +43,7 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: PARTIALLY FIXED (80%->60%)
-Further improvement likely requires larger models or restructuring artifact generation order (generate service artifact first, then route).
+## Status: PARTIALLY FIXED (80%->26%)
+Three-layer fix: imported type API injection + explicit rules + prompt reorder (rules+grounding FIRST, reasoning last). Lost-in-the-middle effect was the key insight — FitzService API was buried in the middle of the prompt.
+
+Remaining 26%: model still invents `service.answer_stream()` because reasoning says "build streaming" but service only has `query()`. The model can't consistently reconcile these on a 3B model. 40% of the time it correctly figures out the bridging pattern.

@@ -72,5 +72,5 @@ Option 1 or 4 is most targeted. Options 2-3 risk blowing the token budget on irr
 
 The fix transformed artifacts from useless stubs to real implementations with mostly-correct internal API calls. The 28% remaining fabrication is on secondary calls, not the core pipeline flow.
 
-## Status: PARTIALLY FIXED
-Reference method injection implemented. Model now produces real implementations but still fabricates some secondary calls. Next step: extend interface injection to cover factory methods and query field names.
+## Status: FIXED
+Three-layer fix: reference method injection + param type field extraction + callable factory annotation. 0% fabrication on engine.py artifacts across 50 isolated runs. Full pipeline run 67: engine.py fab=0 on all 10 plans.

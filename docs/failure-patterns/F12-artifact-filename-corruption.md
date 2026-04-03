@@ -35,4 +35,11 @@ Deterministic post-extraction cleanup in `_build_artifacts_per_file`:
 ## Affected Stage
 `synthesis.py` → `_build_artifacts_per_file()`, filename parsing
 
-## Status: NOT FIXED
+## Fix (IMPLEMENTED)
+Deterministic post-extraction cleanup in `_build_artifacts_per_file`:
+1. Pattern A: `re.sub(r'\.py[.#:].*', '.py', fname)` — strips method suffixes
+2. Pattern B: skip filenames without path separators (generic names like `new_chat_stream_endpoint.py`)
+
+Also found `::` variant in run 67 Plan 9 — fixed.
+
+## Status: FIXED

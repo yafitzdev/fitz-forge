@@ -57,6 +57,14 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | 49a-e | 03-30 | P4 re-enabled (A/B test) | 12-14 | — | 7.4 | 8.2 | 5.2 | 5.6 | 4.8 | 7.2 | **39.0 avg** | P4 confirmed dead weight. |
 | 50a-e | 03-30 | chain call grounding — REVERTED | 12-14 | — | 7.2 | 7.4 | 6.0 | 5.0 | 4.8 | 6.8 | **38.2 avg** | False positives on un-indexed classes. |
 | 51a-e | 03-30 | enriched repair — REVERTED | 12-15 | — | 5.6 | 7.4 | 6.2 | 3.4 | 3.8 | 5.6 | **33.2 avg** | LLM picks semantically wrong methods. |
+| 60a-j | 04-03 | best-of-2 + prompt eng (BASELINE for F-work) | 12-14 | — | 6.5 | 6.8 | 6.2 | 6.5 | 6.3 | 7.8 | **40.1 avg** | 10 plans. Min 30, max 49. |
+| 61a-c | 04-03 | + F7 prompt reorder | 12-14 | — | — | — | — | — | — | — | **37.0 avg** | 3 plans. F7 fixed but other failures dominate. |
+| 62a-c | 04-03 | + F1-F8 all fixed | 13 | — | — | — | — | — | — | — | **40.3 avg** | 3 plans. Structural fixes, score flat because F9 dominated. |
+| 63a-j | 04-03 | + F9 ref injection + bandaids removed | 12-15 | — | 7.7 | 8.0 | 6.0 | 5.3 | 5.7 | 7.7 | **40.6 avg** | 10 plans. Two 50s! Engine.py fab=0. Floor unchanged (32). |
+| 64a-j | 04-03 | + F10 API injection + F12 filename cleanup | 11-15 | — | 7.7 | 6.6 | 5.8 | 5.8 | 5.7 | 6.6 | **40.3 avg** | 10 plans. Range 29-49. Floor plans = upstream reasoning (F13). |
+| 65a-j | 04-03 | + F10 prompt reorder (rules+grounding first) | 12-15 | — | 8.1 | 7.9 | 6.6 | 6.7 | 6.8 | 7.6 | **42.7 avg** | 10 plans. New high 52. Floor 33. |
+| 66a-j | 04-03 | + F13C approach fallback | 12-14 | — | 7.8 | 8.0 | 6.4 | 7.0 | 6.5 | 7.0 | **42.5 avg** | 10 plans. New high 53. Zero empty architectures. |
+| **67a-j** | **04-04** | **+ best-of-3 scope consensus** | **12-15** | **—** | **8.3** | **8.5** | **7.1** | **7.0** | **7.2** | **7.6** | **45.3 avg** | **10 plans. +5.2 over baseline. Floor 37. Two 53s. Top 5 avg 49.2.** |
 
 ---
 
@@ -105,19 +113,35 @@ Scored by AST-based deterministic scorer (0-100). Zero variance. Measures: fabri
 | 04-02 | Compressed reasoning for artifacts | 20K->15.5K. Keep arch+design, drop roadmap/risk. |
 | 04-02 | Sectioned extraction (roadmap/risk from Design) | Score 72.6->76.0. NEW BEST. |
 | 04-02 | Attr-as-function repair | self._assembler() -> self._assembler.assemble(). |
+| 04-03 | Best-of-2 decomposition + scoring | Decomp quality gated. |
+| 04-03 | F1: Duplicate decision dedup (SequenceMatcher 0.85) | 17%->0% (100 runs). |
+| 04-03 | F4: Phantom phase filter (critical_path + risks) | 100%->0%. |
+| 04-03 | F7: Prompt reorder (source+interfaces BEFORE reasoning) | Fabrication 62%->2% (100 runs). |
+| 04-03 | F8: depends_on int->string coercion | Parse failures 6%->0%. |
+| 04-03 | F9: Reference method injection (answer() body into prompt) | Engine.py fab 100%->0% (200 runs). **BREAKTHROUGH.** |
+| 04-03 | F9: Param type field extraction (Query fields: text, constraints, metadata) | query.conversation_context eliminated. |
+| 04-03 | F9: Callable factory annotation | _chat_factory.get_chat() eliminated. |
+| 04-03 | F10: Imported type API injection (FitzService methods) | Generic, works for any codebase. |
+| 04-03 | F10: Prompt reorder v2 (rules+grounding FIRST, reasoning last) | Service fab 80%->26%. |
+| 04-03 | F12: Artifact filename cleanup (strip .py.xxx and ::xxx suffixes) | Filename corruption eliminated. |
+| 04-03 | F13C: Approach fallback from key_tradeoffs | Empty architecture eliminated. |
+| 04-03 | Removed hardcoded _INVALID_FIELD_PATTERNS (codebase-specific bandaid) | Could produce wrong corrections. |
+| 04-03 | F5: Import path repair with ambiguity guard (skip if N>1 classes) | Deterministic, zero LLM cost. |
+| 04-04 | **Best-of-3 scope consensus** | **THE biggest single improvement. +2.8 pts (42.5->45.3). Floor 33->37.** |
 
 ---
 
 ## Key Learnings
 
 **What works:**
+- **More LLM calls + pick the best is THE proactive fix for model quality limits.** Don't post-process bad output — generate multiple candidates and select. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts).
 - Decomposition is the strongest weapon (per-decision, per-field, per-artifact)
 - Deterministic repair > LLM repair (LLM picks semantically wrong corrections)
-- Less context is better (4K cheat sheet > 27K source dump)
-- Tools work when the model chooses what to look up (active > passive)
-- Pre-filling context always hurts (model skips verification)
+- **Reference method injection**: when creating a variant (answer_stream from answer), inject the original's body. Model produces 13K-char correct implementations instead of 1.7K stubs.
+- **Prompt order matters enormously** (lost-in-the-middle effect): rules and grounding at TOP, reasoning at bottom
+- **Imported type API injection**: parse target file imports, resolve return types, inject public APIs. Generic, works for any codebase.
 - Init preservation + interface injection + type-aware repair = grounded artifacts
-- Budget-aware truncation with priority ordering (decisions > source > interfaces > reasoning)
+- Budget-aware truncation with priority ordering (rules > grounding > decisions > source > reasoning)
 
 **What doesn't work:**
 - More context (source dumps, method flows, full reasoning)
@@ -125,12 +149,13 @@ Scored by AST-based deterministic scorer (0-100). Zero variance. Measures: fabri
 - Enriched repair (LLM picks wrong methods from suggestion lists)
 - Forced tool exits (loses the model's natural "I'm ready" signal)
 - Pre-fill of any kind (class lookups, tool history, baseline pre-calls)
+- **Blaming the model** — instead of saying "3B model can't do this," give it more chances and pick the best output
 
-**Root causes of remaining fabrication (1.4 avg):**
-- Attr-as-function: correct name but wrong calling pattern (self._xxx() vs self._xxx.method())
-- Invented helpers: model composes multiple real ops into one fake method
-- Hallucinated file paths: services.py vs services/fitz_service.py
-- Model capability ceiling at 40B parameters
+**Root causes of remaining score loss:**
+- Service API fabrication: model invents service.answer_stream() despite seeing real API (26% rate)
+- Synthesizer private method fabrication: _synthesizer._build_messages() (doesn't exist)
+- Wrong file paths: services.py vs services/fitz_service.py
+- Scope miscalibration: model sometimes proposes breaking changes or over-engineers
 
 ---
 
@@ -146,12 +171,30 @@ Shipped class interface injection, type-aware deterministic repair, disk source 
 
 Root cause: `file_contents` stores pre-compressed source with init bodies stripped. Interface injection was receiving 3780-char compressed source instead of 58K-char full source. Fix: read from disk.
 
+### Session 2026-04-03/04: Failure Pattern Analysis + Best-of-3
+
+Identified and fixed 14 failure patterns (F1-F14). 700+ isolated test runs across 6 harnesses. 7 benchmark runs (70 plans total). **Score 40.1 -> 45.3 (+13%).**
+
+Key breakthroughs:
+1. **F9 reference method injection** — inject answer() body when creating answer_stream(). Engine.py fabrication 62%->0% across 200 runs.
+2. **Best-of-3 scope consensus** — generate 3 reasoning candidates, penalize scope outliers. Single biggest improvement (+2.8 pts).
+3. **Prompt reorder** — rules+grounding at TOP, reasoning at bottom. Lost-in-the-middle effect was killing F7 and F10.
+4. **Imported type API injection** — parse imports, resolve return types, inject public APIs. Generic fix for any codebase.
+
+All 14 patterns documented in `docs/failure-patterns/` with individual docs, harnesses, and before/after data.
+
 ### Critical Files
 
-- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation, interface injection, type-aware repair, reasoning compression, sectioned extraction
+- `fitz_forge/planning/pipeline/stages/synthesis.py` — per-artifact generation, interface injection, type-aware repair, reference method injection, imported type API injection, scope consensus, prompt ordering
+- `fitz_forge/planning/pipeline/stages/decision_decomposition.py` — best-of-2 + scorer + dedup
+- `fitz_forge/planning/pipeline/stages/decision_resolution.py` — evidence validation
+- `fitz_forge/planning/pipeline/stages/base.py` — retry on empty extraction
+- `fitz_forge/planning/schemas/decisions.py` — depends_on int coercion
 - `fitz_forge/planning/agent/compressor.py` — init preservation
 - `fitz_forge/planning/validation/grounding.py` — AST grounding + StructuralIndexLookup
 - `benchmarks/eval_deterministic.py` — deterministic scorer
+- `benchmarks/test_f9_compression.py` — F9 fabrication harness
+- `benchmarks/test_f10_service.py` — F10 service API harness
+- `docs/failure-patterns/` — **14 failure pattern docs with before/after data**
 - `benchmarks/BENCHMARK.md` — how to run benchmarks
 - `docs/pipeline-architecture.md` — full pipeline technical reference
-- `docs/synthesis-refactor.md` — prompt compaction design doc
