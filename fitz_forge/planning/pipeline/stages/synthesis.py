@@ -229,6 +229,51 @@ def _truncate_at_line(text: str, max_chars: int) -> str:
     return text[:cut]
 
 
+def _extract_param_type_fields(
+    reference_body: str,
+    source_dir: str,
+) -> str:
+    """Extract field names from parameter types in a reference method.
+
+    Parses type annotations like `query: Query` from the method signature,
+    finds the class definition on disk, and returns field names. This tells
+    the model that Query has (text, constraints, metadata) so it doesn't
+    fabricate fields like conversation_context or history.
+    """
+    import ast as _ast
+    import re as _re
+    from pathlib import Path as _Path
+
+    if not source_dir:
+        return ""
+
+    # Extract type names from the method signature (first line)
+    # Match patterns like `param: TypeName` or `param: TypeName | None`
+    type_names = set(_re.findall(
+        r':\s*([A-Z][A-Za-z]+)\b', reference_body.split("\n")[0],
+    ))
+    # Also catch return types
+    ret_match = _re.search(r'->\s*([A-Z][A-Za-z]+)', reference_body.split("\n")[0])
+    if ret_match:
+        type_names.add(ret_match.group(1))
+
+    if not type_names:
+        return ""
+
+    lines = []
+    for type_name in sorted(type_names):
+        # Skip builtins
+        if type_name in ("None", "Any", "Optional", "Iterator", "Callable",
+                         "Dict", "List", "Tuple", "Set", "Type", "Union"):
+            continue
+        # Find source file containing this class
+        fields = _extract_class_fields(type_name, {}, source_dir)
+        if fields:
+            lines.append(f"{type_name} fields: {', '.join(fields)}")
+
+    return "\n".join(lines)
+
+
 def _extract_reference_method(
     disk_source: str,
     purpose: str,
@@ -1584,6 +1629,8 @@ class SynthesisStage(PipelineStage):
         # Find CamelCase names that look like schemas/models
         text = relevant_decisions + " " + reasoning[:3000]
         candidates = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text))
+        # Also catch single-word capitalized types (Query, Answer, etc.)
+        candidates.update(_re.findall(r"\b([A-Z][a-z]{2,})\b", text))
         # Also include common request/response patterns
         candidates.update(
             name for name in lookup.classes
@@ -1749,6 +1796,14 @@ class SynthesisStage(PipelineStage):
             if meths:
                 sig_str = ", ".join(meths[:8])
                 lines.append(f"self.{attr_name} → {type_name}: {sig_str}")
+            elif (type_name[0].islower()
+                  and ("factory" in type_name.lower()
+                       or type_name.startswith("get_"))):
+                # Callable/factory — not a class, call it directly
+                lines.append(
+                    f'self.{attr_name} → CALLABLE (use as self.{attr_name}("arg"), '
+                    f'NOT self.{attr_name}.get_xxx())'
+                )
             else:
                 lines.append(f"self.{attr_name} → {type_name}")
 
@@ -1837,6 +1892,15 @@ class SynthesisStage(PipelineStage):
                     f"reference method ({len(reference_body)} chars)"
                 )
 
+        # F9 supplement: extract parameter type fields from reference method
+        # so the model knows Query has (text, constraints, metadata) not
+        # (conversation_context, history, mode, provider).
+        param_type_fields = ""
+        if reference_body and prior_outputs:
+            param_type_fields = _extract_param_type_fields(
+                reference_body, prior_outputs.get("_source_dir", ""),
+            )
+
         # Resolve schema fields deterministically
         schema_fields = ""
         if prior_outputs:
@@ -1878,10 +1942,11 @@ class SynthesisStage(PipelineStage):
             )
 
         schema_section = ""
-        if schema_fields:
+        all_schema = "\n".join(filter(None, [schema_fields, param_type_fields]))
+        if all_schema:
             schema_section = (
                 f"\n\n## DATA MODEL FIELDS (use these exact field names)\n"
-                f"{schema_fields}"
+                f"{all_schema}"
             )
 
         interface_section = ""
