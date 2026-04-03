@@ -883,27 +883,12 @@ def _repair_fabricated_refs(
             f"  repair: removed test leak self.{test_ref}()"
         )
 
-    # Regex pass: fix known invalid field accesses on local variables.
-    # The model confuses Query (engine dataclass) with QueryRequest (API model).
-    _INVALID_FIELD_PATTERNS = [
-        # Query dataclass confusion (model uses QueryRequest fields)
-        (r'query\.conversation_context', 'query.text'),
-        (r'query\.conversation_history', 'query.text'),
-        (r'query\.use_hyde', 'False'),
-        (r'query\.profile', 'None'),
-        (r'query\.answer_mode', 'None'),
-        # Request field confusion
-        (r'request\.query\b', 'request.message'),
-        (r'request\.user_id', 'request.message'),
-        (r'request\.question', 'request.message'),
-    ]
+    # NOTE: Hardcoded _INVALID_FIELD_PATTERNS removed. They were
+    # codebase-specific (fitz-sage) and could produce wrong corrections
+    # (e.g. request.question → request.message when QueryRequest DOES
+    # have .question). F2 is now solved by prompt reorder + schema
+    # field injection + F9 param type extraction.
     field_fixes = 0
-    for pattern, replacement in _INVALID_FIELD_PATTERNS:
-        new_repaired = _re.sub(pattern, replacement, repaired)
-        if new_repaired != repaired:
-            field_fixes += 1
-            logger.info(f"  repair: {pattern} -> {replacement}")
-            repaired = new_repaired
 
     # F5 fix: repair wrong import paths using structural index
     import_fixes = 0
@@ -929,12 +914,17 @@ def _repair_fabricated_refs(
             correct_module = None
             for name in names:
                 classes = lookup.classes.get(name)
-                if classes:
+                if classes and len(classes) == 1:
                     cls_file = classes[0].file
                     cls_module = cls_file.replace("/", ".").replace("\\", ".").removesuffix(".py")
                     if cls_module != module_path:
                         correct_module = cls_module
                         break
+                elif classes and len(classes) > 1:
+                    logger.info(
+                        f"  import: skipping ambiguous '{name}' "
+                        f"({len(classes)} locations)"
+                    )
             if correct_module:
                 new_line = f"{prefix}{correct_module}{imp_kw}{names_str}"
                 new_lines.append(new_line)
