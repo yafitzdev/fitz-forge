@@ -94,6 +94,8 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
+| **F10** | **FitzService API fabrication** | **40% of plans (4/10)** | **~8 pts (floor plan driver)** | Service API injection | ❌ | 0 | 40% | — | **❌** |
+| F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
@@ -111,7 +113,9 @@ Every LLM call in the pipeline that can or has produced failures:
 4. ~~**F2** — Wrong request fields.~~ ✅ DONE. Fixed by F7 prompt reorder (40%→0% in traces).
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
-7. **F9** — Source compression blindness. 100% occurrence on large files. THE remaining bottleneck. Fix: inject reference method body into artifact prompt when creating variant methods.
+7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
+8. **F10** — FitzService API fabrication. 40% of plans. THE floor plan driver. Fix: inject FitzService public API into route/SDK artifact prompts.
+9. F11 — Wrong object for correct method. 20% of plans. Low priority (80% get it right).
 
 ---
 
