@@ -94,16 +94,16 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + rules | ✅ | 150 (3×50) | 80% | **60%** | 🟡 |
+| **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + prompt reorder | ✅ | 200 (4×50) | 80% | **26%** | 🟡 |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | **F13** | **Upstream reasoning failures** | **30% of plans (3/10)** | **~10 pts (floor plan driver)** | Fact-checking / best-of-3 | ❌ | 0 | 30% | — | **❌** |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
-**F9 is the dominant remaining bottleneck.** Source compression replaces method bodies with `... # N lines`, so the model fabricates internal API calls, method signatures, config patterns, and orchestration logic. This accounts for the bulk of remaining Sonnet score loss on codebase alignment (5.3/10 avg) and implementability (5.7/10 avg).
+**Current bottlenecks (run 64):** F10 (service API fabrication, 26% after prompt reorder) and F13 (upstream reasoning failures, 30% — empty architecture, codebase misreads, decision duplication). F9 was the breakthrough fix (0% fabrication on engine.py) but the score ceiling is now limited by reasoning quality on a 3B model.
 
-**Impact:** "est." = estimated from Sonnet dimension weights, not yet measured in isolation. F7 was measured: massive isolated improvement but no measurable full-pipeline score change because F1-F6 dominate the remaining score loss. **Individual fixes don't move full-pipeline scores until all major failures are addressed.**
+**Score trajectory:** Baseline 40.1 → F1-F8 40.3 → F9 46.7 (first 3) → 40.6 (10 plans) → 40.3 (run 64). The ceiling rose (50/60 plans exist) but the floor (29-32) drags the average. Floor plans are caused by upstream reasoning, not artifact generation.
 
 ---
 
