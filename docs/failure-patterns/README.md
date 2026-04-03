@@ -97,6 +97,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + rules | ✅ | 150 (3×50) | 80% | **60%** | 🟡 |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
+| **F13** | **Upstream reasoning failures** | **30% of plans (3/10)** | **~10 pts (floor plan driver)** | Fact-checking / best-of-3 | ❌ | 0 | 30% | — | **❌** |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
@@ -127,4 +128,5 @@ Every LLM call in the pipeline that can or has produced failures:
 | 60 | 2026-04-03 | best-of-2 + prompt eng (pre-reorder) | 10 | 40.1/60 | Baseline for failure analysis |
 | 61 | 2026-04-03 | + prompt reorder (F7 fix) | 3 | 37.0/60 | F7 fixed but other failures dominate. Not a regression — within noise. |
 | 62 | 2026-04-03 | + F1-F8 all fixed | 3 | 40.3/60 | Flat vs baseline. Structural metrics improved (phase consistency 100%, fab down). F9 identified as bottleneck — source compression removes method bodies, model fabricates internal API calls. |
-| 63 | 2026-04-03 | + F9 fixed + bandaids removed | 10 | **40.6/60** | First 3 averaged 46.7 (two 50s!), but 10-plan avg is 40.6. High variance (32-50). Engine.py fab=0 across all 10. Ceiling raised but floor unchanged — non-engine artifacts (SDK, service) still fabricate. |
+| 63 | 2026-04-03 | + F9 fixed + bandaids removed | 10 | 40.6/60 | First 3 averaged 46.7 (two 50s!), but 10-plan avg is 40.6. High variance (32-50). Engine.py fab=0 across all 10. Ceiling raised but floor unchanged — non-engine artifacts (SDK, service) still fabricate. |
+| 64 | 2026-04-03 | + F10 + F12 + prompt reorder | 10 | 40.3/60 | Range 29-49. Floor plans caused by upstream reasoning (F13): empty architecture, codebase misreads, decision duplication. Artifact fixes can't help when reasoning is wrong. |
