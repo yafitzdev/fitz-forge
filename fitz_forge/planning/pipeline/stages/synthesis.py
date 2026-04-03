@@ -2170,18 +2170,26 @@ class SynthesisStage(PipelineStage):
             f"- Do NOT fabricate method names — if unsure, omit the call\n"
         )
 
+        # Build grounding block — goes FIRST after purpose to avoid
+        # lost-in-the-middle effect (same fix as F7 for attr fabrication)
+        grounding = ""
+        grounding_parts = [
+            s for s in [interface_section, schema_section, prior_artifact_sigs]
+            if s.strip()
+        ]
+        if grounding_parts:
+            grounding = "\n".join(grounding_parts)
+
         # Measure fixed sections (everything except reasoning)
         fixed = (
             f"Write a code artifact for: {filename}\n"
             f"Purpose: {purpose}\n\n"
+            f"{rules}\n"
+            f"{grounding}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
-            f"{reference_section}"
-            f"{schema_section}"
-            f"{interface_section}"
-            f"{prior_artifact_sigs}\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
-            f"{rules}"
+            f"{reference_section}\n\n"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n"
         )
         fixed_chars = len(fixed)
 
@@ -2201,19 +2209,30 @@ class SynthesisStage(PipelineStage):
         prompt = (
             f"Write a code artifact for: {filename}\n"
             f"Purpose: {purpose}\n\n"
+            f"{rules}\n"
+            f"{grounding}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
-            f"{reference_section}"
-            f"{schema_section}"
-            f"{interface_section}"
-            f"{prior_artifact_sigs}\n\n"
+            f"{reference_section}\n\n"
             f"## PLAN CONTEXT (background — lower priority than above)\n"
             f"{reasoning_final}\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
-            f"{rules}"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n"
         )
 
         messages = self._make_messages(prompt)
+
+        logger.info(
+            f"Stage 'synthesis': {filename} PROMPT SIZE: "
+            f"{len(prompt)} chars (~{len(prompt)//4} tokens)"
+        )
+        # Temporary: dump prompt structure for debugging
+        if os.environ.get("DUMP_ARTIFACT_PROMPT"):
+            import sys as _sys
+            _sys.stderr.write(f"\n{'='*80}\nARTIFACT PROMPT FOR {filename}\n{'='*80}\n")
+            _sys.stderr.write(prompt[:3000])
+            _sys.stderr.write(f"\n... ({len(prompt)} chars total)\n")
+            _sys.stderr.write(prompt[-1000:])
+            _sys.stderr.write(f"\n{'='*80}\n")
 
         try:
             t0 = time.monotonic()
