@@ -2847,6 +2847,23 @@ class SynthesisStage(PipelineStage):
                     arch_merged["recommended"] = approach_names[0]
 
             arch_merged.setdefault("approaches", [])
+            # F13C fix: if approaches is empty but key_tradeoffs exists,
+            # derive a single approach from available architecture data
+            if not arch_merged["approaches"] and arch_merged.get("key_tradeoffs"):
+                logger.warning(
+                    "Stage 'synthesis': approaches empty, deriving from "
+                    "key_tradeoffs"
+                )
+                tradeoffs = arch_merged["key_tradeoffs"]
+                arch_merged["approaches"] = [{
+                    "name": "Recommended Approach",
+                    "description": arch_merged.get("scope_statement", "")
+                    or "See key tradeoffs for design rationale",
+                    "pros": list(tradeoffs.keys())[:3],
+                    "cons": ["Single approach evaluated"],
+                    "recommended": True,
+                }]
+                arch_merged["recommended"] = "Recommended Approach"
             arch_merged.setdefault("recommended", "")
             arch_merged.setdefault("reasoning", "")
             arch_merged.setdefault("key_tradeoffs", {})
