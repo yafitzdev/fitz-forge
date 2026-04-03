@@ -122,3 +122,4 @@ Every LLM call in the pipeline that can or has produced failures:
 | 60 | 2026-04-03 | best-of-2 + prompt eng (pre-reorder) | 10 | 40.1/60 | Baseline for failure analysis |
 | 61 | 2026-04-03 | + prompt reorder (F7 fix) | 3 | 37.0/60 | F7 fixed but other failures dominate. Not a regression — within noise. |
 | 62 | 2026-04-03 | + F1-F8 all fixed | 3 | 40.3/60 | Flat vs baseline. Structural metrics improved (phase consistency 100%, fab down). F9 identified as bottleneck — source compression removes method bodies, model fabricates internal API calls. |
+| 63 | 2026-04-03 | + F9 fixed + bandaids removed | 3 | **46.7/60** | **+6.6 pts (+16%).** Two plans hit 50/60. Engine.py fab=0 across all 3. Codebase alignment 5.3→7.3, implementability 5.7→7.0. |
