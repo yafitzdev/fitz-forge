@@ -1636,6 +1636,23 @@ class SynthesisStage(PipelineStage):
             else:
                 artifact_specs.append((entry.strip(), ""))
 
+        # F12 fix: clean up corrupted artifact filenames
+        import re as _re
+        cleaned_specs: list[tuple[str, str]] = []
+        for fname, purpose in artifact_specs:
+            # Pattern A: strip method suffix (engine.py.answer_stream() -> engine.py)
+            fname = _re.sub(r'\.py[.#].*', '.py', fname)
+            # Pattern B: skip generic filenames without path separators
+            # (new_chat_stream_endpoint.py -> not a real codebase path)
+            if "/" not in fname and fname not in ("__init__.py",):
+                logger.warning(
+                    f"Stage 'synthesis': skipping generic artifact "
+                    f"filename '{fname}' (no path separator)"
+                )
+                continue
+            cleaned_specs.append((fname, purpose))
+        artifact_specs = cleaned_specs
+
         if not artifact_specs:
             return await self._artifacts_template_fallback(
                 client, reasoning, prior_outputs,
