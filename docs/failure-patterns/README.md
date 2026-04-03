@@ -93,8 +93,11 @@ Every LLM call in the pipeline that can or has produced failures:
 | F6 | Empty extraction | was ~10%, now ~0% | est. ~6 pts | LLM retry | ✅ | 150 (3×50) | 0% (0/150) | **0%** (safety net retry) | ✅ |
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
+| **F9** | **Source compression blindness** | **100% of large-file artifacts** | **~10 pts (alignment+implementability)** | Reference method injection | ❌ | 0 | 100% | — | **❌** |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
+
+**F9 is the dominant remaining bottleneck.** Source compression replaces method bodies with `... # N lines`, so the model fabricates internal API calls, method signatures, config patterns, and orchestration logic. This accounts for the bulk of remaining Sonnet score loss on codebase alignment (5.3/10 avg) and implementability (5.7/10 avg).
 
 **Impact:** "est." = estimated from Sonnet dimension weights, not yet measured in isolation. F7 was measured: massive isolated improvement but no measurable full-pipeline score change because F1-F6 dominate the remaining score loss. **Individual fixes don't move full-pipeline scores until all major failures are addressed.**
 
@@ -108,6 +111,7 @@ Every LLM call in the pipeline that can or has produced failures:
 4. ~~**F2** — Wrong request fields.~~ ✅ DONE. Fixed by F7 prompt reorder (40%→0% in traces).
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
+7. **F9** — Source compression blindness. 100% occurrence on large files. THE remaining bottleneck. Fix: inject reference method body into artifact prompt when creating variant methods.
 
 ---
 
@@ -117,3 +121,4 @@ Every LLM call in the pipeline that can or has produced failures:
 |-----|------|--------|-------|-----------|-------|
 | 60 | 2026-04-03 | best-of-2 + prompt eng (pre-reorder) | 10 | 40.1/60 | Baseline for failure analysis |
 | 61 | 2026-04-03 | + prompt reorder (F7 fix) | 3 | 37.0/60 | F7 fixed but other failures dominate. Not a regression — within noise. |
+| 62 | 2026-04-03 | + F1-F8 all fixed | 3 | 40.3/60 | Flat vs baseline. Structural metrics improved (phase consistency 100%, fab down). F9 identified as bottleneck — source compression removes method bodies, model fabricates internal API calls. |
