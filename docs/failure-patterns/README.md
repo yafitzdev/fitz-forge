@@ -44,6 +44,8 @@ Catalog of known failure modes in the planning pipeline, with fix status, test d
 | `benchmarks/test_artifact_gen.py` | Generate N artifacts for a target file, check for fabrications | `python benchmarks/test_artifact_gen.py --runs 50 --trace-dir benchmarks/traces/xxx` |
 | `benchmarks/test_f1_dedup.py` | Generate N decompositions, check for duplicate decisions | `python benchmarks/test_f1_dedup.py --runs 50` |
 | `benchmarks/test_f6_empty.py` | Generate 1 reasoning, run N extractions per critical group | `python benchmarks/test_f6_empty.py --runs 50` |
+| `benchmarks/test_f9_compression.py` | Generate N engine.py artifacts, check internal API fabrication | `python -m benchmarks.test_f9_compression --runs 50` |
+| `benchmarks/test_f10_service.py` | Generate N query.py artifacts, check FitzService API fabrication | `python -m benchmarks.test_f10_service --runs 50` |
 
 ### Key files
 | File | Role |
@@ -65,7 +67,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | 1 | Implementation check | 1 call | JSON parse failure | ✅ non-fatal, pipeline continues |
 | 2 | **Decision decomposition** | 2 calls (best-of-2) | Duplicate decisions (F1 ✅), parse failure (F8 ✅), too few decisions | ✅ best-of-2 + scorer + dedup + depends_on coercion |
 | 3 | Decision resolution | 1 call per decision | Wrong evidence, hallucinated code refs | ✅ contradiction detection + retry + evidence file validation |
-| 4 | **Synthesis reasoning** | 2 calls (best-of-2) | Vague reasoning, missing sections, low decision coverage | ✅ best-of-2 scoring + citation rules |
+| 4 | **Synthesis reasoning** | 3 calls (best-of-3) | Vague reasoning, scope miscalibration, over-engineering (F13) | ✅ best-of-3 + scope consensus + scorer + citation rules |
 | 5 | Self-critique | 1 call | Critique too aggressive (deletes valid content) | ✅ length floor check (>30% of original) |
 | 6 | Context extraction | 4 calls | Empty fields (F6 ✅), JSON parse failure | ✅ JSON regex fix + retry on empty |
 | 7 | Architecture extraction | 2 calls | Empty approaches (F6 ✅), wrong scope statement | ✅ retry on empty + Pydantic defaults |
@@ -97,13 +99,13 @@ Every LLM call in the pipeline that can or has produced failures:
 | **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + prompt reorder | ✅ | 200 (4×50) | 80% | **26%** | 🟡 |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
-| **F13** | **Upstream reasoning failures** | **30% of plans (3/10)** | **~10 pts (floor plan driver)** | Fact-checking / best-of-3 | ❌ | 0 | 30% | — | **❌** |
+| F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
-**Current bottlenecks (run 64):** F10 (service API fabrication, 26% after prompt reorder) and F13 (upstream reasoning failures, 30% — empty architecture, codebase misreads, decision duplication). F9 was the breakthrough fix (0% fabrication on engine.py) but the score ceiling is now limited by reasoning quality on a 3B model.
+**Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Score trajectory:** Baseline 40.1 → F1-F8 40.3 → F9 46.7 (first 3) → 40.6 (10 plans) → 40.3 (run 64). The ceiling rose (50/60 plans exist) but the floor (29-32) drags the average. Floor plans are caused by upstream reasoning, not artifact generation.
+**Current state (run 67):** Avg 45.3/60 (+5.2 over baseline). Ceiling 53/60. Floor 37/60. 6/10 plans have 0% fabrication. All structural issues (phases, approaches, filenames) eliminated. Remaining floor driven by synthesizer private method fabrication (F11-adjacent) and scope miscalibration on non-engine artifacts.
 
 ---
 
@@ -116,8 +118,10 @@ Every LLM call in the pipeline that can or has produced failures:
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
-8. **F10** — FitzService API fabrication. 40% of plans. THE floor plan driver. Fix: inject FitzService public API into route/SDK artifact prompts.
-9. F11 — Wrong object for correct method. 20% of plans. Low priority (80% get it right).
+8. ~~**F10** — Service API fabrication.~~ 🟡 PARTIALLY. Imported type API injection + prompt reorder (80%→26%).
+9. F11 — Wrong object for correct method. 20% of plans. Low priority.
+10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
+11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
 
 ---
 

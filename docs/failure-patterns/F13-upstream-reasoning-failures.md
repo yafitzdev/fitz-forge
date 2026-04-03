@@ -34,4 +34,13 @@ These are model quality limits on a 3B parameter model:
 3. **Best-of-3 reasoning**: Generate 3 reasoning candidates instead of 2 to reduce chance of hollow sections
 4. **Post-extraction validation**: Check that architecture.approaches is non-empty AND substantive (not just empty strings)
 
-## Status: NOT FIXED (model quality limit)
+## Fix (IMPLEMENTED)
+**Best-of-3 with scope consensus**: Generate 3 reasoning candidates, extract scope size (files + types), compute median, penalize candidates >50% from median. This filters out over-engineered outliers.
+
+Results: Run 67 avg 45.3/60 (was 42.5 with best-of-2). Floor rose from 33→37. The consensus band naturally selects for "what most candidates agree on" as reasonable scope.
+
+**Key learning**: The proactive fix for model quality limits is MORE CALLS + PICK THE BEST, not post-processing. The model WILL produce good output some % of the time. The scorer's job is to select it.
+
+Also: F13C fallback derives approaches from key_tradeoffs when extraction returns empty.
+
+## Status: PARTIALLY FIXED (best-of-3 + F13C fallback)
