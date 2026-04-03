@@ -707,7 +707,29 @@ def _repair_fabricated_refs(
             f"  repair: removed test leak self.{test_ref}()"
         )
 
-    total_fixes = len(fixes) + len(removals)
+    # Regex pass: fix known invalid field accesses on local variables.
+    # The model confuses Query (engine dataclass) with QueryRequest (API model).
+    _INVALID_FIELD_PATTERNS = [
+        # Query dataclass confusion (model uses QueryRequest fields)
+        (r'query\.conversation_context', 'query.text'),
+        (r'query\.conversation_history', 'query.text'),
+        (r'query\.use_hyde', 'False'),
+        (r'query\.profile', 'None'),
+        (r'query\.answer_mode', 'None'),
+        # Request field confusion
+        (r'request\.query\b', 'request.message'),
+        (r'request\.user_id', 'request.message'),
+        (r'request\.question', 'request.message'),
+    ]
+    field_fixes = 0
+    for pattern, replacement in _INVALID_FIELD_PATTERNS:
+        new_repaired = _re.sub(pattern, replacement, repaired)
+        if new_repaired != repaired:
+            field_fixes += 1
+            logger.info(f"  repair: {pattern} -> {replacement}")
+            repaired = new_repaired
+
+    total_fixes = len(fixes) + len(removals) + field_fixes
     return repaired, total_fixes
 
 
@@ -1705,11 +1727,11 @@ class SynthesisStage(PipelineStage):
             f"Write a code artifact for: {filename}\n"
             f"Purpose: {purpose}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
-            f"## PLAN CONTEXT (what this artifact is part of)\n"
-            f"{reasoning_final}"
             f"{source_section}"
             f"{schema_section}"
             f"{interface_section}\n\n"
+            f"## PLAN CONTEXT (background — lower priority than above)\n"
+            f"{reasoning_final}\n\n"
             f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
             f"{rules}"
         )
