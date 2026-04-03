@@ -93,7 +93,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F6 | Empty extraction | was ~10%, now ~0% | est. ~6 pts | LLM retry | ✅ | 150 (3×50) | 0% (0/150) | **0%** (safety net retry) | ✅ |
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
-| **F9** | **Source compression blindness** | **100% of large-file artifacts** | **~10 pts (alignment+implementability)** | Reference method injection | ✅ | 100 (2x50) | stubs only (4% fab) | **real impls (28% fab)** | 🟡 |
+| F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
