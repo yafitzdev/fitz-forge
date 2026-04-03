@@ -131,4 +131,5 @@ Every LLM call in the pipeline that can or has produced failures:
 | 63 | 2026-04-03 | + F9 fixed + bandaids removed | 10 | 40.6/60 | First 3 averaged 46.7 (two 50s!), but 10-plan avg is 40.6. High variance (32-50). Engine.py fab=0 across all 10. Ceiling raised but floor unchanged — non-engine artifacts (SDK, service) still fabricate. |
 | 64 | 2026-04-03 | + F10 + F12 + prompt reorder | 10 | 40.3/60 | Range 29-49. Floor plans caused by upstream reasoning (F13): empty architecture, codebase misreads, decision duplication. |
 | 65 | 2026-04-03 | + F12 active + F13C pending | 10 | 42.7/60 | +2.6 over baseline. New high: 52/60. Top 5 avg 47.6. Floor 33. |
-| 66 | 2026-04-03 | + F13C approach fallback | 10 | 42.5/60 | New high: 53/60. Zero empty architecture sections (F13C working). Floor 33. Remaining floor from scope miscalibration + over-engineering. |
+| 66 | 2026-04-03 | + F13C approach fallback | 10 | 42.5/60 | New high: 53/60. Zero empty architecture sections (F13C working). Floor 33. |
+| **67** | **2026-04-04** | **+ best-of-3 scope consensus** | **10** | **45.3/60** | **+5.2 over baseline. Floor 37, two 53s. Top 5 avg 49.2. Scope consensus filtering out over-engineered candidates.** |
