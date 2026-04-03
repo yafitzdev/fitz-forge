@@ -2048,11 +2048,11 @@ class SynthesisStage(PipelineStage):
             imported_type_apis = _resolve_imported_type_apis(
                 interface_source, prior_outputs,
             )
-            logger.info(
-                f"Stage 'synthesis': {filename} imported_type_apis="
-                f"{len(imported_type_apis)} chars, "
-                f"interface_source={len(interface_source)} chars"
-            )
+            if imported_type_apis:
+                logger.info(
+                    f"Stage 'synthesis': {filename} imported APIs: "
+                    f"{len(imported_type_apis)} chars"
+                )
             if imported_type_apis:
                 class_interfaces = (
                     class_interfaces + "\n" + imported_type_apis
@@ -2222,17 +2222,9 @@ class SynthesisStage(PipelineStage):
         messages = self._make_messages(prompt)
 
         logger.info(
-            f"Stage 'synthesis': {filename} PROMPT SIZE: "
-            f"{len(prompt)} chars (~{len(prompt)//4} tokens)"
+            f"Stage 'synthesis': {filename} prompt={len(prompt)} chars "
+            f"(~{len(prompt)//4} tok)"
         )
-        # Temporary: dump prompt structure for debugging
-        if os.environ.get("DUMP_ARTIFACT_PROMPT"):
-            import sys as _sys
-            _sys.stderr.write(f"\n{'='*80}\nARTIFACT PROMPT FOR {filename}\n{'='*80}\n")
-            _sys.stderr.write(prompt[:3000])
-            _sys.stderr.write(f"\n... ({len(prompt)} chars total)\n")
-            _sys.stderr.write(prompt[-1000:])
-            _sys.stderr.write(f"\n{'='*80}\n")
 
         try:
             t0 = time.monotonic()
