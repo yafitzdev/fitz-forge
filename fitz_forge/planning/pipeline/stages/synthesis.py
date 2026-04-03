@@ -229,6 +229,191 @@ def _truncate_at_line(text: str, max_chars: int) -> str:
     return text[:cut]
 
 
+def _resolve_imported_type_apis(
+    source: str,
+    prior_outputs: dict[str, Any],
+) -> str:
+    """Resolve public APIs for types imported or used as local variables.
+
+    Parses the target file for:
+      - `from X import ClassName` → look up ClassName's public methods
+      - `var: ClassName = ...` → look up ClassName's public methods
+      - `def func(...) -> ClassName` → look up ClassName's public methods
+
+    Returns a compact cheat sheet appended to the interface section.
+    This prevents the model from fabricating methods on imported types
+    (e.g. inventing service.query_stream() when FitzService only has query()).
+
+    Generic — works for any codebase, not hardcoded to specific classes.
+    """
+    import ast as _ast
+
+    if not source:
+        return ""
+
+    try:
+        tree = _ast.parse(source)
+    except SyntaxError:
+        return ""
+
+    # Collect type names from imports, annotations, and return types
+    imported_types: set[str] = set()
+    # Track imported functions to resolve their return types
+    imported_funcs: dict[str, str] = {}  # func_name -> module_path
+
+    for node in _ast.walk(tree):
+        # from X import ClassName or function
+        if isinstance(node, _ast.ImportFrom) and node.module:
+            for alias in node.names:
+                name = alias.name
+                if name[0].isupper() and not name.startswith("_"):
+                    imported_types.add(name)
+                elif name[0].islower() and not name.startswith("_"):
+                    # Imported function — resolve its return type later
+                    imported_funcs[name] = node.module
+        # var: ClassName = ... (annotations)
+        if isinstance(node, _ast.AnnAssign) and isinstance(node.annotation, _ast.Name):
+            name = node.annotation.id
+            if name[0].isupper():
+                imported_types.add(name)
+        # def func(...) -> ClassName (return type hints)
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            if node.returns and isinstance(node.returns, _ast.Name):
+                name = node.returns.id
+                if name[0].isupper():
+                    imported_types.add(name)
+            # Parameter type hints
+            for arg in node.args.args:
+                if arg.annotation and isinstance(arg.annotation, _ast.Name):
+                    name = arg.annotation.id
+                    if name[0].isupper():
+                        imported_types.add(name)
+
+    # Filter out builtins and stdlib types
+    _SKIP = {"Any", "Optional", "Iterator", "AsyncIterator", "Callable",
+             "Dict", "List", "Tuple", "Set", "Type", "Union", "None",
+             "Depends", "Request", "Response", "HTTPException",
+             "BaseModel", "Field", "Query"}
+
+    # Resolve return types of imported functions (e.g. get_service -> FitzService)
+    source_dir = prior_outputs.get("_source_dir", "")
+    if imported_funcs and source_dir:
+        from pathlib import Path as _P
+        for func_name, module_path in imported_funcs.items():
+            rel_path = module_path.replace(".", "/") + ".py"
+            func_file = _P(source_dir) / rel_path
+            if not func_file.is_file():
+                continue
+            try:
+                func_src = func_file.read_text(encoding="utf-8", errors="replace")
+                func_tree = _ast.parse(func_src)
+            except (OSError, SyntaxError):
+                continue
+            for fnode in _ast.walk(func_tree):
+                if (isinstance(fnode, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                        and fnode.name == func_name
+                        and fnode.returns
+                        and isinstance(fnode.returns, _ast.Name)):
+                    ret_type = fnode.returns.id
+                    if ret_type[0].isupper() and ret_type not in _SKIP:
+                        imported_types.add(ret_type)
+                    break
+
+    imported_types -= _SKIP
+
+    if not imported_types:
+        return ""
+
+    # Look up public methods for each type
+    agent_ctx = prior_outputs.get("_agent_context", {})
+    full_index = agent_ctx.get("full_structural_index", "")
+    if not full_index:
+        full_index = prior_outputs.get("_gathered_context", "")
+
+    source_dir = prior_outputs.get("_source_dir", "")
+    lines = []
+
+    if full_index:
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+        lookup = StructuralIndexLookup(full_index)
+
+        for type_name in sorted(imported_types):
+            cls = lookup.find_class(type_name)
+            if cls and cls.methods:
+                meths = [
+                    m for m in cls.methods
+                    if not m.startswith("__")
+                ]
+                if meths:
+                    sig_parts = []
+                    for mname in meths[:10]:
+                        minfo = cls.methods[mname]
+                        sig = mname
+                        if minfo.return_type:
+                            sig += f" -> {minfo.return_type}"
+                        sig_parts.append(sig)
+                    lines.append(
+                        f"{type_name} methods: {', '.join(sig_parts)}"
+                    )
+
+    # Fallback: parse source files on disk for types not found in index
+    if source_dir:
+        from pathlib import Path as _Path
+        found_in_index = {l.split(" methods:")[0] for l in lines}
+        missing = imported_types - found_in_index
+
+        for type_name in missing:
+            # Search disk for class definition
+            for py in _Path(source_dir).rglob("*.py"):
+                if ".venv" in str(py) or "__pycache__" in str(py):
+                    continue
+                stem = py.stem.lower()
+                tn_lower = type_name.lower()
+                if len(stem) < 3 or (tn_lower not in stem and stem not in tn_lower
+                                      and "service" not in stem and "model" not in stem):
+                    continue
+                try:
+                    src = py.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if f"class {type_name}" not in src:
+                    continue
+                try:
+                    file_tree = _ast.parse(src)
+                except SyntaxError:
+                    continue
+                for cnode in _ast.walk(file_tree):
+                    if isinstance(cnode, _ast.ClassDef) and cnode.name == type_name:
+                        meths = []
+                        for child in _ast.iter_child_nodes(cnode):
+                            if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                                if child.name.startswith("_"):
+                                    continue
+                                params = [
+                                    a.arg for a in child.args.args
+                                    if a.arg != "self"
+                                ]
+                                sig = f"{child.name}({', '.join(params)})"
+                                if child.returns:
+                                    try:
+                                        sig += f" -> {_ast.unparse(child.returns)}"
+                                    except Exception:
+                                        pass
+                                meths.append(sig)
+                        if meths:
+                            lines.append(
+                                f"{type_name} methods: {', '.join(meths[:10])}"
+                            )
+                        break
+                if type_name in {l.split(" methods:")[0] for l in lines}:
+                    break
+
+    if lines:
+        header = "## IMPORTED TYPE APIs (use ONLY these methods)"
+        return header + "\n" + "\n".join(lines)
+    return ""
+
+
 def _extract_param_type_fields(
     reference_body: str,
     source_dir: str,
@@ -1856,6 +2041,24 @@ class SynthesisStage(PipelineStage):
             init_attrs = _extract_init_attr_names(interface_source)
             # Map attr_name -> first public method (for attr-as-function repair)
             attr_methods = _build_attr_methods(type_attr_map, prior_outputs)
+            # F10 fix: resolve APIs for types imported/used as local
+            # variables (not just self._xxx attrs). When the artifact
+            # calls service.xxx(), the model needs to know what methods
+            # the service object actually has.
+            imported_type_apis = _resolve_imported_type_apis(
+                interface_source, prior_outputs,
+            )
+            logger.info(
+                f"Stage 'synthesis': {filename} imported_type_apis="
+                f"{len(imported_type_apis)} chars, "
+                f"interface_source={len(interface_source)} chars"
+            )
+            if imported_type_apis:
+                class_interfaces = (
+                    class_interfaces + "\n" + imported_type_apis
+                    if class_interfaces else imported_type_apis
+                )
+
             logger.info(
                 f"Stage 'synthesis': {filename} source={len(source)} chars, "
                 f"disk={len(disk_source)} chars, "
@@ -1959,6 +2162,9 @@ class SynthesisStage(PipelineStage):
             f"- Use exact attribute names from the source code above\n"
             f"- When calling self._xxx.method(), use ONLY methods listed "
             f"in AVAILABLE METHODS above\n"
+            f"- When calling imported objects (e.g. service.xxx()), use ONLY "
+            f"methods listed in IMPORTED TYPE APIs above. If a method is not "
+            f"listed, it does NOT exist — do NOT assume it will be added later\n"
             f"- When adding a parallel method (e.g. generate_stream), "
             f"match the original method's parameters\n"
             f"- Do NOT fabricate method names — if unsure, omit the call\n"

@@ -94,7 +94,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| **F10** | **FitzService API fabrication** | **40% of plans (4/10)** | **~8 pts (floor plan driver)** | Service API injection | ❌ | 0 | 40% | — | **❌** |
+| **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + rules | ✅ | 150 (3×50) | 80% | **60%** | 🟡 |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
