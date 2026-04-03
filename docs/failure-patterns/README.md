@@ -100,6 +100,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
+| F14 | Wrong service file path | 10% of plans (1/10) | ~8 pts (no source loaded) | Fuzzy path matching | ❌ | 0 | 10% | — | ❌ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
