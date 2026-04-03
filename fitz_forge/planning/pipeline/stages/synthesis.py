@@ -1641,7 +1641,8 @@ class SynthesisStage(PipelineStage):
         cleaned_specs: list[tuple[str, str]] = []
         for fname, purpose in artifact_specs:
             # Pattern A: strip method suffix (engine.py.answer_stream() -> engine.py)
-            fname = _re.sub(r'\.py[.#].*', '.py', fname)
+            # Also handles :: separator (engine.py::answer_stream())
+            fname = _re.sub(r'\.py[.#:].*', '.py', fname)
             # Pattern B: skip generic filenames without path separators
             # (new_chat_stream_endpoint.py -> not a real codebase path)
             if "/" not in fname and fname not in ("__init__.py",):
