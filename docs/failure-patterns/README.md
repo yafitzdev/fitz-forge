@@ -129,4 +129,5 @@ Every LLM call in the pipeline that can or has produced failures:
 | 61 | 2026-04-03 | + prompt reorder (F7 fix) | 3 | 37.0/60 | F7 fixed but other failures dominate. Not a regression — within noise. |
 | 62 | 2026-04-03 | + F1-F8 all fixed | 3 | 40.3/60 | Flat vs baseline. Structural metrics improved (phase consistency 100%, fab down). F9 identified as bottleneck — source compression removes method bodies, model fabricates internal API calls. |
 | 63 | 2026-04-03 | + F9 fixed + bandaids removed | 10 | 40.6/60 | First 3 averaged 46.7 (two 50s!), but 10-plan avg is 40.6. High variance (32-50). Engine.py fab=0 across all 10. Ceiling raised but floor unchanged — non-engine artifacts (SDK, service) still fabricate. |
-| 64 | 2026-04-03 | + F10 + F12 + prompt reorder | 10 | 40.3/60 | Range 29-49. Floor plans caused by upstream reasoning (F13): empty architecture, codebase misreads, decision duplication. Artifact fixes can't help when reasoning is wrong. |
+| 64 | 2026-04-03 | + F10 + F12 + prompt reorder | 10 | 40.3/60 | Range 29-49. Floor plans caused by upstream reasoning (F13): empty architecture, codebase misreads, decision duplication. |
+| 65 | 2026-04-03 | + F12 active + F13C pending | 10 | **42.7/60** | **+2.6 over baseline.** New high: 52/60. Top 5 avg 47.6. Floor 33. F13C (approach fallback) not yet active. |
