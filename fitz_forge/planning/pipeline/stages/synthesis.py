@@ -2661,6 +2661,17 @@ class SynthesisStage(PipelineStage):
 
         return sum(breakdown.values()), breakdown
 
+    @staticmethod
+    def _scope_size(reasoning: str) -> int:
+        """Extract scope indicator from reasoning text.
+
+        Counts files mentioned for modification + new types proposed.
+        Used by best-of-3 to detect outliers (over/under-scoped).
+        """
+        files = set(re.findall(r'\b[\w/]+\.py\b', reasoning))
+        new_types = set(re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', reasoning))
+        return len(files) + len(new_types)
+
     def _format_resolutions(self, resolutions: list[dict]) -> str:
         """Format resolved decisions for the synthesis prompt.
 
@@ -2697,16 +2708,16 @@ class SynthesisStage(PipelineStage):
         prior_outputs: dict[str, Any],
     ) -> StageResult:
         try:
-            # 1. Best-of-2 synthesis reasoning
+            # 1. Best-of-3 synthesis reasoning with scope consensus
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("synthesizing")
 
             resolution_output = prior_outputs.get("decision_resolution", {})
             resolutions = resolution_output.get("resolutions", [])
 
-            candidates: list[tuple[float, str, dict[str, float]]] = []
+            candidates: list[tuple[float, str, dict[str, float], int]] = []
             last_error: Exception | None = None
-            for i in range(2):
+            for i in range(3):
                 try:
                     t0 = time.monotonic()
                     r = await client.generate(
@@ -2718,10 +2729,11 @@ class SynthesisStage(PipelineStage):
                         f"took {t1 - t0:.1f}s ({len(r)} chars)"
                     )
                     score, breakdown = self._score_reasoning(r, resolutions)
-                    candidates.append((score, r, breakdown))
+                    scope = self._scope_size(r)
+                    candidates.append((score, r, breakdown, scope))
                     logger.info(
                         f"Stage '{self.name}': candidate {i+1} "
-                        f"score={score:.1f} {breakdown}"
+                        f"score={score:.1f} scope={scope} {breakdown}"
                     )
                 except Exception as e:
                     last_error = e
@@ -2732,8 +2744,31 @@ class SynthesisStage(PipelineStage):
 
             if not candidates:
                 raise last_error or RuntimeError(
-                    "Both synthesis reasoning candidates failed"
+                    "All synthesis reasoning candidates failed"
                 )
+
+            # Scope consensus: compute median scope, penalize outliers
+            if len(candidates) >= 2:
+                scopes = sorted(c[3] for c in candidates)
+                median_scope = scopes[len(scopes) // 2]
+
+                adjusted: list[tuple[float, str, dict[str, float], int]] = []
+                for score, r, breakdown, scope in candidates:
+                    penalty = 0.0
+                    if median_scope > 0:
+                        deviation = abs(scope - median_scope) / median_scope
+                        if deviation > 0.5:
+                            # >50% from median scope = penalize
+                            penalty = deviation * 10.0
+                    adj_score = score - penalty
+                    adjusted.append((adj_score, r, breakdown, scope))
+                    if penalty > 0:
+                        logger.info(
+                            f"Stage '{self.name}': scope penalty "
+                            f"{penalty:.1f} (scope={scope} vs "
+                            f"median={median_scope})"
+                        )
+                candidates = adjusted
 
             candidates.sort(key=lambda c: c[0], reverse=True)
             reasoning = candidates[0][1]
@@ -2742,7 +2777,8 @@ class SynthesisStage(PipelineStage):
                 margin = candidates[0][0] - candidates[1][0]
                 logger.info(
                     f"Stage '{self.name}': selected reasoning "
-                    f"(score={candidates[0][0]:.1f}, margin={margin:.1f})"
+                    f"(score={candidates[0][0]:.1f}, "
+                    f"scope={candidates[0][3]}, margin={margin:.1f})"
                 )
 
             # 2. Self-critique the winner
