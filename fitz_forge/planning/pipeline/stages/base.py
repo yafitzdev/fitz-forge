@@ -450,6 +450,7 @@ class PipelineStage(ABC):
         mini_schema: str,
         group_label: str,
         extra_context: str = "",
+        retry_if_empty: str | None = None,
     ) -> dict[str, Any]:
         """Extract a small group of fields from reasoning text as JSON.
 
@@ -465,6 +466,7 @@ class PipelineStage(ABC):
             mini_schema: JSON schema string showing expected output shape
             group_label: Human-readable label (e.g. "approaches") for logging/substeps
             extra_context: Optional codebase context to include (e.g. gathered context)
+            retry_if_empty: If set, retry once when this field name has an empty list.
 
         Returns:
             Parsed dict of extracted fields, or {} on failure
@@ -503,7 +505,35 @@ class PipelineStage(ABC):
             logger.info(
                 f"Stage '{self.name}': extracted '{group_label}' ({t1 - t0:.1f}s, {len(raw)} chars)"
             )
-            return extract_json(raw)
+            result = extract_json(raw)
+
+            # F6 fix: retry once if a critical field came back empty
+            if retry_if_empty:
+                val = result.get(retry_if_empty)
+                if isinstance(val, list) and len(val) == 0:
+                    logger.warning(
+                        f"Stage '{self.name}': '{group_label}' returned "
+                        f"empty '{retry_if_empty}', retrying once"
+                    )
+                    t0 = time.monotonic()
+                    raw = await client.generate(
+                        messages=extract_messages, max_tokens=4096,
+                    )
+                    t1 = time.monotonic()
+                    retry_result = extract_json(raw)
+                    retry_val = retry_result.get(retry_if_empty)
+                    if isinstance(retry_val, list) and len(retry_val) > 0:
+                        logger.info(
+                            f"Stage '{self.name}': retry produced "
+                            f"{len(retry_val)} {retry_if_empty} ({t1 - t0:.1f}s)"
+                        )
+                        return retry_result
+                    logger.warning(
+                        f"Stage '{self.name}': retry also empty for "
+                        f"'{retry_if_empty}'"
+                    )
+
+            return result
         except Exception as e:
             logger.warning(
                 f"Stage '{self.name}': field group '{group_label}' extraction failed: {e}"

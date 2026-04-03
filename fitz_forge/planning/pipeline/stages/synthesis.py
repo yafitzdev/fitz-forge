@@ -229,6 +229,48 @@ def _truncate_at_line(text: str, max_chars: int) -> str:
     return text[:cut]
 
 
+def _extract_method_signatures(content: str, filename: str) -> list[str]:
+    """Extract method/function signatures from artifact code for F3 injection.
+
+    Returns lines like:
+        engine.py: async def answer_stream(self, query: Query, ...) -> AsyncIterator[str]
+    """
+    import ast as _ast
+    import textwrap as _tw
+
+    sigs = []
+    # Try parsing the artifact content
+    for attempt in [content, _tw.dedent(content), f"class _:\n    " + content.replace("\n", "\n    ")]:
+        try:
+            tree = _ast.parse(attempt)
+            break
+        except SyntaxError:
+            continue
+    else:
+        return sigs
+
+    short = filename.split("/")[-1]
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            if node.name.startswith("_") and node.name != "__init__":
+                continue
+            prefix = "async def" if isinstance(node, _ast.AsyncFunctionDef) else "def"
+            # Reconstruct signature from AST
+            args = []
+            for arg in node.args.args:
+                ann = ""
+                if arg.annotation:
+                    ann = f": {_ast.unparse(arg.annotation)}"
+                args.append(f"{arg.arg}{ann}")
+            ret = ""
+            if node.returns:
+                ret = f" -> {_ast.unparse(node.returns)}"
+            sig = f"{prefix} {node.name}({', '.join(args)}){ret}"
+            sigs.append(f"{short}: {sig}")
+
+    return sigs
+
+
 def _compress_reasoning_for_artifact(reasoning: str) -> str:
     """Compress synthesis reasoning for per-artifact prompts.
 
@@ -729,7 +771,47 @@ def _repair_fabricated_refs(
             logger.info(f"  repair: {pattern} -> {replacement}")
             repaired = new_repaired
 
-    total_fixes = len(fixes) + len(removals) + field_fixes
+    # F5 fix: repair wrong import paths using structural index
+    import_fixes = 0
+    if lookup:
+        import_lines = repaired.split("\n")
+        new_lines = []
+        for line in import_lines:
+            m = _re.match(r'^(\s*from\s+)([\w.]+)(\s+import\s+)(.+)$', line)
+            if not m:
+                new_lines.append(line)
+                continue
+            prefix, module_path, imp_kw, names_str = m.groups()
+            # Skip stdlib / third-party
+            top_pkg = module_path.split(".")[0]
+            if top_pkg in ("typing", "dataclasses", "collections", "abc",
+                           "enum", "pathlib", "os", "sys", "json", "re",
+                           "asyncio", "logging", "pydantic", "fastapi",
+                           "httpx", "pytest"):
+                new_lines.append(line)
+                continue
+            # Check each imported name against structural index
+            names = [n.strip().split(" as ")[0].strip() for n in names_str.split(",")]
+            correct_module = None
+            for name in names:
+                classes = lookup.classes.get(name)
+                if classes:
+                    cls_file = classes[0].file
+                    cls_module = cls_file.replace("/", ".").replace("\\", ".").removesuffix(".py")
+                    if cls_module != module_path:
+                        correct_module = cls_module
+                        break
+            if correct_module:
+                new_line = f"{prefix}{correct_module}{imp_kw}{names_str}"
+                new_lines.append(new_line)
+                import_fixes += 1
+                logger.info(f"  repair: import {module_path} -> {correct_module}")
+            else:
+                new_lines.append(line)
+        if import_fixes:
+            repaired = "\n".join(new_lines)
+
+    total_fixes = len(fixes) + len(removals) + field_fixes + import_fixes
     return repaired, total_fixes
 
 
@@ -1261,6 +1343,7 @@ class SynthesisStage(PipelineStage):
         decision_summary = self._format_resolutions(resolutions)
 
         artifacts: list[dict] = []
+        prior_signatures: list[str] = []  # F3: accumulate method sigs
         t0 = time.monotonic()
 
         for filename, purpose in artifact_specs:
@@ -1274,12 +1357,26 @@ class SynthesisStage(PipelineStage):
                 filename, resolutions,
             )
 
+            # F3 fix: inject prior artifact signatures for cross-consistency
+            sig_context = ""
+            if prior_signatures:
+                sig_context = (
+                    "\n## SIGNATURES FROM OTHER ARTIFACTS (match these exactly)\n"
+                    + "\n".join(prior_signatures)
+                )
+
             artifact = await self._generate_single_artifact(
                 client, filename, purpose, source,
                 relevant_decisions, reasoning, prior_outputs,
+                prior_artifact_sigs=sig_context,
             )
             if artifact:
                 artifacts.append(artifact)
+                # Extract method signatures for subsequent artifacts
+                sigs = _extract_method_signatures(
+                    artifact.get("content", ""), filename,
+                )
+                prior_signatures.extend(sigs)
 
         elapsed = time.monotonic() - t0
         logger.info(
@@ -1593,6 +1690,7 @@ class SynthesisStage(PipelineStage):
         relevant_decisions: str,
         reasoning: str,
         prior_outputs: dict[str, Any] | None = None,
+        prior_artifact_sigs: str = "",
     ) -> dict | None:
         """Generate a single artifact with the target file's real source."""
         # Resolve class interfaces from DISK source (uncompressed).
@@ -1704,7 +1802,8 @@ class SynthesisStage(PipelineStage):
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
             f"{schema_section}"
-            f"{interface_section}\n\n"
+            f"{interface_section}"
+            f"{prior_artifact_sigs}\n\n"
             f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
             f"{rules}"
         )
@@ -1729,7 +1828,8 @@ class SynthesisStage(PipelineStage):
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
             f"{schema_section}"
-            f"{interface_section}\n\n"
+            f"{interface_section}"
+            f"{prior_artifact_sigs}\n\n"
             f"## PLAN CONTEXT (background — lower priority than above)\n"
             f"{reasoning_final}\n\n"
             f"Return ONLY valid JSON matching this schema:\n{schema}\n\n"
@@ -2261,12 +2361,15 @@ class SynthesisStage(PipelineStage):
                 context_merged.update(partial)
 
             # Architecture fields
+            # F6: retry approaches if empty (critical for plan quality)
+            _RETRY_FIELDS = {"approaches": "approaches", "components": "components", "phases": "phases"}
             arch_merged: dict[str, Any] = {}
             for group in _ARCH_FIELD_GROUPS:
                 partial = await self._extract_field_group(
                     client, reasoning, group["fields"],
                     group["schema"], group["label"],
                     extra_context=extract_context,
+                    retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
                 arch_merged.update(partial)
 
@@ -2280,6 +2383,7 @@ class SynthesisStage(PipelineStage):
                     client, reasoning, group["fields"],
                     group["schema"], group["label"],
                     extra_context=extra,
+                    retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
                 design_merged.update(partial)
 
@@ -2308,6 +2412,7 @@ class SynthesisStage(PipelineStage):
                     client, reasoning, group["fields"],
                     group["schema"], group["label"],
                     extra_context=roadmap_risk_context,
+                    retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
                 roadmap_merged.update(partial)
 
@@ -2363,16 +2468,36 @@ class SynthesisStage(PipelineStage):
                     roadmap_merged["phases"]
                 )
             roadmap_merged.setdefault("phases", [])
-            roadmap_merged.setdefault("critical_path", [])
-            roadmap_merged.setdefault("parallel_opportunities", [])
-            roadmap_merged.setdefault(
-                "total_phases", len(roadmap_merged.get("phases", []))
-            )
+
+            # F4 fix: filter phantom phase references
+            valid_phase_nums = {
+                p.get("number", i + 1)
+                for i, p in enumerate(roadmap_merged["phases"])
+            }
+            roadmap_merged["critical_path"] = [
+                n for n in roadmap_merged.get("critical_path", [])
+                if n in valid_phase_nums
+            ]
+            roadmap_merged["parallel_opportunities"] = [
+                grp for grp in (
+                    [n for n in group if n in valid_phase_nums]
+                    for group in roadmap_merged.get("parallel_opportunities", [])
+                )
+                if len(grp) >= 2
+            ]
+            roadmap_merged["total_phases"] = len(roadmap_merged["phases"])
             roadmap = RoadmapOutput(**roadmap_merged).model_dump()
 
             risk_merged.setdefault("risks", [])
             risk_merged.setdefault("overall_risk_level", "medium")
             risk_merged.setdefault("recommended_contingencies", [])
+            # Filter phantom phase refs in risks (same as F4)
+            for risk_item in risk_merged["risks"]:
+                if "affected_phases" in risk_item:
+                    risk_item["affected_phases"] = [
+                        n for n in risk_item["affected_phases"]
+                        if n in valid_phase_nums
+                    ]
             risk = RiskOutput(**risk_merged).model_dump()
 
             # 5. Combine into the output format expected by the orchestrator

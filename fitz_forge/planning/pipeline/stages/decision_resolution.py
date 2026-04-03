@@ -9,6 +9,7 @@ full source of 1-3 files + constraints from resolved dependencies.
 
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Any
@@ -377,6 +378,14 @@ class DecisionResolutionStage(PipelineStage):
                     d_id = key[len("_resolution_partial_"):]
                     already_resolved[d_id] = val
 
+            # Build set of known file paths for evidence validation
+            known_files: set[str] = set()
+            known_files.update(file_contents.keys())
+            known_files.update(file_index_entries.keys())
+            # Also add basenames for partial matching
+            for f in list(known_files):
+                known_files.add(f.split("/")[-1])
+
             resolutions: list[dict] = []
             constraint_map: dict[str, list[str]] = {}
 
@@ -439,6 +448,31 @@ class DecisionResolutionStage(PipelineStage):
                         "evidence": [],
                         "constraints_for_downstream": [],
                     }
+
+                # Validate evidence: strip refs to non-existent files
+                evidence = resolution.get("evidence", [])
+                if evidence and known_files:
+                    valid_evidence = []
+                    for ev in evidence:
+                        # Extract file references like "engine.py:..." or "path/to/file.py"
+                        file_refs = re.findall(r'([\w./]+\.py)\b', ev)
+                        if not file_refs:
+                            valid_evidence.append(ev)  # No file ref, keep it
+                            continue
+                        # Keep if at least one referenced file exists
+                        if any(
+                            ref in known_files
+                            or any(kf.endswith(ref) for kf in known_files)
+                            for ref in file_refs
+                        ):
+                            valid_evidence.append(ev)
+                        else:
+                            logger.warning(
+                                f"Stage '{self.name}': {d_id} dropping "
+                                f"hallucinated evidence: {ev[:100]}"
+                            )
+                    if len(valid_evidence) < len(evidence):
+                        resolution["evidence"] = valid_evidence
 
                 resolutions.append(resolution)
                 constraint_map[d_id] = resolution.get(

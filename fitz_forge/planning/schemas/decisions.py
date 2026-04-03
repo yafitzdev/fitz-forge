@@ -1,7 +1,9 @@
 # fitz_forge/planning/schemas/decisions.py
 """Schemas for decomposed decision pipeline."""
 
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class AtomicDecision(BaseModel):
@@ -34,6 +36,14 @@ class AtomicDecision(BaseModel):
             "Each dependency's resolution will be injected as a constraint."
         ),
     )
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def coerce_int_deps(cls, v: Any) -> list[str]:
+        """LLM sometimes emits depends_on: [1, 2] instead of ["d1", "d2"]."""
+        if not isinstance(v, list):
+            return v
+        return [f"d{x}" if isinstance(x, int) else x for x in v]
 
     category: str = Field(
         default="technical",

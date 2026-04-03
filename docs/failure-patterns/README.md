@@ -1,0 +1,119 @@
+# Pipeline Failure Patterns
+
+Catalog of known failure modes in the planning pipeline, with fix status, test data, and instructions for working on them.
+
+## How to Use This Document
+
+### For understanding the current state
+- **LLM Call Vulnerability Map**: Shows every LLM call in the pipeline and whether it's protected. ✅ = secured, 🟡 = partially secured, ❌ = no protection.
+- **Cross-Cutting Failures table**: The actionable work list. Each row is a specific failure pattern with its current status.
+- **Priority Order**: Work on these in order. Top = highest ROI.
+
+### For fixing a failure
+1. Check the **Harness** column — does an isolated test script exist? If ❌, build one first (see Testing Methodology below).
+2. Run the harness N times (50 recommended) to get a **Before** baseline.
+3. Implement the fix.
+4. Run the harness N times again to get an **After** measurement.
+5. Update the table: set Isolated Runs, Before, After, and flip Status to ✅.
+6. Do NOT run full pipeline benchmarks to validate individual fixes — Sonnet scoring variance (~6 stdev) drowns out individual improvements. Full pipeline benchmarks are only useful after multiple fixes are applied.
+
+### For running full pipeline benchmarks
+- Use 1-1-1-7 sequence (see `benchmarks/BENCHMARK.md`)
+- Score with Sonnet subagents (one per plan)
+- Only do this after several failure patterns are fixed, to measure cumulative impact
+
+### Column definitions (Cross-Cutting Failures table)
+| Column | Meaning |
+|--------|---------|
+| **ID** | Failure pattern identifier (F1-F7). Referenced in individual docs in this folder. |
+| **Pattern** | Short name for the failure |
+| **Occurrence** | How often this happens in full pipeline plans. Based on observed data (e.g., "3/3 plans" or "~67%"). |
+| **Impact** | Estimated Sonnet score points lost when this failure occurs. "est." = estimated from dimension weights. Measured values shown when available. |
+| **Fix Type** | Implementation complexity. Deterministic = pure code, 0 LLM cost. Prompt = change prompt text only. LLM retry = costs 1 extra LLM call. Cross-validation = post-generation analysis. |
+| **Harness** | ✅ = isolated test script exists in `benchmarks/`. ❌ = needs to be built. |
+| **Isolated Runs** | Total number of isolated test runs (before + after). 0 = not yet tested. |
+| **Before** | Failure rate before fix, measured in isolation. "?" = not yet measured. |
+| **After** | Failure rate after fix, measured in isolation. "—" = fix not yet implemented. |
+| **Status** | ✅ = fixed and verified. ❌ = not yet fixed. |
+
+### Existing test harnesses
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `benchmarks/test_decomp_scorer.py` | Generate N decompositions, score each | `python benchmarks/test_decomp_scorer.py` |
+| `benchmarks/test_synth_scorer.py` | Generate N synthesis reasoning candidates, score each | `python benchmarks/test_synth_scorer.py` |
+| `benchmarks/test_artifact_gen.py` | Generate N artifacts for a target file, check for fabrications | `python benchmarks/test_artifact_gen.py --runs 50 --trace-dir benchmarks/traces/xxx` |
+| `benchmarks/test_f1_dedup.py` | Generate N decompositions, check for duplicate decisions | `python benchmarks/test_f1_dedup.py --runs 50` |
+| `benchmarks/test_f6_empty.py` | Generate 1 reasoning, run N extractions per critical group | `python benchmarks/test_f6_empty.py --runs 50` |
+
+### Key files
+| File | Role |
+|------|------|
+| `fitz_forge/planning/pipeline/stages/decision_decomposition.py` | Decomposition stage (F1) |
+| `fitz_forge/planning/pipeline/stages/synthesis.py` | Synthesis + artifact generation (F2, F3, F5, F6, F7) |
+| `fitz_forge/planning/pipeline/stages/base.py` | JSON extraction, field group extraction (F6) |
+| `fitz_forge/planning/prompts/decision_decomposition.txt` | Decomposition prompt template |
+| `fitz_forge/planning/prompts/synthesis.txt` | Synthesis reasoning prompt template |
+
+---
+
+## LLM Call Vulnerability Map
+
+Every LLM call in the pipeline that can or has produced failures:
+
+| # | Stage | LLM Call | What Can Go Wrong | Status |
+|---|-------|----------|-------------------|--------|
+| 1 | Implementation check | 1 call | JSON parse failure | ✅ non-fatal, pipeline continues |
+| 2 | **Decision decomposition** | 2 calls (best-of-2) | Duplicate decisions (F1 ✅), parse failure (F8 ✅), too few decisions | ✅ best-of-2 + scorer + dedup + depends_on coercion |
+| 3 | Decision resolution | 1 call per decision | Wrong evidence, hallucinated code refs | ✅ contradiction detection + retry + evidence file validation |
+| 4 | **Synthesis reasoning** | 2 calls (best-of-2) | Vague reasoning, missing sections, low decision coverage | ✅ best-of-2 scoring + citation rules |
+| 5 | Self-critique | 1 call | Critique too aggressive (deletes valid content) | ✅ length floor check (>30% of original) |
+| 6 | Context extraction | 4 calls | Empty fields (F6 ✅), JSON parse failure | ✅ JSON regex fix + retry on empty |
+| 7 | Architecture extraction | 2 calls | Empty approaches (F6 ✅), wrong scope statement | ✅ retry on empty + Pydantic defaults |
+| 8 | Design extraction | 3 calls | Empty components/ADRs (F6 ✅), missing integration points | ✅ retry on empty + Pydantic defaults |
+| 9 | **Per-artifact generation** | 1 call per artifact | Method fabrication (F7 ✅), wrong request fields (F2 ✅), wrong imports (F5 ✅) | ✅ prompt reorder + field repair + import repair |
+| 10 | Roadmap extraction | 1 call | Empty phases (F6 ✅), wrong effort estimates | ✅ retry on empty |
+| 11 | Scheduling extraction | 1 call | Phantom phase refs (F4 ✅), wrong critical path | ✅ post-extraction filter removes phantom refs |
+| 12 | Risk extraction | 1 call | Wrong phase references in risks (F4 ✅) | ✅ phantom phase filter on affected_phases |
+| 13 | Grounding validation (AST) | 0 calls | False positives on valid code | ✅ type-aware repair |
+| 14 | Grounding repair (LLM) | 1 call per artifact | Repair makes things worse, JSON parse failure | ✅ only applied if violations decrease |
+| 15 | Coherence check | 1 call | Over-correction, scope inflation | ✅ advisory only |
+| 16 | Confidence scoring | 1 call | Miscalibrated scores | ✅ informational only |
+
+---
+
+## Cross-Cutting Failures
+
+| ID | Pattern | Occurrence | Impact | Fix Type | Harness | Isolated Runs | Before | After | Status |
+|----|---------|-----------|--------|----------|---------|---------------|--------|-------|--------|
+| F1 | Duplicate decisions | ~17% of raw LLM output | est. ~3 pts | Deterministic dedup | ✅ | 100 (2×50) | 17% (8/47) | **0%** (dedup in execute) | ✅ |
+| F2 | Wrong request fields | was 40% of engine.py artifacts | est. ~4 pts | Prompt reorder (F7) | ✅ | 100 (2×50 traces) | 40% (20/50) | **0%** (0/50) | ✅ |
+| F3 | Cross-artifact mismatch | ~33% of plans | est. ~5 pts | Signature injection | ❌ | 0 | ? | — (needs full pipeline test) | ✅ |
+| F4 | Phantom phases | ~100% of plans | est. ~2 pts | Deterministic filter | ❌ | 0 | ~100% | **0%** (deterministic filter) | ✅ |
+| F5 | Wrong imports | ~33% of plans | est. ~2 pts | Index lookup | ❌ | 0 | ? | **0%** (deterministic repair) | ✅ |
+| F6 | Empty extraction | was ~10%, now ~0% | est. ~6 pts | LLM retry | ✅ | 150 (3×50) | 0% (0/150) | **0%** (safety net retry) | ✅ |
+| F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
+| F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
+
+**Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
+
+**Impact:** "est." = estimated from Sonnet dimension weights, not yet measured in isolation. F7 was measured: massive isolated improvement but no measurable full-pipeline score change because F1-F6 dominate the remaining score loss. **Individual fixes don't move full-pipeline scores until all major failures are addressed.**
+
+---
+
+## Priority Order for Fixes
+
+1. ~~**F4** — Phantom phases.~~ ✅ DONE. Deterministic filter.
+2. ~~**F1** — Duplicate decisions.~~ ✅ DONE. String similarity dedup (17%→0%).
+3. ~~**F6** — Empty extraction.~~ ✅ DONE. Retry safety net (baseline already 0% after JSON regex fix).
+4. ~~**F2** — Wrong request fields.~~ ✅ DONE. Fixed by F7 prompt reorder (40%→0% in traces).
+5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
+6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
+
+---
+
+## Benchmark History (for this failure pattern work)
+
+| Run | Date | Config | Plans | Avg Score | Notes |
+|-----|------|--------|-------|-----------|-------|
+| 60 | 2026-04-03 | best-of-2 + prompt eng (pre-reorder) | 10 | 40.1/60 | Baseline for failure analysis |
+| 61 | 2026-04-03 | + prompt reorder (F7 fix) | 3 | 37.0/60 | F7 fixed but other failures dominate. Not a regression — within noise. |

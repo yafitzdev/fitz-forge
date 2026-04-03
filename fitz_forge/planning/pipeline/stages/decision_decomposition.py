@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import time
+from difflib import SequenceMatcher
 from typing import Any
 
 from fitz_forge.planning.pipeline.stages.base import (
@@ -254,6 +255,37 @@ class DecisionDecompositionStage(PipelineStage):
                 )
 
             decisions = parsed.get("decisions", [])
+
+            # F1 fix: deduplicate decisions by question similarity
+            keep_ids: set[str] = set()
+            deduped: list[dict] = []
+            for d in decisions:
+                question = d.get("question", "").lower()
+                is_dup = False
+                for kept in deduped:
+                    sim = SequenceMatcher(
+                        None, question, kept.get("question", "").lower(),
+                    ).ratio()
+                    if sim >= 0.85:
+                        is_dup = True
+                        break
+                if not is_dup:
+                    deduped.append(d)
+                    keep_ids.add(d.get("id", ""))
+            if len(deduped) < len(decisions):
+                logger.info(
+                    f"Stage '{self.name}': deduped {len(decisions)} → "
+                    f"{len(deduped)} decisions"
+                )
+                # Prune dangling depends_on refs
+                for d in deduped:
+                    d["depends_on"] = [
+                        dep for dep in d.get("depends_on", [])
+                        if dep in keep_ids
+                    ]
+                decisions = deduped
+                parsed["decisions"] = decisions
+
             logger.info(
                 f"Stage '{self.name}': produced {len(decisions)} decisions"
             )
