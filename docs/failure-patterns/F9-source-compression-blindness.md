@@ -63,9 +63,14 @@ Option 1 or 4 is most targeted. Options 2-3 risk blowing the token budget on irr
 - F5 (import repair) fixed fabricated import PATHS via structural index
 - But none of these help when the model needs to understand HOW to chain components — that requires reading the actual implementation
 
-## Test Plan
-1. Generate 50 engine.py artifacts with current compression (baseline)
-2. Implement reference method injection
-3. Generate 50 more, compare fabricated internal call rate
+## Test Data
+- Harness: `benchmarks/test_f9_compression.py`
+- Baseline (no reference): 2/50 = 4% fabrication, but artifacts were SHORT STUBS (~1700 chars avg). Model didn't attempt the real pipeline at all.
+- Post-fix (reference injected): 14/50 = 28% fabrication, but artifacts are FULL IMPLEMENTATIONS (~14000 chars avg). Model now writes real code following the answer() pattern.
+- False positive: `self._fast_analyze()` was flagged as fabricated but IS a real method (line 600 of engine.py). 48/50 artifacts correctly used it.
+- Remaining fabrications: `query.conversation_context` (18%), `_chat_factory.get_chat()` (14%)
 
-## Status: NOT FIXED
+The fix transformed artifacts from useless stubs to real implementations with mostly-correct internal API calls. The 28% remaining fabrication is on secondary calls, not the core pipeline flow.
+
+## Status: PARTIALLY FIXED
+Reference method injection implemented. Model now produces real implementations but still fabricates some secondary calls. Next step: extend interface injection to cover factory methods and query field names.

@@ -229,6 +229,95 @@ def _truncate_at_line(text: str, max_chars: int) -> str:
     return text[:cut]
 
 
+def _extract_reference_method(
+    disk_source: str,
+    purpose: str,
+    relevant_decisions: str,
+) -> str:
+    """Extract the body of an existing method that the new artifact variants.
+
+    When creating answer_stream() (streaming variant of answer()), the model
+    needs to see answer()'s actual implementation to know how to chain
+    _query_rewriter, _retrieval_router, _reader, etc. Without this, it
+    fabricates internal API calls (F9).
+
+    Heuristic: look for method names referenced in purpose/decisions that
+    exist in the source, pick the longest public method as the reference.
+    """
+    import ast as _ast
+
+    combined = (purpose + " " + relevant_decisions).lower()
+
+    # Detect variant patterns: "streaming version of X", "parallel to X",
+    # "same as X but", "mirrors X", "variant of X"
+    import re as _re
+    variant_patterns = [
+        r'(?:stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)',
+        r'(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)',
+        r'(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)',
+        r'(\w+)\(\)\s+(?:but|except|with)\s+stream',
+    ]
+    target_methods: list[str] = []
+    for pat in variant_patterns:
+        for m in _re.finditer(pat, combined):
+            name = m.group(1) or (m.group(2) if m.lastindex >= 2 else None)
+            if name and not name.startswith("_"):
+                target_methods.append(name)
+
+    # Also check for common patterns: "answer_stream" implies "answer" is the ref
+    method_refs = _re.findall(r'(\w+)_stream\b', combined)
+    target_methods.extend(method_refs)
+    method_refs = _re.findall(r'stream_(\w+)\b', combined)
+    target_methods.extend(method_refs)
+
+    # Deduplicate, filter out noise
+    target_methods = list(dict.fromkeys(
+        m for m in target_methods
+        if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
+    ))
+
+    if not target_methods:
+        return ""
+
+    try:
+        tree = _ast.parse(disk_source)
+    except SyntaxError:
+        return ""
+
+    # Find matching method bodies
+    lines = disk_source.split("\n")
+    best_body = ""
+    best_name = ""
+
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        if node.name not in target_methods:
+            continue
+
+        # Extract the full method body from source lines
+        start = node.lineno - 1  # 0-indexed
+        end = node.end_lineno if hasattr(node, "end_lineno") else start + 1
+        body = "\n".join(lines[start:end])
+
+        if len(body) > len(best_body):
+            best_body = body
+            best_name = node.name
+
+    if best_body:
+        # Cap at 16K chars to avoid blowing prompt budget
+        if len(best_body) > 16000:
+            best_body = best_body[:16000] + "\n    # ... (truncated)"
+        logger.info(
+            f"F9: extracted reference method '{best_name}' "
+            f"({len(best_body)} chars)"
+        )
+
+    return best_body
+
+
 def _extract_method_signatures(content: str, filename: str) -> list[str]:
     """Extract method/function signatures from artifact code for F3 injection.
 
@@ -1699,6 +1788,7 @@ class SynthesisStage(PipelineStage):
         # extraction fail. Read uncompressed from disk instead.
         class_interfaces = ""
         type_attr_map: dict[str, str] = {}
+        disk_source = ""
         if prior_outputs:
             source_dir = prior_outputs.get("_source_dir", "")
             disk_source = ""
@@ -1733,6 +1823,20 @@ class SynthesisStage(PipelineStage):
             from fitz_forge.planning.agent.compressor import compress_file
             source = compress_file(source, filename)
 
+        # F9 fix: inject reference method body when creating a variant.
+        # The model needs to see HOW existing methods chain internal
+        # components to create a streaming/async/parallel variant.
+        reference_body = ""
+        if disk_source and purpose:
+            reference_body = _extract_reference_method(
+                disk_source, purpose, relevant_decisions,
+            )
+            if reference_body:
+                logger.info(
+                    f"Stage 'synthesis': {filename} injecting "
+                    f"reference method ({len(reference_body)} chars)"
+                )
+
         # Resolve schema fields deterministically
         schema_fields = ""
         if prior_outputs:
@@ -1761,6 +1865,16 @@ class SynthesisStage(PipelineStage):
             source_section = (
                 f"\n\n(Source code for {filename} not available. "
                 f"Use method names from the decisions above.)"
+            )
+
+        reference_section = ""
+        if reference_body:
+            reference_section = (
+                f"\n\n## REFERENCE IMPLEMENTATION (follow this pattern exactly)\n"
+                f"Your new method must chain components the same way as this "
+                f"existing method. Use the same call signatures, parameter "
+                f"names, and data flow:\n\n"
+                f"```python\n{reference_body}\n```"
             )
 
         schema_section = ""
@@ -1801,6 +1915,7 @@ class SynthesisStage(PipelineStage):
             f"Purpose: {purpose}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
+            f"{reference_section}"
             f"{schema_section}"
             f"{interface_section}"
             f"{prior_artifact_sigs}\n\n"
@@ -1827,6 +1942,7 @@ class SynthesisStage(PipelineStage):
             f"Purpose: {purpose}\n\n"
             f"## RELEVANT DECISIONS\n{relevant_decisions}\n\n"
             f"{source_section}"
+            f"{reference_section}"
             f"{schema_section}"
             f"{interface_section}"
             f"{prior_artifact_sigs}\n\n"
