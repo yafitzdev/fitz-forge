@@ -1991,7 +1991,7 @@ class SynthesisStage(PipelineStage):
         candidates = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text))
         # Also catch single-word capitalized types (Query, Answer, etc.)
         candidates.update(_re.findall(r"\b([A-Z][a-z]{2,})\b", text))
-        # Also include common request/response patterns
+        # Also include common request/response patterns from index
         candidates.update(
             name
             for name in lookup.classes
@@ -2363,11 +2363,11 @@ class SynthesisStage(PipelineStage):
             "- When calling imported objects (e.g. service.xxx()), use ONLY "
             "methods listed in IMPORTED TYPE APIs above. If a method is not "
             "listed, it does NOT exist — do NOT assume it will be added later\n"
-            "- If a dependency has NO streaming method, implement streaming "
-            "at the caller level: call the regular method, then yield/stream "
-            "the response yourself. Do NOT invent streaming methods.\n"
-            "- When adding a parallel method (e.g. generate_stream), "
-            "match the original method's parameters\n"
+            "- If the method you need does NOT exist on a dependency, "
+            "compose the behavior from its existing methods instead of "
+            "inventing new ones\n"
+            "- When adding a parallel method, match the original "
+            "method's parameters exactly\n"
             "- Do NOT fabricate method names — if unsure, omit the call\n"
         )
 

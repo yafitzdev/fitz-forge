@@ -22,8 +22,8 @@ DECISION {decision_id} ({decision_category}):
 ## Contract preservation rules
 
 - NEVER modify the signature or return type of an existing public method. Callers depend on the current contract.
-- When adding new capability (e.g., streaming), add a PARALLEL method (e.g., generate_stream() alongside generate()). The existing method must continue to work identically.
-- A parallel method MUST accept the SAME parameters as the original. Do not simplify or remove parameters. If generate() takes (query, context, results, answer_mode, gap_context, conflict_context), then generate_stream() must take those same parameters.
+- When adding new capability, add a PARALLEL method alongside the existing one. The existing method must continue to work identically.
+- A parallel method MUST accept the SAME parameters as the original. Do not simplify or remove parameters.
 - Emit "existing method X() must not be modified" as a downstream constraint so all subsequent decisions respect this.
 
 CRITICAL: Do NOT invent methods, classes, or APIs that don't exist in the source code above. If the source code doesn't contain what you need, say so explicitly.
@@ -39,6 +39,6 @@ Respond with ONLY valid JSON:
   ],
   "constraints_for_downstream": [
     "Constraint that downstream decisions must respect",
-    "e.g., 'generate_stream() must return Iterator[str] because chat_stream() returns Iterator[str]'"
+    "e.g., 'new_method() must return the same type as original_method() for API consistency'"
   ]
 }}

@@ -43,7 +43,11 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: PARTIALLY FIXED (80%->26%)
-Three-layer fix: imported type API injection + explicit rules + prompt reorder (rules+grounding FIRST, reasoning last). Lost-in-the-middle effect was the key insight — FitzService API was buried in the middle of the prompt.
+## Status: FIXED (80%->0%)
+Four-layer fix:
+1. Imported type API injection (shows real methods)
+2. Explicit rules + prompt reorder (rules+grounding FIRST, reasoning last)
+3. Lost-in-the-middle fix (FitzService API was buried in the middle)
+4. **Compose-from-existing rule**: "If the method you need does NOT exist on a dependency, compose the behavior from its existing methods instead of inventing new ones"
 
-Remaining 26%: model still invents `service.answer_stream()` because reasoning says "build streaming" but service only has `query()`. The model can't consistently reconcile these on a 3B model. 40% of the time it correctly figures out the bridging pattern.
+Layer 4 was the breakthrough: 48%→0% in 50 isolated runs. The model just needed to be told what to do INSTEAD of fabricating — compose from existing methods. Generic rule, applies to any codebase.

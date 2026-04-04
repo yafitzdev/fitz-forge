@@ -98,17 +98,22 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + prompt reorder | ✅ | 200 (4×50) | 80% | **26%** | 🟡 |
+| F10 | Service API fabrication | 80% of route artifacts | ~8 pts (floor plan driver) | API injection + compose rule | ✅ | 300 (6×50) | 48% | **0%** (0/50) | ✅ |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Upstream fix (F9 ref injection) | ✅ | 50 | 0% (0/50) | **0%** (F9 prevents) | ✅ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
 | F14 | Wrong service file path | 10% of plans (1/10) | ~8 pts (no source loaded) | N/A (not reproducible) | ✅ | 35 | 0% (0/35) | **0%** (not reproducible) | ✅ |
+| F15 | Overfitted decomp examples | 100% of prompts | improved quality | Generic examples | ✅ | 100 (2×50) | 22% dupes | **6% dupes** | ✅ |
+| F16 | Overfitted resolution params | 100% of prompts | no impact | Generic examples | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
+| F17 | Overfitted synthesis examples | 100% of prompts | no impact | Generic examples | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
+| F18 | Overfitted artifact rules | 100% of prompts | no impact | Remove example | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
+| F19 | Hardcoded schema keywords | 100% of code paths | load-bearing | N/A (reverted) | ✅ | 50 | 0% fab | **72% fab** (reverted) | ⏸️ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 67):** Avg 45.3/60 (+5.2 over baseline). Ceiling 53/60. Floor 37/60. 6/10 plans have 0% fabrication. All structural issues (phases, approaches, filenames) eliminated. F11 and F14 confirmed non-issues in isolation (0/50 and 0/35 respectively) — resolved by upstream fixes (F9 reference injection, F12 filename cleanup). Remaining floor driven by F10 service API fabrication (26%) and F13 scope miscalibration.
+**Current state (run 67):** Avg 45.3/60 (+5.2 over baseline). Ceiling 53/60. Floor 37/60. 6/10 plans have 0% fabrication. All structural issues (phases, approaches, filenames) eliminated. F10 fixed (48%→0%). F11/F14 resolved (0% in isolation). Next priority: generalization audit (F15-F19) — remove codebase-specific prompt content without quality regression.
 
 ---
 
@@ -121,7 +126,7 @@ Every LLM call in the pipeline that can or has produced failures:
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
-8. ~~**F10** — Service API fabrication.~~ 🟡 PARTIALLY. Imported type API injection + prompt reorder (80%→26%).
+8. ~~**F10** — Service API fabrication.~~ ✅ DONE. Compose-from-existing rule (48%→0%).
 9. ~~**F11** — Wrong object for correct method.~~ ✅ RESOLVED. 0% in isolation — F9 reference injection prevents.
 10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
 11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
