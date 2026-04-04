@@ -1523,6 +1523,50 @@ class SynthesisStage(PipelineStage):
         )
 
     @staticmethod
+    def _extract_referenced_files(reasoning: str) -> set[str]:
+        """Extract file paths mentioned in reasoning text."""
+        import re as _re
+        # Match patterns like fitz_sage/foo/bar.py or api/routes/query.py
+        paths = set(_re.findall(
+            r"\b((?:[\w-]+/)+[\w-]+\.py)\b", reasoning,
+        ))
+        return paths
+
+    @staticmethod
+    def _trim_context_to_files(
+        context: str,
+        referenced_files: set[str],
+    ) -> str:
+        """Trim codebase context to only sections about referenced files.
+
+        Keeps section headers (## file.py) and their content only if
+        the file path matches one of the referenced files. Also keeps
+        any non-file sections (structural overview, library signatures).
+        """
+        lines = context.split("\n")
+        result: list[str] = []
+        keep = True  # Start keeping (preamble before first ## section)
+
+        for line in lines:
+            # Detect section headers like "## fitz_sage/foo/bar.py"
+            if line.startswith("## ") and "/" in line:
+                # Extract path from header
+                header_path = line[3:].strip()
+                # Check if any referenced file matches this section
+                keep = any(
+                    ref in header_path or header_path in ref
+                    for ref in referenced_files
+                )
+            elif line.startswith("## ") and "/" not in line:
+                # Non-file section (e.g. "## Structural Overview") — keep
+                keep = True
+
+            if keep:
+                result.append(line)
+
+        return "\n".join(result)
+
+    @staticmethod
     def _build_layer_warning(prior_outputs: dict[str, Any]) -> str:
         """Return a warning if interior call chain layers have no resolutions.
 
@@ -3025,8 +3069,6 @@ class SynthesisStage(PipelineStage):
         chain-of-thought) and truncates evidence to file:signature only.
         The synthesis model needs WHAT was decided and WHAT the constraints
         are, not WHY the decision was made.
-
-        Saves ~54% tokens vs the full format.
         """
         lines = []
         for r in resolutions:
@@ -3131,6 +3173,59 @@ class SynthesisStage(PipelineStage):
                 job_description,
                 krag_context=krag_context,
             )
+
+            # 2a. Refinement pass: re-run synthesis with only the files
+            # the first pass actually referenced. This dramatically improves
+            # signal-to-noise in the context, giving the model focused
+            # attention on the files that matter.
+            referenced_files = self._extract_referenced_files(design_reasoning)
+            if referenced_files:
+                trimmed_context = self._trim_context_to_files(
+                    krag_context, referenced_files,
+                )
+                if len(trimmed_context) < len(krag_context) * 0.85:
+                    # Only refine if we actually trimmed significantly
+                    logger.info(
+                        f"Stage '{self.name}': refinement pass — "
+                        f"context {len(krag_context)} -> {len(trimmed_context)} chars "
+                        f"({len(referenced_files)} referenced files)"
+                    )
+                    # Temporarily swap context for the refinement prompt
+                    orig_context = prior_outputs.get("_gathered_context", "")
+                    prior_outputs["_gathered_context"] = trimmed_context
+                    refined_messages = self.build_prompt(
+                        job_description, prior_outputs,
+                    )
+                    prior_outputs["_gathered_context"] = orig_context
+
+                    t0_ref = time.monotonic()
+                    refined = await client.generate(
+                        messages=refined_messages,
+                        temperature=0.7,
+                    )
+                    t1_ref = time.monotonic()
+                    logger.info(
+                        f"Stage '{self.name}': refinement took "
+                        f"{t1_ref - t0_ref:.1f}s ({len(refined)} chars)"
+                    )
+
+                    # Use refined reasoning if it scores well
+                    ref_score, ref_breakdown = self._score_reasoning(
+                        refined, resolutions,
+                    )
+                    orig_score = candidates[0][0]
+                    if ref_score >= orig_score * 0.9:
+                        design_reasoning = refined
+                        logger.info(
+                            f"Stage '{self.name}': using refined reasoning "
+                            f"(score={ref_score:.1f} vs original={orig_score:.1f})"
+                        )
+                    else:
+                        logger.info(
+                            f"Stage '{self.name}': keeping original reasoning "
+                            f"(refined score={ref_score:.1f} < "
+                            f"threshold={orig_score * 0.9:.1f})"
+                        )
 
             # 2b. Generate roadmap+risk reasoning in a separate pass.
             # This reasoning gets only the design output (not full codebase

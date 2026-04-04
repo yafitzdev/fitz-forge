@@ -67,10 +67,17 @@ In the full pipeline, each plan gets a fresh reasoning. When the **synthesis rea
 - Clean plans: 22/48 (46%)
 
 ### Root Cause (updated)
-The fabrication originates in the **synthesis reasoning prompt**, not the artifact generation prompt. The compose rule prevents the artifact generator from inventing methods, but it can't override instructions already written in the reasoning text. The fix must move upstream:
-1. Add compose rule to synthesis reasoning prompt
-2. Post-generation repair: regex-replace fabricated method calls
-3. Validate artifacts against imported type APIs, reject/repair violations
+The fabrication originates during long-form synthesis reasoning generation. With ~50K prompt and ~11K output, attention drifts and the model loses grounding on which methods actually exist. Prompt-level fixes (reorder, cheatsheet, evidence removal) all failed or made it worse.
 
-### Key lesson: harness methodology flaw
-Testing with a frozen pipeline state (one reasoning → N artifacts) does NOT catch failures that originate in upstream variance. The harness must vary ALL upstream stages to catch reasoning-level fabrication. Fixed-state testing is only valid for the specific LLM call being tested.
+### Fix: Refinement Pass (40% → 0%)
+Design by user. The model writes a first-pass plan with full context (31K codebase). We then extract which files the plan actually references, trim the context to only those files (31K → 11-16K, 48-65% reduction), and re-run synthesis with the focused context. The model's attention is now concentrated on the files that matter.
+
+- First pass: exploratory, full context, may fabricate
+- Refinement pass: focused, trimmed context, grounded
+- Cost: 1 extra synthesis reasoning call (~20-30s)
+- Result: 0/5 fabrication in pipeline testing (baseline 40%)
+
+### Key lessons
+1. **Harness methodology**: Frozen-state testing misses upstream variance. The harness must vary ALL upstream stages.
+2. **Attention budget**: Prompt-level instructions can't survive 11K tokens of generation. Reducing context is more effective than adding rules.
+3. **Explore-then-focus**: Let the model think broadly first, then refine with focused input. Works WITH the model's natural behavior.

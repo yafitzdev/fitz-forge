@@ -98,7 +98,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| **F10** | **Service API fabrication** | **54% of full pipeline plans** | **~8 pts (floor plan driver)** | Compose rule (artifact only) | ✅ | 300 (6×50) + 48 pipeline | isolated 0%, **pipeline 54%** | — | 🟡 |
+| F10 | Service API fabrication | was 40% pipeline | ~8 pts (floor plan driver) | Refinement pass (context trim) | ✅ | 300+48+35 pipeline | 40% pipeline | **0%** (0/5 refined) | ✅ |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Upstream fix (F9 ref injection) | ✅ | 50 | 0% (0/50) | **0%** (F9 prevents) | ✅ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
@@ -114,9 +114,13 @@ Every LLM call in the pipeline that can or has produced failures:
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 68, 48 plans):** 100% structural success. 46% clean plans (0 fabrication). 54% have F10 fabrication in route/SDK artifacts. Fabrication originates in synthesis reasoning (upstream), not artifact generation. Compose rule fixed artifact-level fabrication (0/50 isolated) but can't override reasoning-level instructions. F15 improved decomp quality (22%→6% dupes). F11/F14 resolved. F15-F18 genericized (no regression). F19 deferred (load-bearing).
+**Current state (post-refinement):** F10 fixed via refinement pass — explore-then-focus design reduces context 48-65%, eliminates fabrication (40%→0% in pipeline testing). Decision merger (F20) reduces decisions 13→8. Reasoning split into design + roadmap_risk. All prompts genericized (F15-F18). F19 deferred (load-bearing).
 
-**Critical harness methodology lesson (run 68):** Isolated testing with frozen upstream state misses reasoning-level failures. The F10 harness showed 0% by freezing one clean reasoning and varying only artifact generation. Full pipeline (48 plans) showed 54% because each plan gets fresh reasoning that may instruct fabrication. Harnesses must vary ALL upstream stages to catch upstream-originated failures.
+**Key lessons:**
+1. More LLM calls + pick the best = proactive fix for model quality limits (best-of-3, +2.8 pts)
+2. Frozen-state harness testing misses upstream variance — harnesses must vary ALL stages
+3. Prompt instructions can't survive 11K tokens of generation — reduce context instead of adding rules
+4. Explore-then-focus: let the model think broadly first, then refine with focused input
 
 ---
 
@@ -129,7 +133,7 @@ Every LLM call in the pipeline that can or has produced failures:
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
-8. **F10** — Service API fabrication. 🟡 Artifact-level fix works (0% isolated), but reasoning-level fabrication persists (54% pipeline). Needs upstream fix.
+8. ~~**F10** — Service API fabrication.~~ ✅ DONE. Refinement pass (40%→0%). Explore-then-focus context trimming.
 9. ~~**F11** — Wrong object for correct method.~~ ✅ RESOLVED. 0% in isolation — F9 reference injection prevents.
 10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
 11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
