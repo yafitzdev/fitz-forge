@@ -43,11 +43,34 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: FIXED (80%->0%)
+## Status: PARTIALLY FIXED (isolated 0%, full pipeline 54%)
+
+### Isolated fix (artifact generation only): 48%→0%
 Four-layer fix:
 1. Imported type API injection (shows real methods)
 2. Explicit rules + prompt reorder (rules+grounding FIRST, reasoning last)
 3. Lost-in-the-middle fix (FitzService API was buried in the middle)
 4. **Compose-from-existing rule**: "If the method you need does NOT exist on a dependency, compose the behavior from its existing methods instead of inventing new ones"
 
-Layer 4 was the breakthrough: 48%→0% in 50 isolated runs. The model just needed to be told what to do INSTEAD of fabricating — compose from existing methods. Generic rule, applies to any codebase.
+Layer 4 was the breakthrough: 48%→0% in 50 isolated runs.
+
+### Full pipeline (run 68, 48 plans): 54% fabrication
+The isolated harness was **flawed**: it froze one decomposition+resolution+reasoning and generated 50 artifacts from that same state. If that one reasoning didn't mention `service.answer_stream()`, all 50 were clean.
+
+In the full pipeline, each plan gets a fresh reasoning. When the **synthesis reasoning** writes "delegate to `service.query_stream()`" as the design, the artifact generator faithfully implements it — no artifact-level rule can override upstream reasoning.
+
+### Run 68 fabrication breakdown (48 plans)
+- `service.query_stream(`: 13 plans (27%)
+- `service.chat_stream(`: 9 plans (19%)
+- `service.answer_stream(`: 7 plans (15%)
+- `request.query` (should be `.message`): 5 plans (10%)
+- Clean plans: 22/48 (46%)
+
+### Root Cause (updated)
+The fabrication originates in the **synthesis reasoning prompt**, not the artifact generation prompt. The compose rule prevents the artifact generator from inventing methods, but it can't override instructions already written in the reasoning text. The fix must move upstream:
+1. Add compose rule to synthesis reasoning prompt
+2. Post-generation repair: regex-replace fabricated method calls
+3. Validate artifacts against imported type APIs, reject/repair violations
+
+### Key lesson: harness methodology flaw
+Testing with a frozen pipeline state (one reasoning → N artifacts) does NOT catch failures that originate in upstream variance. The harness must vary ALL upstream stages to catch reasoning-level fabrication. Fixed-state testing is only valid for the specific LLM call being tested.
