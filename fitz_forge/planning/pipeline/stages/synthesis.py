@@ -1451,6 +1451,9 @@ class SynthesisStage(PipelineStage):
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
 
+        # F20 fix: merge redundant decisions before formatting
+        resolutions = self._merge_redundant_decisions(resolutions)
+
         decision_text = self._format_resolutions(resolutions)
         call_graph_text = prior_outputs.get("_call_graph_text", "")
         gathered_context = self._get_gathered_context(prior_outputs)
@@ -2904,6 +2907,116 @@ class SynthesisStage(PipelineStage):
         files = set(re.findall(r"\b[\w/]+\.py\b", reasoning))
         new_types = set(re.findall(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b", reasoning))
         return len(files) + len(new_types)
+
+    @staticmethod
+    def _merge_redundant_decisions(
+        resolutions: list[dict],
+    ) -> list[dict]:
+        """Merge decisions that resolved to overlapping conclusions.
+
+        Clusters decisions by evidence file overlap. If two decisions
+        cite any of the same source files, they're about the same area
+        of code and likely redundant. Merged into one representative
+        decision with unioned evidence and deduplicated constraints.
+
+        Zero LLM cost — purely deterministic.
+        """
+        from difflib import SequenceMatcher
+        import re as _re
+
+        if len(resolutions) <= 3:
+            return resolutions
+
+        def _evidence_files(r: dict) -> set[str]:
+            """Extract file paths from evidence strings."""
+            files = set()
+            for e in r.get("evidence", []):
+                # Match paths like fitz_sage/foo/bar.py
+                m = _re.match(r"^([\w/._-]+\.py)", e)
+                if m:
+                    files.add(m.group(1))
+            return files
+
+        # Build file sets per decision
+        n = len(resolutions)
+        file_sets = [_evidence_files(resolutions[i]) for i in range(n)]
+
+        # Cluster by file overlap using union-find
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i in range(n):
+            if not file_sets[i]:
+                continue
+            for j in range(i + 1, n):
+                if not file_sets[j]:
+                    continue
+                if file_sets[i] & file_sets[j]:  # Any shared file
+                    union(i, j)
+
+        # Group by cluster
+        clusters: dict[int, list[int]] = {}
+        for i in range(n):
+            root = find(i)
+            clusters.setdefault(root, []).append(i)
+
+        # Build merged decisions
+        result = []
+        for root in sorted(clusters):
+            members = clusters[root]
+            if len(members) == 1:
+                result.append(resolutions[members[0]])
+                continue
+
+            # Merge: pick first member's decision text, union evidence + constraints
+            leader = resolutions[members[0]]
+            all_evidence: list[str] = []
+            all_constraints: list[str] = []
+            all_ids: list[str] = []
+
+            for idx in members:
+                r = resolutions[idx]
+                all_ids.append(r.get("decision_id", "?"))
+                for e in r.get("evidence", []):
+                    sig = e.split(" -- ")[0] if " -- " in e else e
+                    if sig not in all_evidence:
+                        all_evidence.append(sig)
+                for c in r.get("constraints_for_downstream", []):
+                    is_dup = False
+                    for existing in all_constraints:
+                        if SequenceMatcher(
+                            None, c.lower(), existing.lower()
+                        ).ratio() >= 0.75:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        all_constraints.append(c)
+
+            merged_id = "+".join(all_ids)
+            result.append({
+                "decision_id": merged_id,
+                "decision": leader.get("decision", ""),
+                "evidence": all_evidence,
+                "constraints_for_downstream": all_constraints,
+            })
+
+        n_merged = len(resolutions) - len(result)
+        if n_merged > 0:
+            logger.info(
+                f"Stage 'synthesis': merged {n_merged} redundant decisions "
+                f"({len(resolutions)} -> {len(result)})"
+            )
+        return result
 
     def _format_resolutions(self, resolutions: list[dict]) -> str:
         """Format resolved decisions for the synthesis prompt.

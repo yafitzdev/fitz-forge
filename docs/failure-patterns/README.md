@@ -108,6 +108,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F17 | Overfitted synthesis examples | 100% of prompts | no impact | Generic examples | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
 | F18 | Overfitted artifact rules | 100% of prompts | no impact | Remove example | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
 | F19 | Hardcoded schema keywords | 100% of code paths | load-bearing | N/A (reverted) | ✅ | 50 | 0% fab | **72% fab** (reverted) | ⏸️ |
+| F20 | Decision redundancy | 100% of plans | ~3.5K wasted chars (19% of decisions) | File-overlap merger | ✅ | 10 | 13.2 dec, 18.8K | **8 dec, 15.2K** (-19%) | ✅ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
