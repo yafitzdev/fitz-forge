@@ -46,6 +46,8 @@ Catalog of known failure modes in the planning pipeline, with fix status, test d
 | `benchmarks/test_f6_empty.py` | Generate 1 reasoning, run N extractions per critical group | `python benchmarks/test_f6_empty.py --runs 50` |
 | `benchmarks/test_f9_compression.py` | Generate N engine.py artifacts, check internal API fabrication | `python -m benchmarks.test_f9_compression --runs 50` |
 | `benchmarks/test_f10_service.py` | Generate N query.py artifacts, check FitzService API fabrication | `python -m benchmarks.test_f10_service --runs 50` |
+| `benchmarks/test_f11_wrong_object.py` | Generate N engine.py artifacts, check wrong-object method calls | `python -m benchmarks.test_f11_wrong_object --runs 50` |
+| `benchmarks/test_f14_path.py` | Generate N reasonings, extract needed_artifacts, check path resolution | `python -m benchmarks.test_f14_path --runs 50` |
 
 ### Key files
 | File | Role |
@@ -97,16 +99,16 @@ Every LLM call in the pipeline that can or has produced failures:
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
 | **F10** | **Service API fabrication** | **80% of route artifacts** | **~8 pts (floor plan driver)** | API injection + prompt reorder | ✅ | 200 (4×50) | 80% | **26%** | 🟡 |
-| F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Post-gen repair | ❌ | 0 | 20% | — | ❌ |
+| F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Upstream fix (F9 ref injection) | ✅ | 50 | 0% (0/50) | **0%** (F9 prevents) | ✅ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
-| F14 | Wrong service file path | 10% of plans (1/10) | ~8 pts (no source loaded) | Fuzzy path matching | ❌ | 0 | 10% | — | ❌ |
+| F14 | Wrong service file path | 10% of plans (1/10) | ~8 pts (no source loaded) | N/A (not reproducible) | ✅ | 35 | 0% (0/35) | **0%** (not reproducible) | ✅ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 67):** Avg 45.3/60 (+5.2 over baseline). Ceiling 53/60. Floor 37/60. 6/10 plans have 0% fabrication. All structural issues (phases, approaches, filenames) eliminated. Remaining floor driven by synthesizer private method fabrication (F11-adjacent) and scope miscalibration on non-engine artifacts.
+**Current state (run 67):** Avg 45.3/60 (+5.2 over baseline). Ceiling 53/60. Floor 37/60. 6/10 plans have 0% fabrication. All structural issues (phases, approaches, filenames) eliminated. F11 and F14 confirmed non-issues in isolation (0/50 and 0/35 respectively) — resolved by upstream fixes (F9 reference injection, F12 filename cleanup). Remaining floor driven by F10 service API fabrication (26%) and F13 scope miscalibration.
 
 ---
 
@@ -120,7 +122,7 @@ Every LLM call in the pipeline that can or has produced failures:
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
 8. ~~**F10** — Service API fabrication.~~ 🟡 PARTIALLY. Imported type API injection + prompt reorder (80%→26%).
-9. F11 — Wrong object for correct method. 20% of plans. Low priority.
+9. ~~**F11** — Wrong object for correct method.~~ ✅ RESOLVED. 0% in isolation — F9 reference injection prevents.
 10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
 11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
 

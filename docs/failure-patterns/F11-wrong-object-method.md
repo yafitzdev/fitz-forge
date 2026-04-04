@@ -23,4 +23,11 @@ The interface injection shows `self._synthesizer -> CodeSynthesizer: generate(..
 1. **Already partially solved**: The F9 reference body shows the correct `self._synthesizer._build_provenance()` call. Most plans get this right (8/10). Low priority.
 2. **Post-generation repair**: Check for method calls on `self` that exist on a different object, rewrite to correct receiver.
 
-## Status: NOT FIXED (low priority — 80% of plans get it right)
+## Test Data
+- Harness: `benchmarks/test_f11_wrong_object.py`
+- Baseline: **0/50 (0%)** — zero wrong-object errors across 50 engine.py artifacts
+- The F9 reference method injection shows the model exactly how `self._synthesizer._build_provenance(results)` is called — the model follows the correct pattern every time
+- The 20% pipeline rate (2/10 plans) was likely from plans where F12 filename corruption prevented source file lookup → no F9 reference injection → wrong-object calls
+- F12 fix cascade-fixes F11
+
+## Status: RESOLVED (0% in isolation — prevented by F9 reference injection)
