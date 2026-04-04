@@ -1,0 +1,22 @@
+You are writing the Roadmap and Risk sections of an architectural plan. The design decisions and component details have already been written below.
+
+TASK: {task_description}
+
+## Design Summary (from earlier analysis)
+
+{design_summary}
+
+## Instructions
+
+Write ONLY the Roadmap and Risk sections below. Do not repeat the architecture or design — those are done.
+
+### Section 4: Roadmap
+- Implementation phases (ordered by decision dependencies)
+- Each phase: objective, deliverables, verification command, effort estimate
+- Critical path and parallel opportunities
+
+### Section 5: Risk
+- Technical risks (from decision constraints and evidence)
+- Each risk: impact, likelihood, mitigation, contingency, affected phases
+
+Write your analysis as flowing prose. Do not output JSON -- the extraction step will handle that.

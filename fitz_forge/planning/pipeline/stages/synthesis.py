@@ -1469,6 +1469,57 @@ class SynthesisStage(PipelineStage):
         return self._make_messages(prompt)
 
     @staticmethod
+    def _build_api_cheatsheet(prior_outputs: dict[str, Any]) -> str:
+        """Build a compact API reference for classes mentioned in decisions.
+
+        Extracts public method names for key types from the structural index.
+        Placed at the end of the synthesis prompt to ground the model's output
+        against real APIs (prevents fabricating nonexistent methods).
+        """
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        full_index = agent_ctx.get("full_structural_index", "")
+        if not full_index:
+            full_index = prior_outputs.get("_gathered_context", "")
+        if not full_index:
+            return ""
+
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+        lookup = StructuralIndexLookup(full_index)
+
+        # Find class names mentioned in decision text
+        import re as _re
+        resolution_output = prior_outputs.get("decision_resolution", {})
+        resolutions = resolution_output.get("resolutions", [])
+        decision_text = " ".join(
+            r.get("decision", "") + " " + r.get("reasoning", "")
+            for r in resolutions
+        )
+
+        # Extract CamelCase class names
+        candidates = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", decision_text))
+        candidates.update(_re.findall(r"\b([A-Z][a-z]{2,})\b", decision_text))
+
+        # Filter to classes that exist in the index
+        lines = []
+        for name in sorted(candidates):
+            cls = lookup.find_class(name)
+            if cls and cls.methods:
+                public = [m for m in cls.methods if not m.startswith("_")]
+                if public:
+                    lines.append(f"  {name}: {', '.join(public[:12])}")
+
+        if not lines:
+            return ""
+
+        return (
+            "## API REFERENCE (these are the ONLY public methods that exist)\n"
+            + "\n".join(lines)
+            + "\n\nDo NOT reference methods not listed here. "
+            "If you need behavior a class doesn't have, compose it from "
+            "the methods above."
+        )
+
+    @staticmethod
     def _build_layer_warning(prior_outputs: dict[str, Any]) -> str:
         """Return a warning if interior call chain layers have no resolutions.
 
@@ -2961,12 +3012,35 @@ class SynthesisStage(PipelineStage):
 
             # 2. Self-critique the winner
             krag_context = self._get_gathered_context(prior_outputs)
-            reasoning = await self._self_critique(
+            design_reasoning = await self._self_critique(
                 client,
                 reasoning,
                 job_description,
                 krag_context=krag_context,
             )
+
+            # 2b. Generate roadmap+risk reasoning in a separate pass.
+            # This reasoning gets only the design output (not full codebase
+            # context), keeping the prompt small and focused.
+            roadmap_risk_prompt = load_prompt("synthesis_roadmap_risk")
+            rr_prompt = roadmap_risk_prompt.format(
+                task_description=job_description,
+                design_summary=design_reasoning[:8000],  # first 8K of design
+            )
+            rr_messages = self._make_messages(rr_prompt)
+            t0_rr = time.monotonic()
+            roadmap_risk_reasoning = await client.generate(
+                messages=rr_messages,
+                temperature=0.7,
+            )
+            t1_rr = time.monotonic()
+            logger.info(
+                f"Stage '{self.name}': roadmap+risk reasoning "
+                f"{t1_rr - t0_rr:.1f}s ({len(roadmap_risk_reasoning)} chars)"
+            )
+
+            # Combine both passes for extraction
+            reasoning = design_reasoning + "\n\n" + roadmap_risk_reasoning
 
             # 3. Per-field extraction into all five schema sections
             extract_context = krag_context

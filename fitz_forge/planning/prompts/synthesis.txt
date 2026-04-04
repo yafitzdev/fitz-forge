@@ -16,7 +16,9 @@ The following decisions were made by analyzing the actual source code. Each deci
 
 ## Instructions
 
-Write a complete architectural analysis covering ALL of the following sections. For each section, use the resolved decisions above as your primary source. Do not discover new things -- organize what has already been decided.
+Write the Context, Architecture, and Design sections below. Roadmap and Risk will be written in a separate pass — do NOT include them here.
+
+For each section, use the resolved decisions above as your primary source. Do not discover new things -- organize what has already been decided.
 
 CITATION RULES:
 - Reference each decision by its ID when you use it (e.g., "Per [d3], the interface returns TypeName").
@@ -43,15 +45,6 @@ CITATION RULES:
 - Integration points
 - Artifacts (config files, schemas -- write the complete content)
 
-### Section 4: Roadmap
-- Implementation phases (ordered by decision dependencies)
-- Each phase: objective, deliverables, verification command, effort estimate
-- Critical path and parallel opportunities
-
-### Section 5: Risk
-- Technical risks (from decision constraints and evidence)
-- Each risk: impact, likelihood, mitigation, contingency, affected phases
-
 ACCURACY RULE: Every file path, method name, and return type you write MUST come from the resolved decisions' evidence above or the codebase context. Do not invent.
 
-Write your complete analysis as flowing prose. Do not output JSON -- the extraction step will handle that.
+Write your analysis as flowing prose. Do not output JSON -- the extraction step will handle that. Do NOT write Roadmap or Risk sections.
