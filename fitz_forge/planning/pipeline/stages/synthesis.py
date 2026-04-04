@@ -1523,6 +1523,85 @@ class SynthesisStage(PipelineStage):
         )
 
     @staticmethod
+    def _filter_fabricated_from_reasoning(
+        reasoning: str,
+        prior_outputs: dict[str, Any],
+    ) -> str:
+        """Remove fabricated method calls from reasoning before artifact gen.
+
+        Scans the reasoning for patterns like `service.xxx_stream()`
+        or `service.xxx()` where the method doesn't exist on the resolved
+        type. Replaces the fabricated call with a generic placeholder
+        so the artifact generator doesn't treat it as an instruction.
+
+        Uses the same imported type API resolution as the artifact prompt.
+        """
+        import re as _re
+
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        full_index = agent_ctx.get("full_structural_index", "")
+        if not full_index:
+            full_index = prior_outputs.get("_gathered_context", "")
+        if not full_index:
+            return reasoning
+
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+        lookup = StructuralIndexLookup(full_index)
+
+        # Build set of all known public methods across all classes
+        known_methods: dict[str, set[str]] = {}  # class_name -> {methods}
+        for cls_name in lookup.classes:
+            cls = lookup.find_class(cls_name)
+            if cls and cls.methods:
+                known_methods[cls_name] = {
+                    m for m in cls.methods if not m.startswith("__")
+                }
+
+        # Find fabricated method references in reasoning.
+        # The reasoning uses various formats:
+        #   service.answer_stream(...)
+        #   `answer_stream()`
+        #   method `answer_stream`
+        #   a new answer_stream() method
+        # We match any word_stream pattern and check if it exists.
+        n_filtered = 0
+        lines = reasoning.split("\n")
+        filtered_lines = []
+
+        for line in lines:
+            # Match any xxx_stream pattern (with or without object prefix)
+            matches = list(_re.finditer(
+                r'`?(\w+_stream)\s*\(`?',
+                line,
+            ))
+            if matches:
+                for m in reversed(matches):
+                    method = m.group(1)
+                    # Skip if it exists on ANY known class
+                    exists = any(
+                        method in meths
+                        for meths in known_methods.values()
+                    )
+                    if not exists:
+                        # Replace fabricated method with placeholder
+                        line = (
+                            line[:m.start()]
+                            + "/* new streaming method (compose from existing) */"
+                            + line[m.end():]
+                        )
+                        n_filtered += 1
+
+            filtered_lines.append(line)
+
+        if n_filtered > 0:
+            logger.info(
+                f"Stage 'synthesis': filtered {n_filtered} fabricated "
+                f"method refs from reasoning before artifact gen"
+            )
+
+        return "\n".join(filtered_lines)
+
+    @staticmethod
     def _extract_referenced_files(reasoning: str) -> set[str]:
         """Extract file paths mentioned in reasoning text."""
         import re as _re
@@ -3308,13 +3387,22 @@ class SynthesisStage(PipelineStage):
                 )
                 design_merged.update(partial)
 
+            # F10 fix: filter fabricated method references from reasoning
+            # before passing to artifact generation. The reasoning may
+            # mention hypothetical methods (e.g. "service.answer_stream()")
+            # that don't exist. If we pass them through, the artifact
+            # generator treats them as instructions and fabricates code.
+            filtered_reasoning = self._filter_fabricated_from_reasoning(
+                reasoning, prior_outputs,
+            )
+
             # Artifact building: per-artifact focused generation.
             # Each artifact gets its own generate() call with the target
             # file's real source code, so the model sees actual method
             # names, attributes, and signatures — not just an index.
             design_merged["artifacts"] = await self._build_artifacts_per_file(
                 client,
-                reasoning,
+                filtered_reasoning,
                 prior_outputs,
                 context_merged,
             )

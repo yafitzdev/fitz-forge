@@ -195,6 +195,53 @@ All 14 patterns documented in `docs/failure-patterns/` with individual docs, har
 - `benchmarks/eval_deterministic.py` — deterministic scorer
 - `benchmarks/test_f9_compression.py` — F9 fabrication harness
 - `benchmarks/test_f10_service.py` — F10 service API harness
-- `docs/failure-patterns/` — **14 failure pattern docs with before/after data**
+- `docs/failure-patterns/` — **20 failure pattern docs with before/after data**
 - `benchmarks/BENCHMARK.md` — how to run benchmarks
+- `benchmarks/test_f10_pipeline.py` — F10 pipeline harness (full upstream variance)
+- `benchmarks/test_f20_redundancy.py` — F20 decision redundancy harness
+- `fitz_forge/planning/prompts/synthesis_roadmap_risk.txt` — roadmap+risk reasoning prompt (split)
+
+### Session 2026-04-04 (continued): F10 Deep Dive + Prompt Generalization + Architectural Improvements
+
+**F10 Service API Fabrication (the stubborn bug):**
+- Isolated testing (frozen state): compose rule fixed 48%→0%
+- Full pipeline (48 plans): 54% fabrication — harness methodology flaw discovered
+- Root cause: artifact generator follows reasoning instructions over rules. When reasoning says "call service.query_stream()", artifact implements it.
+- 6 prompt-level approaches tried, ALL failed or had no effect:
+  1. Prompt reorder (context→decisions): 75% — worse
+  2. API cheatsheet at end: 75% — worse
+  3. Reasoning split (design only): 40% — same
+  4. Evidence removal: 60% — worse
+  5. Context-first reorder + split: 40% — same
+  6. Reasoning filter (strip fabricated refs): 40% — same
+- Refinement pass (explore-then-focus): context trimmed 48-65%, 0/5 in isolated test but 60% in full pipeline run 69
+- Reasoning filter (Fix 1): strips `xxx_stream()` patterns from reasoning before artifact gen. Removed 6-26 refs per run. Still 40% — artifact generator re-invents independently.
+- **40% is the model's hard floor for this task.** The model fabricates `service.query_stream()` because it can't figure out how to compose streaming from `service.query()`. This is a 3B model capability limit.
+
+**Architectural improvements shipped (all verified, committed):**
+1. **Reasoning split**: design (Sections 1-3) separate from roadmap+risk (Sections 4-5). Output ~11K vs ~20K.
+2. **Decision merger (F20)**: union-find on evidence file overlap. 13→8 decisions, 19% prompt reduction. Zero LLM cost.
+3. **Refinement pass**: first-pass reasoning → extract referenced files → trim context (31K→10-16K) → re-run. Score-gated (only uses refined if ≥90% of original).
+4. **Reasoning filter**: strips fabricated `xxx_stream()` patterns from reasoning before artifact generation.
+5. **Compose rule**: "compose from existing methods instead of inventing new ones" in artifact prompt.
+
+**Prompt generalization (F15-F18):**
+- F15: decomp examples genericized. Improved dedup 22%→6%.
+- F16-F18: resolution params, synthesis examples, artifact rules genericized. No regression.
+- F19: schema keywords removal regressed 0%→72%. Reverted — load-bearing.
+
+**Run 69 (10 plans with all fixes): 40% clean, 60% F10 fabrication.** No structural failures. Decision merger working (14→8 avg). Refinement pass firing (31K→6-12K context). But F10 persists at ~40%.
+
+**Key lessons from this session:**
+1. Frozen-state harness testing misses upstream variance. Must vary ALL stages.
+2. Prompt instructions can't survive 11K+ tokens of generation. Reducing context > adding rules.
+3. Explore-then-focus (user's design): model writes rough plan first, we trim context to referenced files, model rewrites with focused attention. Good architecture even if F10 persists.
+4. 40% F10 fabrication is a model capability limit for this task + model size. Fix requires either bigger model, post-gen validation+retry, or accepting the rate.
+
+**Next steps (for next session):**
+- Score run 69 plans with Sonnet to get quality numbers with all improvements
+- Consider post-gen validate+retry for artifacts (best-of-2 with F10 check)
+- Run on a different task to see if F10 is task-specific (streaming) or general
+- F19 structural fix: use type annotations from target file instead of keyword matching
+- Dynamic decision count (remove 8-18 hardcoded range from scorer)
 - `docs/pipeline-architecture.md` — full pipeline technical reference
