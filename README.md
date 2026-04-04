@@ -1,5 +1,6 @@
 
 
+
 <div align="center">
 
 # fitz-forge
@@ -9,10 +10,11 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
 [![Tests](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml/badge.svg)](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml)
+[![Version](https://img.shields.io/badge/version-0.5.0-green.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-[The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-forge?](#why-fitz-forge) • [How It Works](#how-it-works) • [GitHub](https://github.com/yafitzdev/fitz-forge)
+[The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-forge?](#why-fitz-forge) • [Benchmarks](#benchmarks) • [How It Works](#how-it-works) • [Docs](docs/features/) • [GitHub](https://github.com/yafitzdev/fitz-forge)
 
 </div>
 
@@ -20,30 +22,86 @@
 
 ---
 
+<div align="center">
+<table>
+  <tr>
+    <td align="center" colspan="2">
+      <pre><strong>Task: "Add WebSocket support to the chat API"</strong>
+(Given a real codebase with FastAPI routes, Pydantic schemas, and an existing REST chat endpoint.)</pre>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <strong>❌ Raw local LLM (no harness)</strong>
+<pre>
+"Add a WebSocket endpoint.
+ Use the websockets library.
+ Create a new file for handlers.
+ Add authentication middleware."
+</pre>
+<em>Generic advice. No file paths. No awareness
+of existing code. Hallucinated library choice.
+Would break the existing architecture.</em>
+    </td>
+    <td align="center" width="50%">
+      <strong>🔨 fitz-forge (same model, same hardware)</strong>
+<pre>
+Phase 1: Extend ChatRouter in api/routes/chat.py
+  - Add ws_chat() using existing ChatEngine
+  - Reuse AuthMiddleware.verify_token()
+  - Test: pytest tests/api/test_chat_ws.py
+
+Phase 2: Adapt MessageSchema in schemas/chat.py
+  - Add ws_message field (matches existing
+    ChatMessage.content structure)
+  - Verify: pydantic model_validate()
+</pre>
+<em>Real files. Real methods. Phased roadmap
+with verification commands. Grounded in
+the actual codebase.</em>
+    </td>
+  </tr>
+</table>
+
+→ Same 30B model, same hardware. The difference is the harness: fitz-forge reads your codebase, reasons in stages, self-critiques, and extracts structured output that a small model can actually produce reliably.
+
+</div>
+
+---
+
+### Where to start 🚀
+
+> [!IMPORTANT]
+> Requires [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) with a loaded model. Also needs [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval.
+
 ```bash
 pip install fitz-forge
 
 fitz plan "Add OAuth2 authentication with Google and GitHub providers"
+fitz run        # start background worker
+fitz status 1   # check progress
+fitz get 1      # read the finished plan
 ```
+
+That's it. Your plan runs overnight on local hardware.
 
 ---
 
-### About 🧑‍🌾
+### About
 
-Solo project by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
+I built fitz-forge because the best AI coding tools are dangerously dependent on subsidized API pricing. Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone (understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. fitz-forge moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. And as local models improve, your plans improve for free.
 
-- ~20k lines of Python
-- 970+ tests
-- Zero LangChain/LlamaIndex dependencies — built from scratch
-- Code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage)
+No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
+
+~20k lines of Python. 970+ tests. Built by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
 
 ---
 
 ### The Problem
 
-Claude Code costs $100/month to run semi-productively — and that's *heavily subsidized*. When subsidies shrink, prices go up. The single most expensive operation in agentic LLM coding is the **planning phase**: understanding a codebase, reasoning about architecture, producing a structured plan. Every token of that burns through your API budget.
+The single most expensive operation in agentic LLM coding is the **planning phase**: understanding a codebase, reasoning about architecture, producing a structured plan. Every token burns through your API budget. And raw local LLMs can't do this well — ask a 30B model to plan a feature and you get generic advice with hallucinated file paths, no awareness of your existing code, and no structured output.
 
-What if the planning phase could run on local hardware instead? What if you could do it with a machine you already own?
+What if local models could produce *good* plans — grounded in your codebase, structured into phases, with real file paths and verification commands?
 
 ---
 
@@ -59,46 +117,65 @@ Running LLMs locally means balancing three things: **tokens per second**, **quan
 10 tok/s × 60s × 60min × 8 hours = 288,000 tokens
 ```
 
-That's enough for a full architectural plan — reasoning, self-critique, structured extraction — from a model running on hardware you already own. No API costs. No data leaving your network.
-
-And the best part: **as local models improve, your plans improve for free.**
+That's enough for a full architectural plan — reasoning, self-critique, structured extraction — from a model running on hardware you already own.
 
 ---
 
 ### Why fitz-forge?
 
-**Single model, zero swapping 🔀**
-> Qwen3-Coder-30B (MoE, 3B active) handles both retrieval and reasoning — benchmarked at 89% critical recall across 40 queries, faster than the 4B it replaced. No model switching, no VRAM churn. Split reasoning mode breaks large LLM calls into ~8K-token pieces, enabling dense 27B models at 32K context.
-
-**Reads your codebase first 🔍**
+**Reads your codebase first 🔍** → [Agent Context Gathering](docs/features/pipeline/00_agent-context-gathering.md)
 > An agent builds a structural index of your codebase (classes, functions, imports), selects relevant files via LLM scan, expands through import chains and `__init__.py` facades, and auto-includes architectural hub files. Reasoning stages see a compact file manifest (~4K tokens) with on-demand `inspect_files` and `read_file` tools — 50+ files fit in 32K context.
 
-**Per-field extraction that small models can handle 🧩**
+**Per-field extraction that small models can handle 🧩** → [Per-Field Extraction](docs/features/infrastructure/per-field-extraction.md)
 > Each stage does 1 reasoning pass + 1 self-critique + N tiny JSON extractions (<2000 chars each). Even a 3B model can reliably produce structured output at this scale. Failed extractions get Pydantic defaults instead of crashing the stage — partial plan > no plan.
 
-**Crash recovery built in 🔄**
+**Single model, zero swapping 🔀** → [LLM Providers](docs/features/infrastructure/llm-providers.md)
+> Qwen3-Coder-30B (MoE, 3B active) handles both retrieval and reasoning — benchmarked at 89% critical recall across 40 queries, faster than the 4B it replaced. No model switching, no VRAM churn. Split reasoning mode breaks large LLM calls into ~8K-token pieces, enabling dense 27B models at 32K context.
+
+**Crash recovery built in 🔄** → [Crash Recovery](docs/features/infrastructure/crash-recovery.md)
 > Jobs checkpoint to SQLite. Machine crashes mid-plan? `retry` picks up from the last checkpoint. Power goes out overnight? Resume in the morning.
 
-**Claude where it counts, local everywhere else 🎯**
-> The local model does the heavy lifting — 95% of the tokens. But the pipeline knows what it's uncertain about. Per-section confidence scoring flags weak spots, and those sections can pause for an Anthropic API review pass before the plan finalizes. Fully optional — off by default, zero API calls unless you opt in.
+**5 verification agents catch mistakes 🔬** → [Verification Agents](docs/features/infrastructure/verification-agents.md)
+> After the main reasoning pass, 5 agents run in parallel: contract extraction, data flow tracing, pattern matching, type boundary auditing, and assumption surfacing. They catch hallucinated method calls and architectural gaps before the plan finalizes.
+
+**Claude where it counts, local everywhere else 🎯** → [Confidence Scoring](docs/features/pipeline/06_confidence-scoring.md)
+> The local model does the heavy lifting — 95% of the tokens. Per-section confidence scoring flags weak spots, and those sections can pause for an Anthropic API review pass. Fully optional — off by default, zero API calls unless you opt in.
 
 **Two interfaces, same engine 🔌**
 > CLI for background job queues, MCP server for Claude Code / Claude Desktop integration. Both wrap the same `tools/` service layer and SQLite job store.
 
-**Other features at a glance 🃏**
-> 1. [x] **Three LLM providers.** Ollama (with OOM fallback), LM Studio (OpenAI-compatible API), or llama.cpp (managed subprocess with flash attention and configurable KV cache).
-> 2. [x] **Split reasoning.** Architecture and design as separate calls, roadmap and risk as separate calls. Reduces peak context from ~29K to ~8K tokens per call.
-> 3. [x] **Hub + facade retrieval signals.** Deterministic file selection that doesn't depend on LLM judgment — auto-includes orchestration files and `__init__.py` re-exports.
-> 4. [x] **Cross-stage coherence check.** Post-pipeline pass verifies context -> architecture -> roadmap consistency.
-> 5. [x] **Section-specific confidence scoring.** Each section type scored against its own criteria with 1-10 granularity.
-> 6. [x] **Implementation detection.** Surgical check prevents planning to build what already exists.
-> 7. [x] **5 post-reasoning verification agents.** Contract extraction, data flow tracing, pattern matching, type boundary auditing, and assumption surfacing.
+**More features at a glance:**
+> - [x] **Three LLM providers.** [Ollama](docs/features/infrastructure/llm-providers.md) (with OOM fallback), LM Studio (OpenAI-compatible), or llama.cpp (managed subprocess with flash attention).
+> - [x] **[Split reasoning.](docs/features/infrastructure/split-reasoning.md)** Architecture and design as separate calls, roadmap and risk as separate calls. Reduces peak context from ~29K to ~8K tokens per call.
+> - [x] **[Cross-stage coherence check.](docs/features/pipeline/05_coherence-check.md)** Post-pipeline pass verifies context → architecture → roadmap consistency.
+> - [x] **[Implementation detection.](docs/features/pipeline/01_implementation-check.md)** Surgical check prevents planning to build what already exists.
+> - [x] **[Grounding validation.](docs/features/infrastructure/grounding-validation.md)** AST-based verification that generated artifacts reference real methods, not hallucinated ones.
+
+---
+
+### Benchmarks
+
+How much smarter can a local LLM plan when you spoonfeed it everything it needs? fitz-forge is a case study: can a pipeline of retrieval, staged reasoning, self-critique, and structured extraction bring a 30B local model close to frontier API quality?
+
+<!-- TODO: Fill in with real benchmark data from eval runs -->
+
+| Model | Harness | Avg Score (/60) | Notes |
+|-------|---------|-----------------|-------|
+| Qwen3-Coder-30B | None (raw prompt) | _TBD_ | Baseline: just ask the model to plan |
+| Qwen3-Coder-30B | **fitz-forge** | _TBD_ | Same model, full pipeline |
+| Claude Sonnet 4.5 | None (one-shot) | _TBD_ | Frontier API reference point |
+| _more models TBD_ | | | |
+
+**Scoring:** 6-dimension Sonnet-as-Judge rubric — file identification, contract preservation, internal consistency, codebase alignment, implementability, scope calibration. Each dimension scored 1-10, total /60.
+
+> [!NOTE]
+> Benchmark methodology is being refined. Early results show the pipeline adds +20-30 points to raw model scores, but the judging system needs rework for consistency. Real numbers coming soon.
 
 ---
 
 ### How It Works
 
-A retrieval agent pre-stage followed by 3 planning stages. Split reasoning mode breaks architecture+design and roadmap+risk into separate LLM calls for smaller context models. Each stage uses per-field extraction: one reasoning prompt produces analysis, a self-critique pass catches scope inflation and hallucinated files, then small JSON extractions pull structured data from the reasoning.
+A retrieval agent pre-stage followed by 3 planning stages. [Split reasoning](docs/features/infrastructure/split-reasoning.md) mode breaks architecture+design and roadmap+risk into separate LLM calls for smaller context models. Each stage uses [per-field extraction](docs/features/infrastructure/per-field-extraction.md): one reasoning prompt produces analysis, a self-critique pass catches scope inflation and hallucinated files, then small JSON extractions pull structured data from the reasoning.
 
 <br>
 
@@ -123,6 +200,8 @@ A retrieval agent pre-stage followed by 3 planning stages. Split reasoning mode 
 
 > [!NOTE]
 > The pipeline decomposes a problem that would overwhelm a small model into pieces it can handle reliably. Each JSON extraction is <2000 chars — small enough for a 3B quantized model to produce valid output. Split reasoning auto-enables when `context_length < 32768`, letting dense 27B models run the full pipeline.
+
+Full pipeline docs: **[docs/features/](docs/features/)** — 13 detailed feature docs covering every stage and infrastructure component.
 
 ---
 
@@ -301,11 +380,9 @@ output:
 
 <details>
 
-<summary><strong>📦 Architecture</strong></summary>
+<summary><strong>📦 Architecture</strong> → <a href="docs/ARCHITECTURE.md">Full Architecture Guide</a></summary>
 
 <br>
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture reference and [docs/features/](docs/features/) for detailed breakdowns of every pipeline stage.
 
 ```
 CLI (typer)   --> tools/ --> SQLiteJobStore <-- BackgroundWorker --> PlanningPipeline
@@ -379,3 +456,7 @@ MIT
 - [GitHub](https://github.com/yafitzdev/fitz-forge)
 - [PyPI](https://pypi.org/project/fitz-forge/)
 - [Changelog](CHANGELOG.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Feature Docs](docs/features/) — 13 detailed docs covering every pipeline stage
+- [Contributing](CONTRIBUTING.md)
+- [Examples](examples/)
