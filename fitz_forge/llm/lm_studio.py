@@ -38,7 +38,11 @@ def _strip_thinking(text: str) -> str:
     text = _THINK_RE.sub("", text)
     # Handle unclosed <think> (generation ended mid-thought)
     if "<think>" in text:
-        text = text.split("</think>")[-1].lstrip() if "</think>" in text else text.split("<think>")[0].rstrip()
+        text = (
+            text.split("</think>")[-1].lstrip()
+            if "</think>" in text
+            else text.split("<think>")[0].rstrip()
+        )
     return text
 
 
@@ -127,7 +131,9 @@ class LMStudioClient:
         self._gpu_guard = gpu_guard
         self._fast_model = fast_model
         self._smart_model = smart_model
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key or "lm-studio", timeout=timeout)
+        self._client = AsyncOpenAI(
+            base_url=base_url, api_key=api_key or "lm-studio", timeout=timeout
+        )
         self._call_metrics: list[dict] = []
 
     @property
@@ -151,7 +157,9 @@ class LMStudioClient:
         return self._smart_model or self.model
 
     async def ensure_model(
-        self, model_name: str, context_size: int | None = None,
+        self,
+        model_name: str,
+        context_size: int | None = None,
     ) -> None:
         """Ensure the requested model is loaded in LM Studio."""
         if await self.is_model_loaded():
@@ -215,8 +223,11 @@ class LMStudioClient:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [lms, "ps"],
-                capture_output=True, text=True, timeout=10,
-                encoding="utf-8", errors="replace",
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding="utf-8",
+                errors="replace",
             )
             output = result.stdout + result.stderr
             if "No models" in output:
@@ -254,32 +265,34 @@ class LMStudioClient:
         lms = shutil.which("lms")
         if not lms:
             logger.warning(
-                "lms CLI not found — cannot auto-load model. "
-                "Load it manually in LM Studio."
+                "lms CLI not found — cannot auto-load model. Load it manually in LM Studio."
             )
             return False
 
-        logger.info(
-            f"Running: lms load {model_name} -y -c {ctx} --parallel 1"
-        )
+        logger.info(f"Running: lms load {model_name} -y -c {ctx} --parallel 1")
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [
-                    lms, "load", model_name, "-y",
-                    "-c", str(ctx),
-                    "--parallel", "1",
+                    lms,
+                    "load",
+                    model_name,
+                    "-y",
+                    "-c",
+                    str(ctx),
+                    "--parallel",
+                    "1",
                 ],
-                capture_output=True, text=True, timeout=300,
-                encoding="utf-8", errors="replace",
+                capture_output=True,
+                text=True,
+                timeout=300,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode == 0:
                 logger.info(f"Model {model_name} loaded successfully")
                 return True
-            logger.error(
-                f"lms load failed (code {result.returncode}): "
-                f"{result.stderr[:300]}"
-            )
+            logger.error(f"lms load failed (code {result.returncode}): {result.stderr[:300]}")
             return False
         except subprocess.TimeoutExpired:
             logger.error("lms load timed out after 300s")
@@ -311,7 +324,7 @@ class LMStudioClient:
         ok = await self._load_model_via_cli(model_name)
         if not ok:
             # Retry once after longer cooldown (CUDA context cleanup)
-            logger.warning(f"Model load failed, retrying after 10s cooldown...")
+            logger.warning("Model load failed, retrying after 10s cooldown...")
             await asyncio.sleep(10)
             ok = await self._load_model_via_cli(model_name)
         if not ok:
@@ -333,16 +346,17 @@ class LMStudioClient:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [lms, "unload", "--all"],
-                capture_output=True, text=True, timeout=30,
-                encoding="utf-8", errors="replace",
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                errors="replace",
             )
             output = (result.stdout + result.stderr).strip()
             if result.returncode == 0:
                 logger.info(f"Model unloaded successfully: {output}")
                 return True
-            logger.warning(
-                f"lms unload failed (code {result.returncode}): {output}"
-            )
+            logger.warning(f"lms unload failed (code {result.returncode}): {output}")
             return False
         except Exception as e:
             logger.warning(f"lms unload failed: {e}")
@@ -403,10 +417,11 @@ class LMStudioClient:
         elapsed = time.monotonic() - t0
         est_tokens = len(result) / 4
         tok_s = est_tokens / elapsed if elapsed > 0 else 0
-        self._call_metrics.append({"elapsed_s": elapsed, "output_chars": len(result), "model": model})
+        self._call_metrics.append(
+            {"elapsed_s": elapsed, "output_chars": len(result), "model": model}
+        )
         logger.info(
-            f"LMStudio.generate: {len(result)} chars in {elapsed:.1f}s "
-            f"(~{tok_s:.1f} tok/s)"
+            f"LMStudio.generate: {len(result)} chars in {elapsed:.1f}s (~{tok_s:.1f} tok/s)"
         )
         return result
 

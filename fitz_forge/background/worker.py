@@ -13,25 +13,24 @@ import re
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TYPE_CHECKING as _TC
+from typing import TYPE_CHECKING as _TC
+from typing import Any
 
 from fitz_forge.config.schema import FitzPlannerConfig
 from fitz_forge.llm.llama_cpp import LlamaCppClient
 from fitz_forge.llm.lm_studio import LMStudioClient
-from fitz_forge.llm.memory import MemoryMonitor
 
 if _TC:
     from fitz_forge.llm.client import OllamaClient
+from fitz_forge.api_review.client import AnthropicReviewClient
+from fitz_forge.api_review.schemas import ReviewRequest
 from fitz_forge.models.jobs import JobState
 from fitz_forge.models.store import JobStore
+from fitz_forge.planning.agent import AgentContextGatherer
 from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
 from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline, PlanningPipeline
 from fitz_forge.planning.pipeline.output import PlanRenderer
-from fitz_forge.planning.agent import AgentContextGatherer
-from fitz_forge.planning.pipeline.stages import DEFAULT_STAGES, create_stages
 from fitz_forge.planning.schemas.plan_output import PlanOutput
-from fitz_forge.api_review.schemas import ReviewRequest, CostBreakdown
-from fitz_forge.api_review.client import AnthropicReviewClient
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ class BackgroundWorker:
 
         if ollama_client:
             # Create checkpoint manager (needs db_path from store)
-            if hasattr(store, '_db_path'):
+            if hasattr(store, "_db_path"):
                 self._checkpoint_mgr = CheckpointManager(store._db_path)
             else:
                 # Fallback for in-memory stores (no checkpointing)
@@ -238,9 +237,7 @@ class BackgroundWorker:
             MemoryError: If RAM threshold exceeded during generation
         """
         if self._ollama_client is None or self._pipeline is None:
-            logger.warning(
-                f"No pipeline configured, completing job {job.job_id} with stub"
-            )
+            logger.warning(f"No pipeline configured, completing job {job.job_id} with stub")
             await self._store.update(job.job_id, progress=0.5, current_phase="pending_engine")
             await asyncio.sleep(0.1)
             return
@@ -260,11 +257,10 @@ class BackgroundWorker:
             if isinstance(self._ollama_client, LMStudioClient):
                 if not await self._ollama_client.is_model_loaded():
                     await self._store.update(
-                        job.job_id, current_phase="loading_model",
+                        job.job_id,
+                        current_phase="loading_model",
                     )
-                    logger.info(
-                        f"No model loaded — auto-loading {self._ollama_client.model}"
-                    )
+                    logger.info(f"No model loaded — auto-loading {self._ollama_client.model}")
 
             healthy = await self._ollama_client.health_check()
             if not healthy:
@@ -274,15 +270,12 @@ class BackgroundWorker:
 
         # Step 2: Execute pipeline with progress callback (skip on second pass)
         if not is_review_confirmed:
+
             async def progress_callback(progress: float, phase: str) -> None:
                 await self._store.update(job.job_id, progress=progress, current_phase=phase)
 
             # Build agent if source_dir is available
-            source_dir = (
-                job.source_dir
-                or self._config.agent.source_dir
-                or str(Path.cwd())
-            )
+            source_dir = job.source_dir or self._config.agent.source_dir or str(Path.cwd())
             agent = None
             if self._config.agent.enabled and source_dir:
                 if Path(source_dir).is_dir():
@@ -313,6 +306,7 @@ class BackgroundWorker:
         else:
             # Second pass: load pipeline state from job.pipeline_state
             import json
+
             from fitz_forge.planning.pipeline.orchestrator import PipelineResult
 
             if not job.pipeline_state:
@@ -349,16 +343,15 @@ class BackgroundWorker:
                     ]
 
                     review_client = AnthropicReviewClient(
-                        api_key=self._config.anthropic.api_key,
-                        model=self._config.anthropic.model
+                        api_key=self._config.anthropic.api_key, model=self._config.anthropic.model
                     )
                     cost_calculator = review_client.get_cost_calculator()
                     cost_estimate = await cost_calculator.estimate_review_cost(
-                        flagged_sections,
-                        model=self._config.anthropic.model
+                        flagged_sections, model=self._config.anthropic.model
                     )
 
                     import json
+
                     await self._store.update(
                         job.job_id,
                         cost_estimate_json=cost_estimate.model_dump_json(),
@@ -378,6 +371,7 @@ class BackgroundWorker:
         else:
             # Second pass: execute API review
             import json
+
             from fitz_forge.api_review.schemas import CostEstimate
 
             await self._store.update(job.job_id, progress=0.96, current_phase="executing_review")
@@ -397,28 +391,23 @@ class BackgroundWorker:
             ]
 
             review_client = AnthropicReviewClient(
-                api_key=self._config.anthropic.api_key,
-                model=self._config.anthropic.model
+                api_key=self._config.anthropic.api_key, model=self._config.anthropic.model
             )
             review_results = await review_client.review_sections(flagged_sections)
 
             cost_calculator = review_client.get_cost_calculator()
             actual_cost = cost_calculator.calculate_actual_cost(
-                review_results,
-                model=self._config.anthropic.model
+                review_results, model=self._config.anthropic.model
             )
             actual_cost.estimate = cost_estimate
             api_review_cost_dict = actual_cost.model_dump()
 
             api_review_feedback = {
-                r.section_name: r.feedback
-                for r in review_results
-                if r.success and r.feedback
+                r.section_name: r.feedback for r in review_results if r.success and r.feedback
             }
 
             await self._store.update(
-                job.job_id,
-                review_result_json=json.dumps([r.model_dump() for r in review_results])
+                job.job_id, review_result_json=json.dumps([r.model_dump() for r in review_results])
             )
 
             logger.info(
@@ -456,7 +445,9 @@ class BackgroundWorker:
 
         # Extract quant from model path/name (e.g. "Q6_K_XL" from GGUF filename)
         model_id = diagnostics.get("model_file") or diagnostics.get("model", "")
-        quant_match = re.search(r"[_-](Q\d+_K(?:_[A-Z]+)?|Q\d+_\d+|IQ\d+_[A-Z]+|F16|F32|BF16)", model_id, re.IGNORECASE)
+        quant_match = re.search(
+            r"[_-](Q\d+_K(?:_[A-Z]+)?|Q\d+_\d+|IQ\d+_[A-Z]+|F16|F32|BF16)", model_id, re.IGNORECASE
+        )
         if quant_match:
             diagnostics["quant"] = quant_match.group(1).upper()
         agent_ctx = result.outputs.get("_agent_context", {})
@@ -466,11 +457,11 @@ class BackgroundWorker:
         # Pipeline outputs are dicts from model_dump(), need to reconstruct Pydantic models
         await self._store.update(job.job_id, progress=0.97, current_phase="rendering")
 
-        from fitz_forge.planning.schemas.context import ContextOutput
         from fitz_forge.planning.schemas.architecture import ArchitectureOutput
+        from fitz_forge.planning.schemas.context import ContextOutput
         from fitz_forge.planning.schemas.design import DesignOutput
-        from fitz_forge.planning.schemas.roadmap import RoadmapOutput
         from fitz_forge.planning.schemas.risk import RiskOutput
+        from fitz_forge.planning.schemas.roadmap import RoadmapOutput
 
         plan_output = PlanOutput(
             context=ContextOutput(**result.outputs["context"]),
@@ -526,7 +517,9 @@ class BackgroundWorker:
         logger.info(f"Job {job.job_id} completed: plan written to {file_path}")
 
     async def process_job_direct(
-        self, job_id: str, pre_gathered_context: str | None = None,
+        self,
+        job_id: str,
+        pre_gathered_context: str | None = None,
         resume: bool = False,
     ) -> None:
         """
@@ -553,9 +546,7 @@ class BackgroundWorker:
         self._resume_from_checkpoint = resume
         try:
             if resume:
-                await self._store.update(
-                    job_id, state=JobState.RUNNING, current_phase="resuming"
-                )
+                await self._store.update(job_id, state=JobState.RUNNING, current_phase="resuming")
             else:
                 await self._store.update(
                     job_id, state=JobState.RUNNING, progress=0.0, current_phase="starting"
@@ -604,4 +595,3 @@ class BackgroundWorker:
         prompt = "".join(prompt_parts)
 
         return [{"role": "user", "content": prompt}]
-

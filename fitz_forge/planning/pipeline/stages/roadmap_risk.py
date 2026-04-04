@@ -12,13 +12,12 @@ import time
 from typing import Any
 
 from fitz_forge.planning.pipeline.stages.base import (
-    SYSTEM_PROMPT,
     PipelineStage,
     StageResult,
     extract_json,
 )
 from fitz_forge.planning.prompts import load_prompt
-from fitz_forge.planning.schemas import RoadmapOutput, RiskOutput
+from fitz_forge.planning.schemas import RiskOutput, RoadmapOutput
 
 logger = logging.getLogger(__name__)
 
@@ -30,50 +29,59 @@ _FIELD_GROUPS = [
     {
         "label": "phases",
         "fields": ["phases"],
-        "schema": json.dumps({
-            "phases": [
-                {
-                    "number": 1,
-                    "name": "Phase Name",
-                    "objective": "What this phase achieves",
-                    "deliverables": ["specific deliverable"],
-                    "dependencies": [],
-                    "estimated_complexity": "low|medium|high",
-                    "key_risks": ["risk"],
-                    "verification_command": "pytest tests/test_something.py -v",
-                    "estimated_effort": "~2 hours",
-                }
-            ],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "phases": [
+                    {
+                        "number": 1,
+                        "name": "Phase Name",
+                        "objective": "What this phase achieves",
+                        "deliverables": ["specific deliverable"],
+                        "dependencies": [],
+                        "estimated_complexity": "low|medium|high",
+                        "key_risks": ["risk"],
+                        "verification_command": "pytest tests/test_something.py -v",
+                        "estimated_effort": "~2 hours",
+                    }
+                ],
+            },
+            indent=2,
+        ),
     },
     {
         "label": "scheduling",
         "fields": ["critical_path", "parallel_opportunities", "total_phases"],
-        "schema": json.dumps({
-            "critical_path": [1, 2, 4],
-            "parallel_opportunities": [[3, 5]],
-            "total_phases": 5,
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "critical_path": [1, 2, 4],
+                "parallel_opportunities": [[3, 5]],
+                "total_phases": 5,
+            },
+            indent=2,
+        ),
     },
     {
         "label": "risks",
         "fields": ["risks", "overall_risk_level", "recommended_contingencies"],
-        "schema": json.dumps({
-            "risks": [
-                {
-                    "category": "technical|external|resource|schedule|quality|security",
-                    "description": "What could go wrong",
-                    "impact": "low|medium|high|critical",
-                    "likelihood": "low|medium|high",
-                    "mitigation": "Specific mitigation action",
-                    "contingency": "What to do if it happens",
-                    "affected_phases": [1, 3],
-                    "verification": "assert something",
-                }
-            ],
-            "overall_risk_level": "low|medium|high",
-            "recommended_contingencies": ["contingency action"],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "risks": [
+                    {
+                        "category": "technical|external|resource|schedule|quality|security",
+                        "description": "What could go wrong",
+                        "impact": "low|medium|high|critical",
+                        "likelihood": "low|medium|high",
+                        "mitigation": "Specific mitigation action",
+                        "contingency": "What to do if it happens",
+                        "affected_phases": [1, 3],
+                        "verification": "assert something",
+                    }
+                ],
+                "overall_risk_level": "low|medium|high",
+                "recommended_contingencies": ["contingency action"],
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -137,7 +145,9 @@ class RoadmapRiskStage(PipelineStage):
         return (0.65, 0.95)
 
     def _build_prompt_parts(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> tuple[str, str, str, str]:
         """Extract shared prompt components.
 
@@ -188,19 +198,27 @@ class RoadmapRiskStage(PipelineStage):
                 architecture_design_str += f"\nIntegration Points: {', '.join(integrations)}\n"
             artifacts = design.get("artifacts", [])
             if artifacts:
-                architecture_design_str += f"\nDesign Artifacts: {', '.join(a.get('filename', '') for a in artifacts)}\n"
+                architecture_design_str += (
+                    f"\nDesign Artifacts: {', '.join(a.get('filename', '') for a in artifacts)}\n"
+                )
 
         binding_parts = []
         if "context" in prior_outputs:
             needed = ctx.get("needed_artifacts", [])
             if needed:
-                binding_parts.append("Deliverable files (from context):\n" + "\n".join(f"  - {a}" for a in needed))
+                binding_parts.append(
+                    "Deliverable files (from context):\n" + "\n".join(f"  - {a}" for a in needed)
+                )
         if "architecture" in prior_outputs:
             rec = prior_outputs["architecture"].get("recommended", "")
             if rec:
                 binding_parts.append(f"Chosen approach: {rec}")
         if "design" in prior_outputs:
-            comps = [c.get("name", "") for c in prior_outputs["design"].get("components", []) if c.get("name")]
+            comps = [
+                c.get("name", "")
+                for c in prior_outputs["design"].get("components", [])
+                if c.get("name")
+            ]
             if comps:
                 binding_parts.append(f"Components to implement: {', '.join(comps)}")
         binding = "\n".join(binding_parts) if binding_parts else "No specific binding constraints."
@@ -211,7 +229,8 @@ class RoadmapRiskStage(PipelineStage):
     def build_prompt(self, job_description: str, prior_outputs: dict[str, Any]) -> list[dict]:
         prompt_template = load_prompt("roadmap_risk")
         context_str, arch_design_str, binding, krag_context = self._build_prompt_parts(
-            job_description, prior_outputs,
+            job_description,
+            prior_outputs,
         )
         prompt = prompt_template.format(
             description=job_description,
@@ -223,11 +242,14 @@ class RoadmapRiskStage(PipelineStage):
         return self._make_messages(prompt)
 
     def _build_split_roadmap_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> list[dict]:
         prompt_template = load_prompt("roadmap")
         context_str, arch_design_str, binding, krag_context = self._build_prompt_parts(
-            job_description, prior_outputs,
+            job_description,
+            prior_outputs,
         )
         prompt = prompt_template.format(
             context=context_str,
@@ -238,12 +260,15 @@ class RoadmapRiskStage(PipelineStage):
         return self._make_messages(prompt)
 
     def _build_split_risk_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
         roadmap_reasoning: str,
     ) -> list[dict]:
         prompt_template = load_prompt("risk")
         context_str, arch_design_str, binding, krag_context = self._build_prompt_parts(
-            job_description, prior_outputs,
+            job_description,
+            prior_outputs,
         )
         prompt = prompt_template.format(
             context=context_str,
@@ -286,7 +311,10 @@ class RoadmapRiskStage(PipelineStage):
         }
 
     async def _execute_combined(
-        self, client: Any, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> str:
         """Single combined reasoning call (original behavior)."""
         messages = self.build_prompt(job_description, prior_outputs)
@@ -298,11 +326,17 @@ class RoadmapRiskStage(PipelineStage):
 
         krag_context = self._get_gathered_context(prior_outputs)
         return await self._self_critique(
-            client, reasoning, job_description, krag_context=krag_context,
+            client,
+            reasoning,
+            job_description,
+            krag_context=krag_context,
         )
 
     async def _execute_split(
-        self, client: Any, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> str:
         """Two sequential reasoning calls: roadmap then risk."""
         # Roadmap reasoning
@@ -310,7 +344,9 @@ class RoadmapRiskStage(PipelineStage):
         await self._report_substep("reasoning:roadmap")
         t0 = time.monotonic()
         roadmap_reasoning = await self._reason_with_tools(
-            client, roadmap_messages, prior_outputs,
+            client,
+            roadmap_messages,
+            prior_outputs,
         )
         t1 = time.monotonic()
         logger.info(
@@ -320,38 +356,49 @@ class RoadmapRiskStage(PipelineStage):
 
         # Risk reasoning (with roadmap injected)
         risk_messages = self._build_split_risk_prompt(
-            job_description, prior_outputs, roadmap_reasoning,
+            job_description,
+            prior_outputs,
+            roadmap_reasoning,
         )
         await self._report_substep("reasoning:risk")
         t2 = time.monotonic()
         risk_reasoning = await self._reason_with_tools(
-            client, risk_messages, prior_outputs,
+            client,
+            risk_messages,
+            prior_outputs,
         )
         t3 = time.monotonic()
         logger.info(
-            f"Stage '{self.name}': risk reasoning took "
-            f"{t3 - t2:.1f}s ({len(risk_reasoning)} chars)"
+            f"Stage '{self.name}': risk reasoning took {t3 - t2:.1f}s ({len(risk_reasoning)} chars)"
         )
 
         reasoning = (
-            "## Roadmap\n\n" + roadmap_reasoning
-            + "\n\n## Risk Assessment\n\n" + risk_reasoning
+            "## Roadmap\n\n" + roadmap_reasoning + "\n\n## Risk Assessment\n\n" + risk_reasoning
         )
 
         krag_context = self._get_gathered_context(prior_outputs)
         return await self._self_critique(
-            client, reasoning, job_description, krag_context=krag_context,
+            client,
+            reasoning,
+            job_description,
+            krag_context=krag_context,
         )
 
-    async def execute(self, client: Any, job_description: str, prior_outputs: dict[str, Any]) -> StageResult:
+    async def execute(
+        self, client: Any, job_description: str, prior_outputs: dict[str, Any]
+    ) -> StageResult:
         try:
             if self._split_reasoning:
                 reasoning = await self._execute_split(
-                    client, job_description, prior_outputs,
+                    client,
+                    job_description,
+                    prior_outputs,
                 )
             else:
                 reasoning = await self._execute_combined(
-                    client, job_description, prior_outputs,
+                    client,
+                    job_description,
+                    prior_outputs,
                 )
 
             # 3. Per-field-group extraction
@@ -375,8 +422,11 @@ class RoadmapRiskStage(PipelineStage):
 
             # 4. Post-extraction validators
             from fitz_forge.planning.pipeline.validators import (
-                ensure_phase_zero, ensure_concrete_verification, ensure_grounded_risks,
+                ensure_concrete_verification,
+                ensure_grounded_risks,
+                ensure_phase_zero,
             )
+
             merged = ensure_phase_zero(merged, prior_outputs)
             merged = ensure_grounded_risks(merged, prior_outputs)
             merged = await ensure_concrete_verification(merged, client, reasoning)
@@ -391,4 +441,6 @@ class RoadmapRiskStage(PipelineStage):
             )
         except Exception as e:
             logger.error(f"Stage '{self.name}' failed: {e}", exc_info=True)
-            return StageResult(stage_name=self.name, success=False, output={}, raw_output="", error=str(e))
+            return StageResult(
+                stage_name=self.name, success=False, output={}, raw_output="", error=str(e)
+            )

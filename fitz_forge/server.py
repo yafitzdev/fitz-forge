@@ -13,7 +13,6 @@ configure_logging()
 
 # Now safe to import everything else
 import logging
-from pathlib import Path
 
 from fastmcp import FastMCP
 from platformdirs import user_config_path
@@ -57,7 +56,7 @@ async def get_store() -> JobStore:
     return _lifecycle.store
 
 
-async def initialize_lifecycle(config = None) -> None:
+async def initialize_lifecycle(config=None) -> None:
     """
     Initialize the server lifecycle (DB + crash recovery + worker + signals).
 
@@ -99,8 +98,14 @@ async def create_plan(
     """
     store = await get_store()
     return await _create_plan(
-        description, timeline, context, integration_points, api_review,
-        store=store, config=_config, source_dir=source_dir,
+        description,
+        timeline,
+        context,
+        integration_points,
+        api_review,
+        store=store,
+        config=_config,
+        source_dir=source_dir,
     )
 
 

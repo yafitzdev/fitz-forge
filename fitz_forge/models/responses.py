@@ -28,17 +28,13 @@ class PlanStatusResponse(BaseModel):
     """Response from check_status tool."""
 
     job_id: str = Field(description="Job identifier")
-    state: str = Field(description="Current job state (queued/running/awaiting_review/complete/failed/interrupted)")
-    progress: float = Field(
-        ge=0.0, le=1.0, description="Completion progress as fraction (0.0-1.0)"
+    state: str = Field(
+        description="Current job state (queued/running/awaiting_review/complete/failed/interrupted)"
     )
-    current_phase: str | None = Field(
-        default=None, description="Current planning phase if running"
-    )
+    progress: float = Field(ge=0.0, le=1.0, description="Completion progress as fraction (0.0-1.0)")
+    current_phase: str | None = Field(default=None, description="Current planning phase if running")
     eta: str | None = Field(default=None, description="Estimated time remaining")
-    message: str | None = Field(
-        default=None, description="Human-readable status message"
-    )
+    message: str | None = Field(default=None, description="Human-readable status message")
     error: str | None = Field(
         default=None, description="Error message if job failed or interrupted"
     )
@@ -53,9 +49,7 @@ class PlanContentResponse(BaseModel):
     job_id: str = Field(description="Job identifier")
     format: str = Field(description="Response format (full/summary/roadmap_only)")
     content: str = Field(description="Plan content in requested format")
-    file_path: str | None = Field(
-        default=None, description="Path to saved plan file on disk"
-    )
+    file_path: str | None = Field(default=None, description="Path to saved plan file on disk")
     quality_score: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Plan quality score if available"
     )
@@ -71,17 +65,13 @@ class PlanSummary(BaseModel):
         default=None, ge=0.0, le=1.0, description="Plan quality score if available"
     )
     created_at: str = Field(description="Creation timestamp (ISO format)")
-    file_path: str | None = Field(
-        default=None, description="Path to saved plan file on disk"
-    )
+    file_path: str | None = Field(default=None, description="Path to saved plan file on disk")
 
 
 class ListPlansResponse(BaseModel):
     """Response from list_plans tool."""
 
-    plans: list[PlanSummary] = Field(
-        default_factory=list, description="List of all plans"
-    )
+    plans: list[PlanSummary] = Field(default_factory=list, description="List of all plans")
     total: int = Field(description="Total number of plans")
 
 
@@ -100,9 +90,7 @@ class ConfirmReviewResponse(BaseModel):
     """Response from confirm_review tool."""
 
     job_id: str = Field(description="Job identifier")
-    status: str = Field(
-        default="review_started", description="Status after confirmation"
-    )
+    status: str = Field(default="review_started", description="Status after confirmation")
     message: str = Field(
         default="API review started. Use check_status to monitor.",
         description="Human-readable confirmation message",
@@ -113,9 +101,7 @@ class CancelReviewResponse(BaseModel):
     """Response from cancel_review tool."""
 
     job_id: str = Field(description="Job identifier")
-    status: str = Field(
-        default="review_skipped", description="Status after cancellation"
-    )
+    status: str = Field(default="review_skipped", description="Status after cancellation")
     message: str = Field(
         default="API review cancelled. Plan finalized without API review.",
         description="Human-readable confirmation message",

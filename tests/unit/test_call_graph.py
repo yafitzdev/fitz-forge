@@ -1,5 +1,6 @@
 # tests/unit/test_call_graph.py
 """Tests for call graph extraction."""
+
 import pytest
 from fitz_forge.planning.pipeline.call_graph import (
     extract_call_graph,
@@ -54,10 +55,7 @@ class TestKeywordMatching:
         assert "engine.py" in matches
 
     def test_path_match_stronger(self):
-        index = (
-            "## streaming.py\nfunctions: process\n\n"
-            "## other.py\nfunctions: streaming_helper\n"
-        )
+        index = "## streaming.py\nfunctions: process\n\n## other.py\nfunctions: streaming_helper\n"
         matches = _match_keywords_to_files(["streaming"], index)
         assert matches[0] == "streaming.py"
 
@@ -67,10 +65,7 @@ class TestKeywordMatching:
         assert matches == []
 
     def test_multiple_keywords_score_higher(self):
-        index = (
-            "## both.py\nclasses: Streamer\nfunctions: query\n\n"
-            "## one.py\nclasses: Streamer\n"
-        )
+        index = "## both.py\nclasses: Streamer\nfunctions: query\n\n## one.py\nclasses: Streamer\n"
         matches = _match_keywords_to_files(["streamer", "query"], index)
         assert matches[0] == "both.py"
 
@@ -90,7 +85,9 @@ class TestCallGraphExtraction:
         assert graph.edges == []
 
     def test_bidirectional_traversal(self):
-        index = "## a.py\nclasses: Streamer\n\n## b.py\nfunctions: call\n\n## c.py\nfunctions: use\n"
+        index = (
+            "## a.py\nclasses: Streamer\n\n## b.py\nfunctions: call\n\n## c.py\nfunctions: use\n"
+        )
         forward = {"b.py": {"a.py"}, "c.py": {"b.py"}}
         entries = {
             "a.py": "classes: Streamer",

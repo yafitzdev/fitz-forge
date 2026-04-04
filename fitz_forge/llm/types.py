@@ -1,7 +1,7 @@
 # fitz_forge/llm/types.py
 """Normalized LLM response types shared by all client implementations."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

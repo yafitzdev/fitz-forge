@@ -10,13 +10,16 @@ import json
 import logging
 import subprocess
 import time
-import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
-from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, PipelineStage, StageResult, extract_json
+from fitz_forge.planning.pipeline.stages.base import (
+    SYSTEM_PROMPT,
+    PipelineStage,
+    extract_json,
+)
 from fitz_forge.planning.prompts import load_prompt
 
 if TYPE_CHECKING:
@@ -88,9 +91,7 @@ class PlanningPipeline:
         result = await pipeline.execute(client, job_id, description)
     """
 
-    def __init__(
-        self, stages: list[PipelineStage], checkpoint_manager: CheckpointManager
-    ) -> None:
+    def __init__(self, stages: list[PipelineStage], checkpoint_manager: CheckpointManager) -> None:
         """
         Initialize planning pipeline.
 
@@ -134,9 +135,7 @@ class PlanningPipeline:
         # Load checkpoint (if resuming)
         if resume:
             prior_outputs = await self._checkpoint_mgr.load_checkpoint(job_id)
-            logger.info(
-                f"Resuming pipeline for job {job_id} from stage {len(prior_outputs)}"
-            )
+            logger.info(f"Resuming pipeline for job {job_id} from stage {len(prior_outputs)}")
         else:
             prior_outputs = {}
             await self._checkpoint_mgr.clear_checkpoint(job_id)
@@ -181,9 +180,7 @@ class PlanningPipeline:
                 override_files=_bench_override_files,
             )
             # gathered is {"synthesized": str, "raw_summaries": str}
-            await self._checkpoint_mgr.save_stage(
-                job_id, "_agent_context", gathered
-            )
+            await self._checkpoint_mgr.save_stage(job_id, "_agent_context", gathered)
             prior_outputs["_agent_context"] = gathered
             synth_len = len(gathered.get("synthesized", ""))
             raw_len = len(gathered.get("raw_summaries", ""))
@@ -197,13 +194,11 @@ class PlanningPipeline:
                 logger.info(f"Switching back to planning model: {client.model}")
                 await client.switch_model(client.model)
         elif "_agent_context" in prior_outputs:
-            logger.info(
-                f"Resuming: using checkpointed agent context for job {job_id}"
-            )
+            logger.info(f"Resuming: using checkpointed agent context for job {job_id}")
             # Report agent stage as complete so UI shows it done
             if progress_callback:
                 result_or_coro = progress_callback(0.09, "agent_exploring_complete")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
         # Inject source_dir so stages can read actual source for verification
@@ -226,17 +221,16 @@ class PlanningPipeline:
                 prior_outputs["_file_index_entries"] = agent_ctx.get("file_index_entries", {})
 
         # Implementation check: does the codebase already solve this task?
-        if (
-            prior_outputs.get("_gathered_context")
-            and "_implementation_check" not in prior_outputs
-        ):
+        if prior_outputs.get("_gathered_context") and "_implementation_check" not in prior_outputs:
             if progress_callback:
                 result_or_coro = progress_callback(0.092, "agent:checking_existing")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
             t_impl = time.monotonic()
             check = await self._implementation_check(
-                client, prior_outputs["_gathered_context"], job_description,
+                client,
+                prior_outputs["_gathered_context"],
+                job_description,
             )
             stage_timings["implementation_check"] = time.monotonic() - t_impl
             prior_outputs["_implementation_check"] = check
@@ -268,7 +262,8 @@ class PlanningPipeline:
                 full_index = agent_ctx.get("full_structural_index", "")
                 search_index = full_index or prior_outputs["_gathered_context"]
                 dupes = self._check_artifact_duplicates(
-                    artifacts, search_index,
+                    artifacts,
+                    search_index,
                 )
                 if dupes:
                     prior_outputs["_artifact_duplicates"] = dupes
@@ -285,7 +280,7 @@ class PlanningPipeline:
                         prior_outputs[sub_key] = prior_outputs[key][sub_key]
 
         # Determine which stages to execute (exclude internal _ keys)
-        completed_stages = {k for k in prior_outputs.keys() if not k.startswith("_")}
+        completed_stages = {k for k in prior_outputs if not k.startswith("_")}
         remaining_stages = [s for s in self._stages if s.name not in completed_stages]
 
         if not remaining_stages:
@@ -308,7 +303,7 @@ class PlanningPipeline:
                     result_or_coro = progress_callback(
                         stage.progress_range[1], f"{stage.name}_complete"
                     )
-                    if hasattr(result_or_coro, '__await__'):
+                    if hasattr(result_or_coro, "__await__"):
                         await result_or_coro
 
         # Execute stages sequentially
@@ -319,7 +314,7 @@ class PlanningPipeline:
             if progress_callback:
                 progress = stage.progress_range[0]
                 result_or_coro = progress_callback(progress, stage.name)
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
             # Set sub-step callback so stage can report incremental progress.
@@ -327,16 +322,21 @@ class PlanningPipeline:
             _EXPECTED_SUBSTEPS = {"context": 7, "architecture_design": 17, "roadmap_risk": 6}
             substep_counter = [0]  # mutable for closure
 
-            async def _substep_cb(phase_detail: str, _stage=stage) -> None:
+            async def _substep_cb(
+                phase_detail: str,
+                _stage=stage,
+                _counter=substep_counter,
+                _expected=_EXPECTED_SUBSTEPS,
+            ) -> None:
                 if progress_callback:
-                    substep_counter[0] += 1
+                    _counter[0] += 1
                     lo, hi = _stage.progress_range
-                    expected = _EXPECTED_SUBSTEPS.get(_stage.name, 5)
+                    expected = _expected.get(_stage.name, 5)
                     # Advance within range, never exceed hi (leave room for stage_complete)
-                    frac = min(substep_counter[0] / (expected + 1), 0.95)
+                    frac = min(_counter[0] / (expected + 1), 0.95)
                     interpolated = lo + frac * (hi - lo)
                     result_or_coro = progress_callback(interpolated, phase_detail)
-                    if hasattr(result_or_coro, '__await__'):
+                    if hasattr(result_or_coro, "__await__"):
                         await result_or_coro
 
             stage.set_substep_callback(_substep_cb)
@@ -374,7 +374,7 @@ class PlanningPipeline:
             if progress_callback:
                 progress = stage.progress_range[1]
                 result_or_coro = progress_callback(progress, f"{stage.name}_complete")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
             logger.info(f"Stage '{stage.name}' completed successfully")
@@ -382,7 +382,7 @@ class PlanningPipeline:
         # Cross-stage coherence check
         if progress_callback:
             result_or_coro = progress_callback(0.955, "coherence_check")
-            if hasattr(result_or_coro, '__await__'):
+            if hasattr(result_or_coro, "__await__"):
                 await result_or_coro
 
         t_coherence = time.monotonic()
@@ -392,8 +392,16 @@ class PlanningPipeline:
             # Apply fixes to prior_outputs — scalar fields only.
             # Never replace list fields (risks, phases, approaches) since the LLM
             # coherence check often returns truncated arrays that destroy data.
-            _PROTECTED_KEYS = {"risks", "phases", "approaches", "adrs", "components",
-                               "key_requirements", "constraints", "deliverables"}
+            _PROTECTED_KEYS = {
+                "risks",
+                "phases",
+                "approaches",
+                "adrs",
+                "components",
+                "key_requirements",
+                "constraints",
+                "deliverables",
+            }
             applied = []
             for section, fixes in coherence_fixes.items():
                 if not isinstance(fixes, dict):
@@ -415,11 +423,7 @@ class PlanningPipeline:
 
         # All stages completed — check if HEAD advanced during execution
         end_sha = get_git_sha()
-        head_advanced = (
-            start_sha is not None
-            and end_sha is not None
-            and start_sha != end_sha
-        )
+        head_advanced = start_sha is not None and end_sha is not None and start_sha != end_sha
         if head_advanced:
             logger.warning(
                 f"HEAD advanced during pipeline execution: {start_sha[:8]} → {end_sha[:8]}"
@@ -514,11 +518,13 @@ class PlanningPipeline:
                             break
 
             if hits:
-                matches.append({
-                    "proposed": artifact,
-                    "keywords": keywords,
-                    "existing_matches": hits[:10],  # cap to avoid bloat
-                })
+                matches.append(
+                    {
+                        "proposed": artifact,
+                        "keywords": keywords,
+                        "existing_matches": hits[:10],  # cap to avoid bloat
+                    }
+                )
 
         return matches
 
@@ -600,6 +606,7 @@ class PlanningPipeline:
 
             # Try to parse fixes
             from fitz_forge.planning.pipeline.stages.base import extract_json
+
             fixes = extract_json(response)
             if isinstance(fixes, dict):
                 logger.debug(f"Coherence check found issues in: {list(fixes.keys())}")
@@ -670,8 +677,7 @@ class DecomposedPipeline:
         job_id: str,
         job_description: str,
         resume: bool = False,
-        progress_callback: Callable[[float, str], None]
-            | Callable[[float, str], Any] | None = None,
+        progress_callback: Callable[[float, str], None] | Callable[[float, str], Any] | None = None,
         agent: "AgentContextGatherer | None" = None,
         pre_gathered_context: str | None = None,
         _bench_override_files: list[str] | None = None,
@@ -716,7 +722,9 @@ class DecomposedPipeline:
                 override_files=_bench_override_files,
             )
             await self._checkpoint_mgr.save_stage(
-                job_id, "_agent_context", gathered,
+                job_id,
+                "_agent_context",
+                gathered,
             )
             prior_outputs["_agent_context"] = gathered
             stage_timings["agent_gathering"] = time.monotonic() - t_agent
@@ -726,7 +734,7 @@ class DecomposedPipeline:
         elif "_agent_context" in prior_outputs:
             if progress_callback:
                 result_or_coro = progress_callback(0.09, "agent_exploring_complete")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
         # Inject gathered context for stages
@@ -745,18 +753,17 @@ class DecomposedPipeline:
             prior_outputs["_source_dir"] = agent._source_dir
 
         # Implementation check (reuse PlanningPipeline logic)
-        if (
-            prior_outputs.get("_gathered_context")
-            and "_implementation_check" not in prior_outputs
-        ):
+        if prior_outputs.get("_gathered_context") and "_implementation_check" not in prior_outputs:
             if progress_callback:
                 result_or_coro = progress_callback(0.092, "agent:checking_existing")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
             t_impl = time.monotonic()
             helper = PlanningPipeline([], self._checkpoint_mgr)
             check = await helper._implementation_check(
-                client, prior_outputs["_gathered_context"], job_description,
+                client,
+                prior_outputs["_gathered_context"],
+                job_description,
             )
             stage_timings["implementation_check"] = time.monotonic() - t_impl
             prior_outputs["_implementation_check"] = check
@@ -766,11 +773,11 @@ class DecomposedPipeline:
             t_cg = time.monotonic()
             if progress_callback:
                 result_or_coro = progress_callback(0.095, "call_graph_extraction")
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
-            from fitz_forge.planning.pipeline.call_graph import extract_call_graph
             from fitz_forge.planning.agent.indexer import build_import_graph
+            from fitz_forge.planning.pipeline.call_graph import extract_call_graph
 
             source_dir = prior_outputs.get("_source_dir", "")
             agent_ctx = prior_outputs.get("_agent_context", {})
@@ -815,34 +822,36 @@ class DecomposedPipeline:
             "synthesis": 20,
         }
 
-        completed_stages = {
-            k for k in prior_outputs.keys() if not k.startswith("_")
-        }
-        remaining_stages = [
-            s for s in self._stages if s.name not in completed_stages
-        ]
+        completed_stages = {k for k in prior_outputs if not k.startswith("_")}
+        remaining_stages = [s for s in self._stages if s.name not in completed_stages]
 
         for stage in remaining_stages:
             if progress_callback:
                 result_or_coro = progress_callback(
-                    stage.progress_range[0], stage.name,
+                    stage.progress_range[0],
+                    stage.name,
                 )
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
             substep_counter = [0]
 
-            async def _substep_cb(phase_detail: str, _stage=stage) -> None:
+            async def _substep_cb(
+                phase_detail: str,
+                _stage=stage,
+                _counter=substep_counter,
+            ) -> None:
                 if progress_callback:
-                    substep_counter[0] += 1
+                    _counter[0] += 1
                     lo, hi = _stage.progress_range
                     expected = _EXPECTED_SUBSTEPS.get(_stage.name, 5)
-                    frac = min(substep_counter[0] / (expected + 1), 0.95)
+                    frac = min(_counter[0] / (expected + 1), 0.95)
                     interpolated = lo + frac * (hi - lo)
                     result_or_coro = progress_callback(
-                        interpolated, phase_detail,
+                        interpolated,
+                        phase_detail,
                     )
-                    if hasattr(result_or_coro, '__await__'):
+                    if hasattr(result_or_coro, "__await__"):
                         await result_or_coro
 
             stage.set_substep_callback(_substep_cb)
@@ -862,7 +871,9 @@ class DecomposedPipeline:
                 )
 
             await self._checkpoint_mgr.save_stage(
-                job_id, stage.name, result.output,
+                job_id,
+                stage.name,
+                result.output,
             )
             prior_outputs[stage.name] = result.output
 
@@ -874,15 +885,16 @@ class DecomposedPipeline:
 
             if progress_callback:
                 result_or_coro = progress_callback(
-                    stage.progress_range[1], f"{stage.name}_complete",
+                    stage.progress_range[1],
+                    f"{stage.name}_complete",
                 )
-                if hasattr(result_or_coro, '__await__'):
+                if hasattr(result_or_coro, "__await__"):
                     await result_or_coro
 
         # Grounding validation (AST + LLM)
         if progress_callback:
             result_or_coro = progress_callback(0.94, "grounding_validation")
-            if hasattr(result_or_coro, '__await__'):
+            if hasattr(result_or_coro, "__await__"):
                 await result_or_coro
 
         t_grounding = time.monotonic()
@@ -891,13 +903,15 @@ class DecomposedPipeline:
 
             artifacts = prior_outputs.get("design", {}).get("artifacts", [])
             full_index = prior_outputs.get(
-                "_agent_context", {},
+                "_agent_context",
+                {},
             ).get("full_structural_index", "")
             # Fall back to gathered context if full index unavailable
             if not full_index:
                 full_index = prior_outputs.get("_gathered_context", "")
             resolutions = prior_outputs.get(
-                "decision_resolution", {},
+                "decision_resolution",
+                {},
             ).get("resolutions", [])
 
             grounding_report = await validate_grounding(
@@ -907,14 +921,12 @@ class DecomposedPipeline:
                 client=client,
             )
             prior_outputs["_grounding_validation"] = grounding_report.to_dict()
-            logger.info(
-                f"Grounding validation: {grounding_report.total_violations} "
-                f"AST violations"
-            )
+            logger.info(f"Grounding validation: {grounding_report.total_violations} AST violations")
 
             # Repair: if AST violations found, fix them before the plan is finalized
             if grounding_report.ast_violations and artifacts:
                 from fitz_forge.planning.validation.grounding import repair_violations
+
                 repaired = await repair_violations(
                     violations=grounding_report.ast_violations,
                     artifacts=artifacts,
@@ -932,40 +944,38 @@ class DecomposedPipeline:
         # Coherence check (reuse PlanningPipeline._coherence_check)
         if progress_callback:
             result_or_coro = progress_callback(0.955, "coherence_check")
-            if hasattr(result_or_coro, '__await__'):
+            if hasattr(result_or_coro, "__await__"):
                 await result_or_coro
 
         t_coherence = time.monotonic()
         coherence_pipeline = PlanningPipeline([], self._checkpoint_mgr)
         coherence_fixes = await coherence_pipeline._coherence_check(
-            client, prior_outputs,
+            client,
+            prior_outputs,
         )
         stage_timings["coherence_check"] = time.monotonic() - t_coherence
         if coherence_fixes:
             _PROTECTED_KEYS = {
-                "risks", "phases", "approaches", "adrs", "components",
-                "key_requirements", "constraints", "deliverables",
+                "risks",
+                "phases",
+                "approaches",
+                "adrs",
+                "components",
+                "key_requirements",
+                "constraints",
+                "deliverables",
             }
             for section, fixes in coherence_fixes.items():
                 if not isinstance(fixes, dict):
                     continue
-                if section not in prior_outputs or not isinstance(
-                    prior_outputs[section], dict
-                ):
+                if section not in prior_outputs or not isinstance(prior_outputs[section], dict):
                     continue
-                safe_fixes = {
-                    k: v for k, v in fixes.items()
-                    if k not in _PROTECTED_KEYS
-                }
+                safe_fixes = {k: v for k, v in fixes.items() if k not in _PROTECTED_KEYS}
                 if safe_fixes:
                     prior_outputs[section].update(safe_fixes)
 
         end_sha = get_git_sha()
-        head_advanced = (
-            start_sha is not None
-            and end_sha is not None
-            and start_sha != end_sha
-        )
+        head_advanced = start_sha is not None and end_sha is not None and start_sha != end_sha
 
         return PipelineResult(
             success=True,

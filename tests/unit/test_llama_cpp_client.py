@@ -17,10 +17,14 @@ def _make_client(**kwargs):
         server_path="/usr/bin/llama-server",
         models_dir="/models",
         fast_model=LlamaCppModelConfig(
-            path="fast.gguf", context_size=32768, gpu_layers=-1,
+            path="fast.gguf",
+            context_size=32768,
+            gpu_layers=-1,
         ),
         smart_model=LlamaCppModelConfig(
-            path="smart.gguf", context_size=8192, gpu_layers=-1,
+            path="smart.gguf",
+            context_size=8192,
+            gpu_layers=-1,
         ),
         port=18080,
         timeout=30,
@@ -66,9 +70,11 @@ class TestLifecycle:
         mock_proc.poll.return_value = None
         mock_proc.stderr = MagicMock()
 
-        with patch("subprocess.Popen", return_value=mock_proc) as popen, \
-             patch("subprocess.run"), \
-             patch.object(client, "_wait_for_ready", new_callable=AsyncMock):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as popen,
+            patch("subprocess.run"),
+            patch.object(client, "_wait_for_ready", new_callable=AsyncMock),
+        ):
             await client.start("fast")
 
         popen.assert_called_once()
@@ -86,9 +92,11 @@ class TestLifecycle:
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
 
-        with patch("subprocess.Popen", return_value=mock_proc), \
-             patch("subprocess.run"), \
-             patch.object(client, "_wait_for_ready", new_callable=AsyncMock):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("subprocess.run"),
+            patch.object(client, "_wait_for_ready", new_callable=AsyncMock),
+        ):
             await client.start("smart")
 
         assert client._active_tier == "smart"
@@ -140,8 +148,10 @@ class TestEnsureTier:
     async def test_no_switch_needed(self):
         client = _make_client()
         client._active_tier = "fast"
-        with patch.object(client, "start", new_callable=AsyncMock) as start, \
-             patch.object(client, "stop", new_callable=AsyncMock) as stop:
+        with (
+            patch.object(client, "start", new_callable=AsyncMock) as start,
+            patch.object(client, "stop", new_callable=AsyncMock) as stop,
+        ):
             await client._ensure_tier("fast.gguf")
         start.assert_not_called()
         stop.assert_not_called()
@@ -150,8 +160,10 @@ class TestEnsureTier:
     async def test_switches_fast_to_smart(self):
         client = _make_client()
         client._active_tier = "fast"
-        with patch.object(client, "start", new_callable=AsyncMock) as start, \
-             patch.object(client, "stop", new_callable=AsyncMock) as stop:
+        with (
+            patch.object(client, "start", new_callable=AsyncMock) as start,
+            patch.object(client, "stop", new_callable=AsyncMock) as stop,
+        ):
             await client._ensure_tier("smart.gguf")
         stop.assert_called_once()
         start.assert_called_once_with("smart", context_size=None)
@@ -160,8 +172,10 @@ class TestEnsureTier:
     async def test_switches_smart_to_fast(self):
         client = _make_client()
         client._active_tier = "smart"
-        with patch.object(client, "start", new_callable=AsyncMock) as start, \
-             patch.object(client, "stop", new_callable=AsyncMock) as stop:
+        with (
+            patch.object(client, "start", new_callable=AsyncMock) as start,
+            patch.object(client, "stop", new_callable=AsyncMock) as stop,
+        ):
             await client._ensure_tier("fast.gguf")
         stop.assert_called_once()
         start.assert_called_once_with("fast", context_size=None)
@@ -178,14 +192,19 @@ class TestEnsureTier:
     async def test_skips_restart_when_same_model_path(self):
         """When all tiers point to the same GGUF, no restart needed."""
         same_model = LlamaCppModelConfig(
-            path="shared.gguf", context_size=65536, gpu_layers=-1,
+            path="shared.gguf",
+            context_size=65536,
+            gpu_layers=-1,
         )
         client = _make_client(
-            fast_model=same_model, smart_model=same_model,
+            fast_model=same_model,
+            smart_model=same_model,
         )
         client._active_tier = "fast"
-        with patch.object(client, "start", new_callable=AsyncMock) as start, \
-             patch.object(client, "stop", new_callable=AsyncMock) as stop:
+        with (
+            patch.object(client, "start", new_callable=AsyncMock) as start,
+            patch.object(client, "stop", new_callable=AsyncMock) as stop,
+        ):
             await client._ensure_tier("shared.gguf")
         stop.assert_not_called()
         start.assert_not_called()
@@ -212,9 +231,7 @@ class TestHealthCheck:
 
         with patch("httpx.AsyncClient") as mock_http_cls:
             mock_http = AsyncMock()
-            mock_http_cls.return_value.__aenter__ = AsyncMock(
-                return_value=mock_http
-            )
+            mock_http_cls.return_value.__aenter__ = AsyncMock(return_value=mock_http)
             mock_http_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -269,9 +286,7 @@ class TestWaitForReady:
 class TestCallMetrics:
     def test_drain_returns_and_clears(self):
         client = _make_client()
-        client._call_metrics = [
-            {"elapsed_s": 1.0, "output_chars": 100, "model": "fast.gguf"}
-        ]
+        client._call_metrics = [{"elapsed_s": 1.0, "output_chars": 100, "model": "fast.gguf"}]
         metrics = client.drain_call_metrics()
         assert len(metrics) == 1
         assert client._call_metrics == []

@@ -40,14 +40,12 @@ async def retry_job(job_id: str, store: JobStore) -> dict:
     except ToolError:
         raise
     except Exception as e:
-        raise ToolError(f"Invalid job ID: {e}")
+        raise ToolError(f"Invalid job ID: {e}") from e
 
     # Look up job
     record = await store.get(sanitized_id)
     if not record:
-        raise ToolError(
-            f"Job '{sanitized_id}' not found. Use list_plans to see available jobs."
-        )
+        raise ToolError(f"Job '{sanitized_id}' not found. Use list_plans to see available jobs.")
 
     # Check if job is in a retryable state
     if record.state not in (JobState.FAILED, JobState.INTERRUPTED):

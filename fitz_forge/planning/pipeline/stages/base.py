@@ -39,7 +39,7 @@ def _count_unclosed_delimiters(text: str) -> tuple[int, int, bool]:
         if escape:
             escape = False
             continue
-        if ch == '\\' and in_string:
+        if ch == "\\" and in_string:
             escape = True
             continue
         if ch == '"':
@@ -47,13 +47,13 @@ def _count_unclosed_delimiters(text: str) -> tuple[int, int, bool]:
             continue
         if in_string:
             continue
-        if ch == '{':
+        if ch == "{":
             braces += 1
-        elif ch == '}':
+        elif ch == "}":
             braces -= 1
-        elif ch == '[':
+        elif ch == "[":
             brackets += 1
-        elif ch == ']':
+        elif ch == "]":
             brackets -= 1
     return max(braces, 0), max(brackets, 0), in_string
 
@@ -92,7 +92,7 @@ def _repair_truncated_json(
         if not text:
             return None
         # Remove trailing comma or colon (incomplete key-value)
-        if text[-1] in (',', ':'):
+        if text[-1] in (",", ":"):
             text = text[:-1]
             continue
         # Remove a trailing string that looks like a dangling key: "key"
@@ -103,10 +103,10 @@ def _repair_truncated_json(
             if quote_start >= 0:
                 before = text[:quote_start].rstrip()
                 # If preceded by comma, colon, or opening bracket — trim the string
-                if before and before[-1] in (',', ':', '[', '{'):
+                if before and before[-1] in (",", ":", "[", "{"):
                     text = before
                     # Also strip trailing comma left behind
-                    text = text.rstrip().rstrip(',')
+                    text = text.rstrip().rstrip(",")
                     continue
         # Remove last character as fallback
         text = text[:-1]
@@ -132,21 +132,21 @@ def _sanitize_json_strings(text: str) -> str:
         if escape:
             result.append(ch)
             escape = False
-        elif ch == '\\' and in_string:
+        elif ch == "\\" and in_string:
             result.append(ch)
             escape = True
         elif ch == '"':
             result.append(ch)
             in_string = not in_string
-        elif in_string and ch == '\n':
-            result.append('\\n')
-        elif in_string and ch == '\r':
-            result.append('\\r')
-        elif in_string and ch == '\t':
-            result.append('\\t')
+        elif in_string and ch == "\n":
+            result.append("\\n")
+        elif in_string and ch == "\r":
+            result.append("\\r")
+        elif in_string and ch == "\t":
+            result.append("\\t")
         else:
             result.append(ch)
-    return ''.join(result)
+    return "".join(result)
 
 
 def extract_json(raw_output: str) -> dict[str, Any]:
@@ -173,10 +173,8 @@ def extract_json(raw_output: str) -> dict[str, Any]:
     # Only match after colon+whitespace (JSON value position) to avoid
     # corrupting string values like "per [d2]."
     sanitized = re.sub(
-        r'(?<=:\s)\[\s*([a-zA-Z]\w*(?:\s*,\s*[a-zA-Z]\w*)*)\s*\]',
-        lambda m: '[' + ', '.join(
-            f'"{x.strip()}"' for x in m.group(1).split(',')
-        ) + ']',
+        r"(?<=:\s)\[\s*([a-zA-Z]\w*(?:\s*,\s*[a-zA-Z]\w*)*)\s*\]",
+        lambda m: "[" + ", ".join(f'"{x.strip()}"' for x in m.group(1).split(",")) + "]",
         sanitized,
     )
 
@@ -187,9 +185,7 @@ def extract_json(raw_output: str) -> dict[str, Any]:
         pass
 
     # Strategy 2: Code fence (```json ... ```)
-    fence_match = re.search(
-        r"```(?:json)?\s*\n(.*?)\n```", sanitized, re.DOTALL | re.IGNORECASE
-    )
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", sanitized, re.DOTALL | re.IGNORECASE)
     if fence_match:
         try:
             return json.loads(fence_match.group(1).strip())
@@ -210,7 +206,11 @@ def extract_json(raw_output: str) -> dict[str, Any]:
     first_brace = sanitized.find("{")
     first_bracket = sanitized.find("[")
     if first_brace != -1 or first_bracket != -1:
-        start = first_brace if (first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket)) else first_bracket
+        start = (
+            first_brace
+            if (first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket))
+            else first_bracket
+        )
         candidate = sanitized[start:]
         braces, brackets, in_string = _count_unclosed_delimiters(candidate)
         # Always attempt repair if strategies 1-3 failed — even if delimiters
@@ -219,10 +219,9 @@ def extract_json(raw_output: str) -> dict[str, Any]:
         if repaired is not None:
             return repaired
 
-    preview = raw_output[:500].replace('\n', '\\n')
+    preview = raw_output[:500].replace("\n", "\\n")
     raise ValueError(
-        f"Could not extract valid JSON from output ({len(raw_output)} chars). "
-        f"Preview: {preview}"
+        f"Could not extract valid JSON from output ({len(raw_output)} chars). Preview: {preview}"
     )
 
 
@@ -262,9 +261,7 @@ class PipelineStage(ABC):
     def __init__(self) -> None:
         self._substep_cb: Callable[[str], Coroutine] | None = None
 
-    def set_substep_callback(
-        self, cb: Callable[[str], Coroutine] | None
-    ) -> None:
+    def set_substep_callback(self, cb: Callable[[str], Coroutine] | None) -> None:
         """Set callback for reporting sub-step progress (e.g. 'architecture:reasoning')."""
         self._substep_cb = cb
 
@@ -304,9 +301,7 @@ class PipelineStage(ABC):
         pass
 
     @abstractmethod
-    def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any]
-    ) -> list[dict]:
+    def build_prompt(self, job_description: str, prior_outputs: dict[str, Any]) -> list[dict]:
         """
         Build the LLM prompt for this stage.
 
@@ -383,7 +378,8 @@ class PipelineStage(ABC):
         ]
         t2 = time.monotonic()
         json_output = await client.generate(
-            messages=extract_messages, max_tokens=4096,
+            messages=extract_messages,
+            max_tokens=4096,
         )
         t3 = time.monotonic()
         logger.info(f"Stage '{self.name}': two-pass formatting took {t3 - t2:.1f}s")
@@ -424,9 +420,7 @@ class PipelineStage(ABC):
             extract_json(raw)  # validate — parse_output will re-extract
             return raw
         except ValueError:
-            logger.info(
-                f"Stage '{self.name}': single-pass JSON failed, falling back to two-pass"
-            )
+            logger.info(f"Stage '{self.name}': single-pass JSON failed, falling back to two-pass")
             _, json_output = await self._two_pass(client, messages, schema_json)
             return json_output
 
@@ -499,7 +493,8 @@ class PipelineStage(ABC):
         try:
             t0 = time.monotonic()
             raw = await client.generate(
-                messages=extract_messages, max_tokens=4096,
+                messages=extract_messages,
+                max_tokens=4096,
             )
             t1 = time.monotonic()
             logger.info(
@@ -517,7 +512,8 @@ class PipelineStage(ABC):
                     )
                     t0 = time.monotonic()
                     raw = await client.generate(
-                        messages=extract_messages, max_tokens=4096,
+                        messages=extract_messages,
+                        max_tokens=4096,
                     )
                     t1 = time.monotonic()
                     retry_result = extract_json(raw)
@@ -528,10 +524,7 @@ class PipelineStage(ABC):
                             f"{len(retry_val)} {retry_if_empty} ({t1 - t0:.1f}s)"
                         )
                         return retry_result
-                    logger.warning(
-                        f"Stage '{self.name}': retry also empty for "
-                        f"'{retry_if_empty}'"
-                    )
+                    logger.warning(f"Stage '{self.name}': retry also empty for '{retry_if_empty}'")
 
             return result
         except Exception as e:
@@ -744,10 +737,15 @@ class PipelineStage(ABC):
         agent_files = prior_outputs.get("_agent_context", {}).get("agent_files", {})
         if agent_files:
             from fitz_forge.planning.agent.indexer import generate_investigation_questions
+
             # Extract signatures from the raw context (it's prepended)
             sig_marker = "--- INTERFACE SIGNATURES"
             sig_end = krag_context.find("\n\n###")
-            signatures = krag_context[krag_context.find(sig_marker):sig_end] if sig_marker in krag_context else ""
+            signatures = (
+                krag_context[krag_context.find(sig_marker) : sig_end]
+                if sig_marker in krag_context
+                else ""
+            )
 
             # Reconstruct forward_map from serialized form
             fwd_raw = agent_files.get("forward_map", {})
@@ -824,7 +822,9 @@ class PipelineStage(ABC):
         ]
         try:
             return await client.generate(
-                messages=messages, temperature=0, max_tokens=4096,
+                messages=messages,
+                temperature=0,
+                max_tokens=4096,
             )
         except Exception as e:
             logger.warning(f"Stage '{self.name}': _ask_one failed: {e}")
@@ -852,7 +852,7 @@ class PipelineStage(ABC):
             logger.info(
                 f"Trimming gathered context: {len(ctx)} -> {self._MAX_GATHERED_CONTEXT_CHARS} chars"
             )
-            ctx = ctx[:self._MAX_GATHERED_CONTEXT_CHARS] + "\n\n[... context trimmed for brevity]"
+            ctx = ctx[: self._MAX_GATHERED_CONTEXT_CHARS] + "\n\n[... context trimmed for brevity]"
         return ctx
 
     def _get_raw_summaries(self, prior_outputs: dict[str, Any]) -> str:
@@ -913,9 +913,13 @@ class PipelineStage(ABC):
 
         if not file_contents or generate_with_tools is None:
             if not file_contents:
-                logger.info(f"Stage '{self.name}': no file_contents, falling back to plain generate")
+                logger.info(
+                    f"Stage '{self.name}': no file_contents, falling back to plain generate"
+                )
             else:
-                logger.info(f"Stage '{self.name}': no generate_with_tools, falling back to plain generate")
+                logger.info(
+                    f"Stage '{self.name}': no generate_with_tools, falling back to plain generate"
+                )
             return await client.generate(messages=messages)
 
         logger.info(
@@ -939,9 +943,8 @@ class PipelineStage(ABC):
             # Disk fallback: read and compress on demand
             if source_dir:
                 try:
-                    from pathlib import Path
-                    from fitz_forge.validation.sanitize import sanitize_agent_path
                     from fitz_forge.planning.agent.compressor import compress_file
+                    from fitz_forge.validation.sanitize import sanitize_agent_path
 
                     resolved = sanitize_agent_path(path, source_dir)
                     if resolved.is_file():
@@ -1018,8 +1021,7 @@ class PipelineStage(ABC):
             "- read_files(paths: list[str]) — read full source of multiple files at once\n\n"
             "Workflow: inspect_files first to understand structure, "
             "then read_file/read_files for implementation details you need.\n\n"
-            f"Files in tool pool ({len(available)} available): "
-            + ", ".join(available)
+            f"Files in tool pool ({len(available)} available): " + ", ".join(available)
         )
         if source_dir:
             tool_hint += (
@@ -1066,14 +1068,10 @@ class PipelineStage(ABC):
                 elif tc.name == "inspect_files":
                     paths = tc.arguments.get("paths", [])
                     result = inspect_files(paths)
-                    logger.info(
-                        f"Stage '{self.name}': inspect_files({len(paths)} files)"
-                    )
+                    logger.info(f"Stage '{self.name}': inspect_files({len(paths)} files)")
                 else:
                     result = f"Unknown tool: {tc.name}"
-                messages.append(
-                    client.tool_result_message(tc.id, result)
-                )
+                messages.append(client.tool_result_message(tc.id, result))
 
             logger.info(
                 f"Stage '{self.name}': tool round {_round + 1}/{max_rounds} — "
@@ -1109,7 +1107,9 @@ class PipelineStage(ABC):
             text += f"\nGaps to fill: {', '.join(gaps)}"
         else:
             text += "\nNo gaps identified — task may already be complete."
-        text += "\nDo NOT propose building something that already exists. If the task is done, say so."
+        text += (
+            "\nDo NOT propose building something that already exists. If the task is done, say so."
+        )
         return text
 
     async def execute(
@@ -1146,9 +1146,7 @@ class PipelineStage(ABC):
             logger.info(f"Stage '{self.name}': Calling LLM")
             raw_output = await client.generate(messages=messages)
 
-            logger.info(
-                f"Stage '{self.name}': Received {len(raw_output)} chars from LLM"
-            )
+            logger.info(f"Stage '{self.name}': Received {len(raw_output)} chars from LLM")
 
             # Parse output
             parsed = self.parse_output(raw_output)

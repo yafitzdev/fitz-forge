@@ -124,9 +124,7 @@ class GPUTemperatureGuard:
             elapsed = time.monotonic() - t0
 
             if temp is None or temp <= self.cooldown_target:
-                logger.debug(
-                    f"GPU cooled to {temp}°C after {elapsed:.0f}s, resuming"
-                )
+                logger.debug(f"GPU cooled to {temp}°C after {elapsed:.0f}s, resuming")
                 return
 
             if elapsed > self.cooldown_timeout:
@@ -136,9 +134,7 @@ class GPUTemperatureGuard:
                 )
                 return
 
-            logger.debug(
-                f"GPU at {temp}°C, waiting... ({elapsed:.0f}s elapsed)"
-            )
+            logger.debug(f"GPU at {temp}°C, waiting... ({elapsed:.0f}s elapsed)")
 
     # ------------------------------------------------------------------
     # Layer 2: Mid-stream throttle

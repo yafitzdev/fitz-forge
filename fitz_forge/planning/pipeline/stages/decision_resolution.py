@@ -14,13 +14,12 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from fitz_forge.planning.pipeline.call_graph import CallGraph
 from fitz_forge.planning.pipeline.stages.base import (
-    SYSTEM_PROMPT,
     PipelineStage,
     StageResult,
     extract_json,
 )
-from fitz_forge.planning.pipeline.call_graph import CallGraph
 from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.schemas.decisions import (
     DecisionResolution,
@@ -111,6 +110,7 @@ class DecisionResolutionStage(PipelineStage):
     def _read_from_disk(source_dir: str, rel_path: str) -> str | None:
         """Read a file from disk as fallback for files not in the agent pool."""
         from pathlib import Path
+
         full = Path(source_dir) / rel_path
         if not full.is_file():
             return None
@@ -118,6 +118,7 @@ class DecisionResolutionStage(PipelineStage):
             text = full.read_bytes()[:50_000].decode("utf-8", errors="replace")
             try:
                 from fitz_sage.engines.fitz_krag.context.compressor import compress_python
+
                 if rel_path.endswith(".py"):
                     text = compress_python(text)
             except ImportError:
@@ -135,7 +136,9 @@ class DecisionResolutionStage(PipelineStage):
         return (0.20, 0.75)
 
     def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> list[dict]:
         raise NotImplementedError("Use _build_decision_prompt instead")
 
@@ -228,21 +231,19 @@ class DecisionResolutionStage(PipelineStage):
                 entry += f" [{c_str}]"
             lines.append(entry)
 
-        prompt = _CONTRADICTION_CHECK_PROMPT.format(
-            resolutions="\n".join(lines)
-        )
+        prompt = _CONTRADICTION_CHECK_PROMPT.format(resolutions="\n".join(lines))
         messages = self._make_messages(prompt)
 
         try:
             raw = await client.generate(
-                messages=messages, temperature=0, max_tokens=1024,
+                messages=messages,
+                temperature=0,
+                max_tokens=1024,
             )
             data = extract_json(raw)
             contradictions = data.get("contradictions", [])
         except Exception as e:
-            logger.warning(
-                f"Stage '{self.name}': contradiction check failed ({e})"
-            )
+            logger.warning(f"Stage '{self.name}': contradiction check failed ({e})")
             return resolutions
 
         if not contradictions:
@@ -261,21 +262,29 @@ class DecisionResolutionStage(PipelineStage):
             # Accept multiple key name variants, then fall back to scanning
             # all string values for decision ID patterns (d\d+).
             import re
+
             _DID = re.compile(r"^d\d+$")
 
-            def _extract_ids(entry: dict) -> tuple[str, str]:
+            def _extract_ids(entry: dict, _DID=_DID) -> tuple[str, str]:
                 # Preferred key names first
-                a = (entry.get("decision_a") or entry.get("a") or
-                     entry.get("da") or entry.get("first") or "")
-                b = (entry.get("decision_b") or entry.get("b") or
-                     entry.get("db") or entry.get("second") or "")
+                a = (
+                    entry.get("decision_a")
+                    or entry.get("a")
+                    or entry.get("da")
+                    or entry.get("first")
+                    or ""
+                )
+                b = (
+                    entry.get("decision_b")
+                    or entry.get("b")
+                    or entry.get("db")
+                    or entry.get("second")
+                    or ""
+                )
                 if a and b:
                     return str(a), str(b)
                 # Fall back: collect all values that look like decision IDs
-                ids = [
-                    str(v) for v in entry.values()
-                    if isinstance(v, str) and _DID.match(v)
-                ]
+                ids = [str(v) for v in entry.values() if isinstance(v, str) and _DID.match(v)]
                 if len(ids) >= 2:
                     return ids[0], ids[1]
                 return str(a), str(b)
@@ -295,10 +304,7 @@ class DecisionResolutionStage(PipelineStage):
                 )
                 continue
 
-            logger.info(
-                f"Stage '{self.name}': retrying {d_b} "
-                f"(contradicts {d_a}: {description})"
-            )
+            logger.info(f"Stage '{self.name}': retrying {d_b} (contradicts {d_a}: {description})")
 
             upstream: list[str] = [
                 f"CONTRADICTION NOTICE: Your previous answer contradicted "
@@ -321,7 +327,9 @@ class DecisionResolutionStage(PipelineStage):
 
             try:
                 retry_raw = await client.generate(
-                    messages=messages, temperature=0, max_tokens=4096,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=4096,
                 )
                 retry_resolution = self.parse_output(retry_raw)
                 retry_resolution["decision_id"] = d_b
@@ -330,10 +338,7 @@ class DecisionResolutionStage(PipelineStage):
                     if r.get("decision_id") == d_b:
                         resolutions[i] = retry_resolution
                         break
-                logger.info(
-                    f"Stage '{self.name}': contradiction retry for "
-                    f"{d_b} succeeded"
-                )
+                logger.info(f"Stage '{self.name}': contradiction retry for {d_b} succeeded")
             except Exception as e:
                 logger.warning(
                     f"Stage '{self.name}': contradiction retry for "
@@ -365,7 +370,10 @@ class DecisionResolutionStage(PipelineStage):
             call_graph = prior_outputs.get("_call_graph")
             if call_graph is None:
                 call_graph = CallGraph(
-                    nodes=[], edges=[], entry_points=[], max_depth=0,
+                    nodes=[],
+                    edges=[],
+                    entry_points=[],
+                    max_depth=0,
                 )
             file_contents = prior_outputs.get("_file_contents", {})
             file_index_entries = prior_outputs.get("_file_index_entries", {})
@@ -375,7 +383,7 @@ class DecisionResolutionStage(PipelineStage):
             already_resolved: dict[str, dict] = {}
             for key, val in prior_outputs.items():
                 if key.startswith("_resolution_partial_"):
-                    d_id = key[len("_resolution_partial_"):]
+                    d_id = key[len("_resolution_partial_") :]
                     already_resolved[d_id] = val
 
             # Build set of known file paths for evidence validation
@@ -391,9 +399,7 @@ class DecisionResolutionStage(PipelineStage):
 
             # Seed constraint_map from already-resolved decisions
             for d_id, resolution in already_resolved.items():
-                constraint_map[d_id] = resolution.get(
-                    "constraints_for_downstream", []
-                )
+                constraint_map[d_id] = resolution.get("constraints_for_downstream", [])
 
             for i, decision in enumerate(sorted_decisions):
                 d_id = decision["id"]
@@ -401,10 +407,7 @@ class DecisionResolutionStage(PipelineStage):
                 # Skip already-resolved decisions (crash recovery)
                 if d_id in already_resolved:
                     resolutions.append(already_resolved[d_id])
-                    logger.info(
-                        f"Stage '{self.name}': skipping {d_id} "
-                        f"(restored from checkpoint)"
-                    )
+                    logger.info(f"Stage '{self.name}': skipping {d_id} (restored from checkpoint)")
                     continue
 
                 await self._report_substep(f"resolving:{d_id}")
@@ -425,12 +428,13 @@ class DecisionResolutionStage(PipelineStage):
 
                 t0 = time.monotonic()
                 raw = await client.generate(
-                    messages=messages, temperature=0, max_tokens=4096,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=4096,
                 )
                 t1 = time.monotonic()
                 logger.info(
-                    f"Stage '{self.name}': resolved {d_id} in "
-                    f"{t1 - t0:.1f}s ({len(raw)} chars)"
+                    f"Stage '{self.name}': resolved {d_id} in {t1 - t0:.1f}s ({len(raw)} chars)"
                 )
 
                 try:
@@ -455,14 +459,13 @@ class DecisionResolutionStage(PipelineStage):
                     valid_evidence = []
                     for ev in evidence:
                         # Extract file references like "engine.py:..." or "path/to/file.py"
-                        file_refs = re.findall(r'([\w./]+\.py)\b', ev)
+                        file_refs = re.findall(r"([\w./]+\.py)\b", ev)
                         if not file_refs:
                             valid_evidence.append(ev)  # No file ref, keep it
                             continue
                         # Keep if at least one referenced file exists
                         if any(
-                            ref in known_files
-                            or any(kf.endswith(ref) for kf in known_files)
+                            ref in known_files or any(kf.endswith(ref) for kf in known_files)
                             for ref in file_refs
                         ):
                             valid_evidence.append(ev)
@@ -475,16 +478,12 @@ class DecisionResolutionStage(PipelineStage):
                         resolution["evidence"] = valid_evidence
 
                 resolutions.append(resolution)
-                constraint_map[d_id] = resolution.get(
-                    "constraints_for_downstream", []
-                )
+                constraint_map[d_id] = resolution.get("constraints_for_downstream", [])
 
                 # Save partial progress for crash recovery
                 prior_outputs[f"_resolution_partial_{d_id}"] = resolution
 
-                await self._report_substep(
-                    f"resolved:{d_id} ({i + 1}/{len(sorted_decisions)})"
-                )
+                await self._report_substep(f"resolved:{d_id} ({i + 1}/{len(sorted_decisions)})")
 
             # Contradiction gate: detect and fix self-contradicting decisions
             # before synthesis narrates them into a broken plan.
@@ -500,9 +499,7 @@ class DecisionResolutionStage(PipelineStage):
             )
 
             output = DecisionResolutionOutput(
-                resolutions=[
-                    DecisionResolution(**r) for r in resolutions
-                ],
+                resolutions=[DecisionResolution(**r) for r in resolutions],
             )
 
             return StageResult(

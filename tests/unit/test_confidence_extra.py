@@ -105,7 +105,8 @@ class TestScorerSectionCriteria:
         scorer = ConfidenceScorer(ollama_client=llm)
 
         await scorer.score_section(
-            "architecture", "Content",
+            "architecture",
+            "Content",
             codebase_context="## Files\n- src/api.py",
         )
 

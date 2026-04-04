@@ -7,7 +7,6 @@ import time
 from typing import TYPE_CHECKING
 
 import httpx
-import ollama
 from ollama import AsyncClient, ResponseError
 
 from .retry import ollama_retry
@@ -90,9 +89,7 @@ class OllamaClient:
 
             # Check if our model is available (exact match or with :latest tag)
             model_base = self.model.split(":")[0]
-            model_available = any(
-                model_base in m or self.model == m for m in available_models
-            )
+            model_available = any(model_base in m or self.model == m for m in available_models)
 
             if not model_available:
                 logger.warning(
@@ -140,7 +137,9 @@ class OllamaClient:
         if temperature is not None:
             options["temperature"] = temperature
         async for chunk in await self.client.chat(
-            model=model, messages=messages, stream=True,
+            model=model,
+            messages=messages,
+            stream=True,
             options=options,
         ):
             if content := chunk.get("message", {}).get("content"):
@@ -148,7 +147,9 @@ class OllamaClient:
 
         result = "".join(accumulated)
         elapsed = time.monotonic() - t0
-        self._call_metrics.append({"elapsed_s": elapsed, "output_chars": len(result), "model": model})
+        self._call_metrics.append(
+            {"elapsed_s": elapsed, "output_chars": len(result), "model": model}
+        )
         logger.info(f"Generated {len(result)} chars in {elapsed:.1f}s")
         return result
 
@@ -182,9 +183,7 @@ class OllamaClient:
                     logger.error("OOM error but no fallback model configured")
                     raise
 
-                logger.warning(
-                    f"OOM error on {self.model}, falling back to {self.fallback_model}"
-                )
+                logger.warning(f"OOM error on {self.model}, falling back to {self.fallback_model}")
                 result = await self.generate(messages, model=self.fallback_model)
                 return result, self.fallback_model
 

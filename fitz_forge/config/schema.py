@@ -15,9 +15,7 @@ class OllamaConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    base_url: str = Field(
-        default="http://localhost:11434", description="Ollama API base URL"
-    )
+    base_url: str = Field(default="http://localhost:11434", description="Ollama API base URL")
     model: str = Field(
         default="qwen2.5-coder-next:80b-instruct",
         description="Ollama model to use for planning",
@@ -48,9 +46,7 @@ class AgentConfig(BaseModel):
     agent_model: str | None = Field(
         default=None, description="Model for agent tool calls (None = use ollama.model)"
     )
-    max_file_bytes: int = Field(
-        default=50_000, description="Maximum bytes to read per file"
-    )
+    max_file_bytes: int = Field(default=50_000, description="Maximum bytes to read per file")
     source_dir: str | None = Field(
         default=None,
         description=(
@@ -127,9 +123,7 @@ class LMStudioConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    base_url: str = Field(
-        default="http://localhost:1234/v1", description="LM Studio API base URL"
-    )
+    base_url: str = Field(default="http://localhost:1234/v1", description="LM Studio API base URL")
     model: str = Field(default="local-model", description="LM Studio model to use for planning")
     fast_model: str | None = Field(
         default=None, description="Model for fast/screening tasks (None = use model)"
@@ -140,9 +134,7 @@ class LMStudioConfig(BaseModel):
     fallback_model: str | None = Field(
         default=None, description="Fallback model (None = no fallback)"
     )
-    timeout: int = Field(
-        default=300, description="Request timeout in seconds"
-    )
+    timeout: int = Field(default=300, description="Request timeout in seconds")
     context_length: int = Field(
         default=65536,
         description="Context length to use when auto-loading the model via lms CLI",
@@ -163,7 +155,9 @@ class LlamaCppModelConfig(BaseModel):
     gpu_layers: int = Field(default=-1, description="GPU layers to offload (-1 = all)")
     flash_attention: bool = Field(default=False, description="Enable flash attention")
     cache_type_k: str | None = Field(default=None, description="KV cache type for keys (e.g. q4_0)")
-    cache_type_v: str | None = Field(default=None, description="KV cache type for values (e.g. q4_0)")
+    cache_type_v: str | None = Field(
+        default=None, description="KV cache type for values (e.g. q4_0)"
+    )
 
 
 class LlamaCppConfig(BaseModel):
@@ -171,12 +165,8 @@ class LlamaCppConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    server_path: str = Field(
-        default="", description="Path to llama-server binary"
-    )
-    models_dir: str = Field(
-        default="", description="Directory containing GGUF model files"
-    )
+    server_path: str = Field(default="", description="Path to llama-server binary")
+    models_dir: str = Field(default="", description="Directory containing GGUF model files")
     fast_model: LlamaCppModelConfig = Field(
         default_factory=LlamaCppModelConfig,
         description="Small model for screening (fast YES/NO calls)",
@@ -191,9 +181,7 @@ class LlamaCppConfig(BaseModel):
     )
     port: int = Field(default=8012, description="llama-server port")
     timeout: int = Field(default=300, description="Request timeout in seconds")
-    startup_timeout: int = Field(
-        default=120, description="Max seconds to wait for server startup"
-    )
+    startup_timeout: int = Field(default=120, description="Max seconds to wait for server startup")
 
 
 class GPUConfig(BaseModel):

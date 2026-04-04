@@ -17,7 +17,6 @@ This mirrors how decision_resolution.py works: one focused call per decision
 with the relevant source code, instead of one big synthesis pass.
 """
 
-import json
 import logging
 import time
 from typing import Any
@@ -80,7 +79,8 @@ async def resolve_artifacts(
     Returns list of artifact dicts (filename, content, purpose).
     """
     resolutions = prior_outputs.get(
-        "decision_resolution", {},
+        "decision_resolution",
+        {},
     ).get("resolutions", [])
     if not resolutions:
         return []
@@ -100,13 +100,13 @@ async def resolve_artifacts(
 
     # Get attribute template from cheat sheet builder
     from fitz_forge.planning.pipeline.stages.synthesis import (
-        SynthesisStage,
         _build_attribute_template,
     )
 
     # Build sections dict for attribute template
     full_index = prior_outputs.get(
-        "_agent_context", {},
+        "_agent_context",
+        {},
     ).get("full_structural_index", "")
     if not full_index:
         full_index = prior_outputs.get("_gathered_context", "")
@@ -127,7 +127,9 @@ async def resolve_artifacts(
                     referenced_files.add(path)
 
     attr_template = _build_attribute_template(
-        referenced_files, prior_outputs, sections,
+        referenced_files,
+        prior_outputs,
+        sections,
     )
 
     # Collect all constraints
@@ -156,7 +158,9 @@ async def resolve_artifacts(
 
         # Find resolutions that reference this file
         relevant = _find_relevant_resolutions(filename, resolutions)
-        decision_text = _format_decisions(relevant) if relevant else "(no specific decisions for this file)"
+        decision_text = (
+            _format_decisions(relevant) if relevant else "(no specific decisions for this file)"
+        )
 
         prompt = _ARTIFACT_PROMPT.format(
             task_description=job_description,
@@ -183,22 +187,24 @@ async def resolve_artifacts(
                 f"Artifact resolution: {filename} ({elapsed:.1f}s, "
                 f"{len(data.get('content', ''))} chars)"
             )
-            artifacts.append({
-                "filename": data.get("filename", filename),
-                "content": data.get("content", ""),
-                "purpose": data.get("purpose", purpose),
-            })
+            artifacts.append(
+                {
+                    "filename": data.get("filename", filename),
+                    "content": data.get("content", ""),
+                    "purpose": data.get("purpose", purpose),
+                }
+            )
         except Exception as e:
             elapsed = time.monotonic() - t0
-            logger.warning(
-                f"Artifact resolution failed for {filename} ({elapsed:.1f}s): {e}"
-            )
+            logger.warning(f"Artifact resolution failed for {filename} ({elapsed:.1f}s): {e}")
             # Don't crash — return empty artifact
-            artifacts.append({
-                "filename": filename,
-                "content": f"# Artifact generation failed: {e}",
-                "purpose": purpose,
-            })
+            artifacts.append(
+                {
+                    "filename": filename,
+                    "content": f"# Artifact generation failed: {e}",
+                    "purpose": purpose,
+                }
+            )
 
     return artifacts
 
@@ -255,6 +261,7 @@ def _get_source(
     # Disk fallback
     if source_dir:
         from pathlib import Path
+
         full_path = Path(source_dir) / filename
         if full_path.is_file():
             try:

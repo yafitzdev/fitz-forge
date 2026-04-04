@@ -74,6 +74,7 @@ def is_lm_studio_retryable(exception: BaseException) -> bool:
     # httpx transport-level errors
     try:
         import httpx
+
         if isinstance(exception, (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout)):
             return True
     except ImportError:
@@ -81,7 +82,8 @@ def is_lm_studio_retryable(exception: BaseException) -> bool:
 
     # openai SDK errors
     try:
-        from openai import APIConnectionError, APITimeoutError, APIStatusError
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
+
         if isinstance(exception, (APIConnectionError, APITimeoutError)):
             return True
         if isinstance(exception, APIStatusError):
@@ -115,6 +117,7 @@ def is_llama_cpp_retryable(exception: BaseException) -> bool:
     # Additionally handle 500 from llama-server during model loading
     try:
         from openai import APIStatusError
+
         if isinstance(exception, APIStatusError) and exception.status_code == 500:
             return True
     except ImportError:

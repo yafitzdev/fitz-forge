@@ -89,6 +89,7 @@ def make_job():
         def test_something(make_job):
             job = make_job(state=JobState.FAILED, error="OOM")
     """
+
     def _factory(
         job_id: str | None = None,
         description: str = "Test planning job",
@@ -152,9 +153,7 @@ class MockLLMClient:
         self.call_count = 0
         self.calls: list[list[dict]] = []
 
-    async def generate(
-        self, messages: list[dict], model: str | None = None, **kwargs
-    ) -> str:
+    async def generate(self, messages: list[dict], model: str | None = None, **kwargs) -> str:
         self.calls.append(messages)
         idx = self.call_count
         self.call_count += 1
@@ -177,8 +176,10 @@ def mock_llm_client():
             client = mock_llm_client(response="yes")
             client = mock_llm_client(responses=["a", "b", "c"])
     """
+
     def _factory(response: str = "{}", responses: list[str] | None = None):
         return MockLLMClient(response=response, responses=responses)
+
     return _factory
 
 

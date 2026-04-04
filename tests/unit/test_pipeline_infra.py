@@ -70,9 +70,7 @@ class MockStageA(PipelineStage):
     def progress_range(self) -> tuple[float, float]:
         return (0.0, 0.5)
 
-    def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any]
-    ) -> list[dict]:
+    def build_prompt(self, job_description: str, prior_outputs: dict[str, Any]) -> list[dict]:
         return [
             {"role": "system", "content": "You are a planner"},
             {"role": "user", "content": job_description},
@@ -93,9 +91,7 @@ class MockStageB(PipelineStage):
     def progress_range(self) -> tuple[float, float]:
         return (0.5, 1.0)
 
-    def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any]
-    ) -> list[dict]:
+    def build_prompt(self, job_description: str, prior_outputs: dict[str, Any]) -> list[dict]:
         # Uses output from stage_a
         stage_a_content = prior_outputs.get("stage_a", {}).get("content", "")
         return [
@@ -121,9 +117,7 @@ class FailingStage(PipelineStage):
     def progress_range(self) -> tuple[float, float]:
         return (0.0, 1.0)
 
-    def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any]
-    ) -> list[dict]:
+    def build_prompt(self, job_description: str, prior_outputs: dict[str, Any]) -> list[dict]:
         return [{"role": "user", "content": job_description}]
 
     def parse_output(self, raw_output: str) -> dict[str, Any]:
@@ -148,9 +142,7 @@ async def checkpoint_manager(temp_db: str) -> CheckpointManager:
 @pytest_asyncio.fixture
 async def mock_client() -> MockLLMClient:
     """Create mock LLM client."""
-    return MockLLMClient(
-        responses={"stage_1": "Response A", "stage_2": "Response B"}
-    )
+    return MockLLMClient(responses={"stage_1": "Response A", "stage_2": "Response B"})
 
 
 # Tests for PipelineStage ABC
@@ -193,9 +185,7 @@ async def test_pipeline_stage_prior_outputs(mock_client: MockLLMClient):
 
 # Tests for CheckpointManager
 @pytest.mark.asyncio
-async def test_checkpoint_save_and_load(
-    checkpoint_manager: CheckpointManager, temp_db: str
-):
+async def test_checkpoint_save_and_load(checkpoint_manager: CheckpointManager, temp_db: str):
     """Test saving and loading checkpoints."""
     # Create a job
     async with aiosqlite.connect(temp_db) as db:
@@ -208,18 +198,14 @@ async def test_checkpoint_save_and_load(
         await db.commit()
 
     # Save checkpoint for stage A
-    await checkpoint_manager.save_stage(
-        "job123", "stage_a", {"result": "data_a"}
-    )
+    await checkpoint_manager.save_stage("job123", "stage_a", {"result": "data_a"})
 
     # Load checkpoint
     checkpoint = await checkpoint_manager.load_checkpoint("job123")
     assert checkpoint == {"stage_a": {"result": "data_a"}}
 
     # Save checkpoint for stage B
-    await checkpoint_manager.save_stage(
-        "job123", "stage_b", {"result": "data_b"}
-    )
+    await checkpoint_manager.save_stage("job123", "stage_b", {"result": "data_b"})
 
     # Load both checkpoints
     checkpoint = await checkpoint_manager.load_checkpoint("job123")
@@ -312,6 +298,7 @@ async def test_checkpoint_stale_warning(
         await db.commit()
 
     import logging
+
     with caplog.at_level(logging.WARNING):
         checkpoint = await checkpoint_manager.load_checkpoint("job_stale")
 
@@ -535,9 +522,7 @@ async def test_pipeline_full_integration(tmp_path: Path):
     client = MockLLMClient(responses={"stage_1": "Result A", "stage_2": "Result B"})
 
     # Execute fresh
-    result = await pipeline.execute(
-        client, "integration_job", "Build system", resume=False
-    )
+    result = await pipeline.execute(client, "integration_job", "Build system", resume=False)
 
     assert result.success is True
     assert len(result.outputs) == 2
@@ -548,9 +533,7 @@ async def test_pipeline_full_integration(tmp_path: Path):
 
     # Resume (should skip all stages)
     client2 = MockLLMClient()  # Fresh client
-    result2 = await pipeline.execute(
-        client2, "integration_job", "Build system", resume=True
-    )
+    result2 = await pipeline.execute(client2, "integration_job", "Build system", resume=True)
 
     assert result2.success is True
     assert result2.outputs == checkpoint

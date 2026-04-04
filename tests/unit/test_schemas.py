@@ -302,8 +302,11 @@ class TestRiskOutput:
     def test_risk_verification_default_empty(self):
         """verification defaults to empty string."""
         risk = Risk(
-            category="technical", description="test",
-            impact="high", likelihood="medium", mitigation="test",
+            category="technical",
+            description="test",
+            impact="high",
+            likelihood="medium",
+            mitigation="test",
         )
         assert risk.verification == ""
 
@@ -433,7 +436,6 @@ class TestConfigValidation:
         with caplog.at_level(logging.WARNING):
             _warn_unknown_keys(yaml_data, FitzPlannerConfig)
         assert not any("Unknown config key" in msg for msg in caplog.messages)
-
 
 
 class TestPromptLoading:

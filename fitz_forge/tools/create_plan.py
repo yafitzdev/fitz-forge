@@ -59,7 +59,7 @@ async def create_plan(
     except ToolError:
         raise
     except Exception as e:
-        raise ToolError(f"Invalid description: {e}")
+        raise ToolError(f"Invalid description: {e}") from e
 
     # Validate source_dir if provided
     validated_source_dir: str | None = None
@@ -95,7 +95,7 @@ async def create_plan(
     except ValueError as e:
         # This should never happen with UUIDs, but handle gracefully
         logger.error(f"Job ID collision: {e}")
-        raise ToolError(f"Internal error creating job: {e}")
+        raise ToolError(f"Internal error creating job: {e}") from e
 
     logger.info(
         f"Created planning job {job_id} for: {cleaned_description[:80]}... (api_review={api_review})"

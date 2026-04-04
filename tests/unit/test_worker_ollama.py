@@ -55,10 +55,28 @@ async def test_process_job_success(store: SQLiteJobStore, tmp_path: Path):
     mock_pipeline_result.success = True
     mock_pipeline_result.git_sha = "abc1234"
     mock_pipeline_result.outputs = {
-        "context": {"project_description": "Test", "key_requirements": [], "constraints": [], "existing_context": "", "stakeholders": [], "scope_boundaries": {}},
-        "architecture": {"approaches": [], "recommended": "Test", "reasoning": "Test", "key_tradeoffs": {}, "technology_considerations": []},
+        "context": {
+            "project_description": "Test",
+            "key_requirements": [],
+            "constraints": [],
+            "existing_context": "",
+            "stakeholders": [],
+            "scope_boundaries": {},
+        },
+        "architecture": {
+            "approaches": [],
+            "recommended": "Test",
+            "reasoning": "Test",
+            "key_tradeoffs": {},
+            "technology_considerations": [],
+        },
         "design": {"adrs": [], "components": [], "data_model": {}, "integration_points": []},
-        "roadmap": {"phases": [], "critical_path": [], "parallel_opportunities": [], "total_phases": 0},
+        "roadmap": {
+            "phases": [],
+            "critical_path": [],
+            "parallel_opportunities": [],
+            "total_phases": 0,
+        },
         "risk": {"risks": []},
     }
 
@@ -159,10 +177,28 @@ async def test_process_job_oom_fallback(store: SQLiteJobStore, tmp_path: Path):
     mock_pipeline_result.success = True
     mock_pipeline_result.git_sha = "abc1234"
     mock_pipeline_result.outputs = {
-        "context": {"project_description": "Test", "key_requirements": [], "constraints": [], "existing_context": "", "stakeholders": [], "scope_boundaries": {}},
-        "architecture": {"approaches": [], "recommended": "Test", "reasoning": "Test", "key_tradeoffs": {}, "technology_considerations": []},
+        "context": {
+            "project_description": "Test",
+            "key_requirements": [],
+            "constraints": [],
+            "existing_context": "",
+            "stakeholders": [],
+            "scope_boundaries": {},
+        },
+        "architecture": {
+            "approaches": [],
+            "recommended": "Test",
+            "reasoning": "Test",
+            "key_tradeoffs": {},
+            "technology_considerations": [],
+        },
         "design": {"adrs": [], "components": [], "data_model": {}, "integration_points": []},
-        "roadmap": {"phases": [], "critical_path": [], "parallel_opportunities": [], "total_phases": 0},
+        "roadmap": {
+            "phases": [],
+            "critical_path": [],
+            "parallel_opportunities": [],
+            "total_phases": 0,
+        },
         "risk": {"risks": []},
     }
 

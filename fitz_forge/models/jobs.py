@@ -6,8 +6,8 @@ Internal models (NOT exposed via MCP) for managing planning jobs.
 """
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from uuid import uuid4
 
@@ -103,9 +103,7 @@ class InMemoryJobStore(JobStore):
         Returns:
             List of all JobRecords, ordered by creation time (newest first)
         """
-        return sorted(
-            self._jobs.values(), key=lambda r: r.created_at, reverse=True
-        )
+        return sorted(self._jobs.values(), key=lambda r: r.created_at, reverse=True)
 
     async def update(self, job_id: str, **kwargs) -> None:
         """

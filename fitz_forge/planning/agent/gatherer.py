@@ -53,7 +53,9 @@ def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable
         def chat(self, messages: list[dict]) -> str:
             future = asyncio.run_coroutine_threadsafe(
                 client.generate(
-                    messages=messages, model=self._model, temperature=0,
+                    messages=messages,
+                    model=self._model,
+                    temperature=0,
                 ),
                 loop,
             )
@@ -123,7 +125,8 @@ class AgentContextGatherer:
 
                 await self._report(progress_callback, 0.06, "agent:mapping")
                 file_paths = build_file_list(
-                    Path(self._source_dir), max_files=2000,
+                    Path(self._source_dir),
+                    max_files=2000,
                 )
                 src = Path(self._source_dir)
                 results = []
@@ -132,15 +135,18 @@ class AgentContextGatherer:
                     if not full.is_file():
                         continue
                     try:
-                        text = full.read_bytes()[:self._config.max_file_bytes]
+                        text = full.read_bytes()[: self._config.max_file_bytes]
                         content = text.decode("utf-8", errors="replace")
                         if rel.endswith(".py"):
                             content = compress_python(content)
                     except OSError:
                         continue
                     addr = Address(
-                        kind=AddressKind.FILE, source_id=rel,
-                        location=rel, summary=rel, score=1.0,
+                        kind=AddressKind.FILE,
+                        source_id=rel,
+                        location=rel,
+                        summary=rel,
+                        score=1.0,
                         metadata={"origin": "selected"},
                     )
                     results.append(ReadResult(address=addr, content=content, file_path=rel))
@@ -225,31 +231,33 @@ class AgentContextGatherer:
             # Step 5: Build structural overview
             await self._report(progress_callback, 0.080, "agent:reading")
             selected_index = build_structural_index(
-                Path(self._source_dir), included,
+                Path(self._source_dir),
+                included,
                 max_file_bytes=self._config.max_file_bytes,
             )
             signatures = extract_interface_signatures(
-                self._source_dir, included, self._config.max_file_bytes,
+                self._source_dir,
+                included,
+                self._config.max_file_bytes,
             )
             lib_sigs = extract_library_signatures(
-                self._source_dir, included, file_paths,
+                self._source_dir,
+                included,
+                file_paths,
                 self._config.max_file_bytes,
             )
 
             overview_parts: list[str] = []
             if signatures:
                 overview_parts.append(
-                    "--- INTERFACE SIGNATURES (auto-extracted, ground truth) ---\n"
-                    + signatures
+                    "--- INTERFACE SIGNATURES (auto-extracted, ground truth) ---\n" + signatures
                 )
             if lib_sigs:
                 overview_parts.append(
-                    "--- LIBRARY API REFERENCE (installed packages, ground truth) ---\n"
-                    + lib_sigs
+                    "--- LIBRARY API REFERENCE (installed packages, ground truth) ---\n" + lib_sigs
                 )
             overview_parts.append(
-                "--- STRUCTURAL OVERVIEW (all selected files) ---\n"
-                + selected_index
+                "--- STRUCTURAL OVERVIEW (all selected files) ---\n" + selected_index
             )
             structural_overview = "\n\n".join(overview_parts)
 
@@ -285,35 +293,28 @@ class AgentContextGatherer:
                 entry = file_index_entries.get(path, "")
                 lines = entry.split("\n") if entry else []
                 doc_line = next(
-                    (l.strip() for l in lines if l.strip().startswith("doc:")),
+                    (line.strip() for line in lines if line.strip().startswith("doc:")),
                     "",
                 )
-                manifest_lines.append(
-                    f"  {path} — {doc_line}" if doc_line else f"  {path}"
-                )
+                manifest_lines.append(f"  {path} — {doc_line}" if doc_line else f"  {path}")
 
             raw_parts: list[str] = []
             if signatures:
                 raw_parts.append(
-                    "--- INTERFACE SIGNATURES (auto-extracted, ground truth) ---\n"
-                    + signatures
+                    "--- INTERFACE SIGNATURES (auto-extracted, ground truth) ---\n" + signatures
                 )
             if lib_sigs:
                 raw_parts.append(
-                    "--- LIBRARY API REFERENCE (installed packages, ground truth) ---\n"
-                    + lib_sigs
+                    "--- LIBRARY API REFERENCE (installed packages, ground truth) ---\n" + lib_sigs
                 )
             raw_parts.append(
-                f"--- FILE MANIFEST ({len(included)} files) ---\n"
-                + "\n".join(manifest_lines)
+                f"--- FILE MANIFEST ({len(included)} files) ---\n" + "\n".join(manifest_lines)
             )
             raw_summaries = "\n\n".join(raw_parts)
 
             # All files go into the tool pool
             seed_files: list[str] = []
-            tool_pool_files: list[str] = [
-                p for p in included if p in file_contents
-            ]
+            tool_pool_files: list[str] = [p for p in included if p in file_contents]
             logger.info(
                 f"AgentContextGatherer: {len(tool_pool_files)} files "
                 f"in tool pool ({sum(len(file_contents.get(p, '')) for p in tool_pool_files)} chars), "
@@ -355,7 +356,8 @@ class AgentContextGatherer:
             # Build full structural index (all files, not just selected)
             # for artifact duplicate checking downstream
             full_index = build_structural_index(
-                Path(self._source_dir), file_paths,
+                Path(self._source_dir),
+                file_paths,
                 max_file_bytes=self._config.max_file_bytes,
             )
 

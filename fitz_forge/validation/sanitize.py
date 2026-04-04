@@ -33,7 +33,7 @@ def sanitize_project_path(user_path: str) -> Path:
     try:
         resolved = Path(user_path).resolve()
     except (ValueError, OSError) as e:
-        raise ToolError(f"Invalid path '{user_path}': {e}")
+        raise ToolError(f"Invalid path '{user_path}': {e}") from e
 
     if not resolved.exists():
         raise ToolError(f"Path does not exist: {resolved}")
@@ -68,9 +68,7 @@ def sanitize_description(text: str, max_length: int = 5000) -> str:
         raise ToolError("Description cannot be empty")
 
     if len(cleaned) > max_length:
-        logger.warning(
-            f"Description truncated from {len(cleaned)} to {max_length} characters"
-        )
+        logger.warning(f"Description truncated from {len(cleaned)} to {max_length} characters")
         cleaned = cleaned[:max_length]
 
     return cleaned
@@ -94,14 +92,12 @@ def sanitize_agent_path(user_path: str, root_dir: str) -> "Path":
     try:
         resolved = (root / user_path).resolve()
     except (ValueError, OSError) as e:
-        raise ValueError(f"Invalid path '{user_path}': {e}")
+        raise ValueError(f"Invalid path '{user_path}': {e}") from e
 
     try:
         resolved.relative_to(root)
     except ValueError:
-        raise ValueError(
-            f"Path '{user_path}' is outside source directory '{root}'"
-        )
+        raise ValueError(f"Path '{user_path}' is outside source directory '{root}'") from None
 
     if not resolved.exists():
         raise ValueError(f"Path does not exist: {resolved}")

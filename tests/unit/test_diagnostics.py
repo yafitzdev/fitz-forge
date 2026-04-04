@@ -36,6 +36,7 @@ def _minimal_plan(**kwargs) -> PlanOutput:
 # LMStudioClient call metrics
 # ---------------------------------------------------------------------------
 
+
 def _make_lm_client(**kwargs):
     with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
         client = LMStudioClient(**kwargs)
@@ -62,9 +63,7 @@ class TestLMStudioCallMetrics:
     async def test_generate_records_metrics(self):
         client = _make_lm_client(model="test-model")
         chunks = _make_stream_chunks(["Hello", " world"])
-        client._client.chat.completions.create = AsyncMock(
-            return_value=_async_iter(chunks)
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         await client.generate([{"role": "user", "content": "hi"}])
 
@@ -78,9 +77,7 @@ class TestLMStudioCallMetrics:
     async def test_drain_clears_metrics(self):
         client = _make_lm_client(model="test-model")
         chunks = _make_stream_chunks(["ok"])
-        client._client.chat.completions.create = AsyncMock(
-            return_value=_async_iter(chunks)
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         await client.generate([{"role": "user", "content": "hi"}])
         first = client.drain_call_metrics()
@@ -95,9 +92,7 @@ class TestLMStudioCallMetrics:
 
         for _ in range(3):
             chunks = _make_stream_chunks(["x"])
-            client._client.chat.completions.create = AsyncMock(
-                return_value=_async_iter(chunks)
-            )
+            client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
             await client.generate([{"role": "user", "content": "hi"}])
 
         metrics = client.drain_call_metrics()
@@ -108,6 +103,7 @@ class TestLMStudioCallMetrics:
 # OllamaClient call metrics
 # ---------------------------------------------------------------------------
 
+
 class TestOllamaCallMetrics:
     @pytest.mark.asyncio
     async def test_generate_records_metrics(self):
@@ -117,6 +113,7 @@ class TestOllamaCallMetrics:
             async def gen():
                 yield {"message": {"content": "Hello"}}
                 yield {"message": {"content": " world"}}
+
             return gen()
 
         client.client.chat = AsyncMock(side_effect=fake_chat)
@@ -136,6 +133,7 @@ class TestOllamaCallMetrics:
         async def fake_chat(**kwargs):
             async def gen():
                 yield {"message": {"content": "ok"}}
+
             return gen()
 
         client.client.chat = AsyncMock(side_effect=fake_chat)
@@ -148,6 +146,7 @@ class TestOllamaCallMetrics:
 # ---------------------------------------------------------------------------
 # PipelineResult stage_timings
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineResultTimings:
     def test_default_empty_dict(self):
@@ -163,6 +162,7 @@ class TestPipelineResultTimings:
 # ---------------------------------------------------------------------------
 # PlanOutput diagnostics field
 # ---------------------------------------------------------------------------
+
 
 class TestPlanOutputDiagnostics:
     def test_default_empty_dict(self):
@@ -180,19 +180,22 @@ class TestPlanOutputDiagnostics:
 # Diagnostics rendering
 # ---------------------------------------------------------------------------
 
+
 class TestDiagnosticsRendering:
     def test_renders_diagnostics_table(self):
-        plan = _minimal_plan(diagnostics={
-            "provider": "lm_studio",
-            "model": "qwen/qwen3-coder-30b",
-            "agent_enabled": True,
-            "total_llm_calls": 14,
-            "total_generation_s": 342.1,
-            "stage_timings_s": {
-                "context": 89.2,
-                "architecture_design": 156.3,
-            },
-        })
+        plan = _minimal_plan(
+            diagnostics={
+                "provider": "lm_studio",
+                "model": "qwen/qwen3-coder-30b",
+                "agent_enabled": True,
+                "total_llm_calls": 14,
+                "total_generation_s": 342.1,
+                "stage_timings_s": {
+                    "context": 89.2,
+                    "architecture_design": 156.3,
+                },
+            }
+        )
         renderer = PlanRenderer()
         md = renderer.render(plan)
 

@@ -57,17 +57,11 @@ def create_llm_client(
     if config.provider == "llama_cpp":
         cfg = config.llama_cpp
         if not cfg.server_path:
-            raise ValueError(
-                "llama_cpp.server_path is required when provider=llama_cpp"
-            )
+            raise ValueError("llama_cpp.server_path is required when provider=llama_cpp")
         if not cfg.fast_model.path:
-            raise ValueError(
-                "llama_cpp.fast_model.path is required when provider=llama_cpp"
-            )
+            raise ValueError("llama_cpp.fast_model.path is required when provider=llama_cpp")
         if not cfg.models_dir:
-            raise ValueError(
-                "llama_cpp.models_dir is required when provider=llama_cpp"
-            )
+            raise ValueError("llama_cpp.models_dir is required when provider=llama_cpp")
         return LlamaCppClient(
             server_path=cfg.server_path,
             models_dir=cfg.models_dir,

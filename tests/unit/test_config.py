@@ -284,10 +284,12 @@ class TestLlamaCppConfig:
 
     def test_nested_from_dict(self):
         """Model can be constructed from nested dicts (YAML parse output)."""
-        c = LlamaCppConfig.model_validate({
-            "server_path": "/usr/bin/llama-server",
-            "fast_model": {"path": "small.gguf", "context_size": 2048},
-        })
+        c = LlamaCppConfig.model_validate(
+            {
+                "server_path": "/usr/bin/llama-server",
+                "fast_model": {"path": "small.gguf", "context_size": 2048},
+            }
+        )
         assert c.fast_model.path == "small.gguf"
         assert c.fast_model.context_size == 2048
 
@@ -351,11 +353,13 @@ class TestFitzPlannerConfig:
         assert isinstance(c.gpu, GPUConfig)
 
     def test_from_dict_partial_overrides(self):
-        c = FitzPlannerConfig.model_validate({
-            "provider": "lm_studio",
-            "lm_studio": {"model": "my-model"},
-            "confidence": {"default_threshold": 0.5},
-        })
+        c = FitzPlannerConfig.model_validate(
+            {
+                "provider": "lm_studio",
+                "lm_studio": {"model": "my-model"},
+                "confidence": {"default_threshold": 0.5},
+            }
+        )
         assert c.provider == "lm_studio"
         assert c.lm_studio.model == "my-model"
         assert c.confidence.default_threshold == 0.5
@@ -397,10 +401,12 @@ class TestFitzPlannerConfig:
 
     def test_nested_extra_fields_ignored(self):
         """Extra fields on nested sub-configs are also ignored."""
-        c = FitzPlannerConfig.model_validate({
-            "ollama": {"base_url": "http://x:11434", "typo_field": "ignored"},
-            "agent": {"enabled": True, "bogus": 123},
-        })
+        c = FitzPlannerConfig.model_validate(
+            {
+                "ollama": {"base_url": "http://x:11434", "typo_field": "ignored"},
+                "agent": {"enabled": True, "bogus": 123},
+            }
+        )
         assert c.ollama.base_url == "http://x:11434"
         assert c.agent.enabled is True
 

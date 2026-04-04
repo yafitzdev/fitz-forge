@@ -36,9 +36,7 @@ class CostCalculator:
         self._client = client
         self._converter = None  # Lazy-loaded CurrencyConverter
 
-    async def estimate_review_cost(
-        self, sections: list[ReviewRequest], model: str
-    ) -> CostEstimate:
+    async def estimate_review_cost(self, sections: list[ReviewRequest], model: str) -> CostEstimate:
         """
         Estimate cost of reviewing sections using count_tokens API.
 
@@ -88,8 +86,7 @@ class CostCalculator:
 
         # Calculate USD cost
         cost_usd = (
-            total_input_tokens * self.INPUT_PRICE
-            + estimated_output_tokens * self.OUTPUT_PRICE
+            total_input_tokens * self.INPUT_PRICE + estimated_output_tokens * self.OUTPUT_PRICE
         )
 
         # Convert to EUR
@@ -104,9 +101,7 @@ class CostCalculator:
             model=model,
         )
 
-    def calculate_actual_cost(
-        self, results: list[ReviewResult], model: str
-    ) -> CostBreakdown:
+    def calculate_actual_cost(self, results: list[ReviewResult], model: str) -> CostBreakdown:
         """
         Calculate actual cost from review results.
 
@@ -124,8 +119,7 @@ class CostCalculator:
 
         # Calculate USD cost
         actual_cost_usd = (
-            actual_input_tokens * self.INPUT_PRICE
-            + actual_output_tokens * self.OUTPUT_PRICE
+            actual_input_tokens * self.INPUT_PRICE + actual_output_tokens * self.OUTPUT_PRICE
         )
 
         # Convert to EUR

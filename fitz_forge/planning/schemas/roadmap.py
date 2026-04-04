@@ -4,7 +4,7 @@
 import re
 from typing import Annotated
 
-from pydantic import BaseModel, Field, ConfigDict, BeforeValidator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 
 def _coerce_phase_number(value: object) -> int:

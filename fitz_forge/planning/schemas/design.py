@@ -1,7 +1,7 @@
 # fitz_forge/planning/schemas/design.py
 """Schema for design decisions stage output."""
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ADR(BaseModel):

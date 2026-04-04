@@ -19,22 +19,35 @@ from fitz_forge.planning.pipeline.validators import (
 # ensure_min_existing_files
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureMinExistingFiles:
     def _make_summaries(self, paths: list[str]) -> str:
         return "\n".join(f"### {p}\nSome summary text." for p in paths)
 
     def test_backfilled_from_summaries(self):
         """< 6 files + summaries have more → backfilled."""
-        merged = {"existing_files": [
-            "src/a.py — does A",
-            "src/b.py — does B",
-            "src/c.py — does C",
-            "src/d.py — does D",
-        ]}
-        prior = {"_raw_summaries": self._make_summaries([
-            "src/a.py", "src/b.py", "src/c.py", "src/d.py",
-            "src/e.py", "src/f.py", "src/g.py", "src/h.py",
-        ])}
+        merged = {
+            "existing_files": [
+                "src/a.py — does A",
+                "src/b.py — does B",
+                "src/c.py — does C",
+                "src/d.py — does D",
+            ]
+        }
+        prior = {
+            "_raw_summaries": self._make_summaries(
+                [
+                    "src/a.py",
+                    "src/b.py",
+                    "src/c.py",
+                    "src/d.py",
+                    "src/e.py",
+                    "src/f.py",
+                    "src/g.py",
+                    "src/h.py",
+                ]
+            )
+        }
         result = ensure_min_existing_files(merged, prior)
         assert len(result["existing_files"]) >= 6
         paths = [e.split(" — ")[0].split(" - ")[0].strip() for e in result["existing_files"]]
@@ -68,22 +81,39 @@ class TestEnsureMinExistingFiles:
 # ensure_min_adrs
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureMinAdrs:
     @pytest.mark.asyncio
     async def test_adrs_added_when_below_minimum(self):
         """1 ADR → LLM adds more → now >= 2."""
         merged = {
-            "adrs": [{"title": "ADR: Existing", "context": "c", "decision": "d", "rationale": "r",
-                       "consequences": [], "alternatives_considered": []}],
+            "adrs": [
+                {
+                    "title": "ADR: Existing",
+                    "context": "c",
+                    "decision": "d",
+                    "rationale": "r",
+                    "consequences": [],
+                    "alternatives_considered": [],
+                }
+            ],
             "recommended": "Approach A",
             "reasoning": "Some reasoning",
             "components": [{"name": "Comp1"}],
         }
         client = AsyncMock()
-        client.generate.return_value = json.dumps([
-            {"title": "ADR: New One", "context": "ctx", "decision": "dec",
-             "rationale": "rat", "consequences": ["c1"], "alternatives_considered": ["a1"]},
-        ])
+        client.generate.return_value = json.dumps(
+            [
+                {
+                    "title": "ADR: New One",
+                    "context": "ctx",
+                    "decision": "dec",
+                    "rationale": "rat",
+                    "consequences": ["c1"],
+                    "alternatives_considered": ["a1"],
+                },
+            ]
+        )
         result = await ensure_min_adrs(merged, client, {}, "reasoning text")
         assert len(result["adrs"]) >= 2
         assert client.generate.called
@@ -92,8 +122,14 @@ class TestEnsureMinAdrs:
     async def test_adrs_noop_when_enough(self):
         """>=2 ADRs → unchanged, no LLM call."""
         adrs = [
-            {"title": f"ADR: {i}", "context": "c", "decision": "d", "rationale": "r",
-             "consequences": [], "alternatives_considered": []}
+            {
+                "title": f"ADR: {i}",
+                "context": "c",
+                "decision": "d",
+                "rationale": "r",
+                "consequences": [],
+                "alternatives_considered": [],
+            }
             for i in range(3)
         ]
         merged = {"adrs": adrs[:]}
@@ -105,7 +141,12 @@ class TestEnsureMinAdrs:
     @pytest.mark.asyncio
     async def test_adrs_llm_failure_no_crash(self):
         """LLM failure → original ADRs kept, no crash."""
-        merged = {"adrs": [{"title": "ADR: Solo"}], "recommended": "A", "reasoning": "r", "components": []}
+        merged = {
+            "adrs": [{"title": "ADR: Solo"}],
+            "recommended": "A",
+            "reasoning": "r",
+            "components": [],
+        }
         client = AsyncMock()
         client.generate.side_effect = RuntimeError("LLM down")
         result = await ensure_min_adrs(merged, client, {}, "reasoning")
@@ -115,6 +156,7 @@ class TestEnsureMinAdrs:
 # ---------------------------------------------------------------------------
 # ensure_phase_zero
 # ---------------------------------------------------------------------------
+
 
 class TestEnsurePhaseZero:
     def _make_summaries(self, paths: list[str]) -> str:
@@ -130,7 +172,9 @@ class TestEnsurePhaseZero:
             "critical_path": [1, 2],
             "total_phases": 2,
         }
-        prior = {"_raw_summaries": self._make_summaries(["src/main.py", "src/config.py", "src/utils.py"])}
+        prior = {
+            "_raw_summaries": self._make_summaries(["src/main.py", "src/config.py", "src/utils.py"])
+        }
         result = ensure_phase_zero(merged, prior)
         assert result["phases"][0]["number"] == 0
         assert result["phases"][0]["name"] == "Read Before Writing"
@@ -176,18 +220,25 @@ class TestEnsurePhaseZero:
 # ensure_concrete_verification
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureConcreteVerification:
     @pytest.mark.asyncio
     async def test_vague_verification_replaced(self):
-        """"run tests" → concrete command via LLM."""
+        """ "run tests" → concrete command via LLM."""
         merged = {
             "phases": [
-                {"number": 1, "name": "Build", "verification_command": "run tests",
-                 "deliverables": ["src/widget.py"]},
+                {
+                    "number": 1,
+                    "name": "Build",
+                    "verification_command": "run tests",
+                    "deliverables": ["src/widget.py"],
+                },
             ],
         }
         client = AsyncMock()
-        client.generate.return_value = json.dumps({"1": "python -m pytest tests/unit/test_widget.py -v"})
+        client.generate.return_value = json.dumps(
+            {"1": "python -m pytest tests/unit/test_widget.py -v"}
+        )
         result = await ensure_concrete_verification(merged, client, "reasoning")
         assert "test_widget" in result["phases"][0]["verification_command"]
 
@@ -196,9 +247,12 @@ class TestEnsureConcreteVerification:
         """Already has path → unchanged, no LLM call."""
         merged = {
             "phases": [
-                {"number": 1, "name": "Build",
-                 "verification_command": "python -m pytest tests/unit/test_foo.py -v",
-                 "deliverables": []},
+                {
+                    "number": 1,
+                    "name": "Build",
+                    "verification_command": "python -m pytest tests/unit/test_foo.py -v",
+                    "deliverables": [],
+                },
             ],
         }
         client = AsyncMock()
@@ -211,8 +265,12 @@ class TestEnsureConcreteVerification:
         """LLM fails → template fallback applied."""
         merged = {
             "phases": [
-                {"number": 1, "name": "Build", "verification_command": "verify",
-                 "deliverables": ["src/widget.py"]},
+                {
+                    "number": 1,
+                    "name": "Build",
+                    "verification_command": "verify",
+                    "deliverables": ["src/widget.py"],
+                },
             ],
         }
         client = AsyncMock()
@@ -223,18 +281,31 @@ class TestEnsureConcreteVerification:
 
 
 class TestIsVagueVerification:
-    @pytest.mark.parametrize("cmd", [
-        "run tests", "Run Tests", "verify", "check that it works",
-        "test it", "manual", "pytest", "python", "# run tests",
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "run tests",
+            "Run Tests",
+            "verify",
+            "check that it works",
+            "test it",
+            "manual",
+            "pytest",
+            "python",
+            "# run tests",
+        ],
+    )
     def test_vague_detected(self, cmd):
         assert _is_vague_verification(cmd) is True
 
-    @pytest.mark.parametrize("cmd", [
-        "python -m pytest tests/unit/test_foo.py -v",
-        "curl localhost:8080/health",
-        "python -c 'from mod import func; func()'",
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python -m pytest tests/unit/test_foo.py -v",
+            "curl localhost:8080/health",
+            "python -c 'from mod import func; func()'",
+        ],
+    )
     def test_concrete_detected(self, cmd):
         assert _is_vague_verification(cmd) is False
 
@@ -242,6 +313,7 @@ class TestIsVagueVerification:
 # ---------------------------------------------------------------------------
 # ensure_grounded_risks
 # ---------------------------------------------------------------------------
+
 
 class TestEnsureGroundedRisks:
     def test_ungrounded_risks_removed(self):

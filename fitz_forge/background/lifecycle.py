@@ -97,14 +97,10 @@ class ServerLifecycle:
 
         # Log any interrupted jobs (the initialize method already marks them)
         interrupted = [
-            job
-            for job in await self._store.list_all()
-            if job.state.value == "interrupted"
+            job for job in await self._store.list_all() if job.state.value == "interrupted"
         ]
         if interrupted:
-            logger.warning(
-                f"Found {len(interrupted)} interrupted job(s) from previous session"
-            )
+            logger.warning(f"Found {len(interrupted)} interrupted job(s) from previous session")
             for job in interrupted:
                 logger.warning(f"  - {job.job_id}: {job.description}")
 

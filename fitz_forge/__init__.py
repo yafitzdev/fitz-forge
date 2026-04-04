@@ -17,8 +17,10 @@ if sys.platform == "win32":
     # WMI codepath is never reached. Registry and env-var fallbacks in
     # platform.py still provide correct values.
     if hasattr(platform, "_wmi_query"):
+
         def _wmi_disabled(*args, **kwargs):
             raise OSError("WMI disabled to prevent deadlock")
+
         platform._wmi_query = _wmi_disabled
 
 __version__ = "0.3.0"

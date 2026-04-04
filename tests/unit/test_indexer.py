@@ -235,9 +235,7 @@ class TestExtractGenericCode:
 # ---------------------------------------------------------------------------
 class TestBuildStructuralIndex:
     def test_indexes_python_file(self, tmp_path):
-        (tmp_path / "main.py").write_text(
-            "class App:\n    def run(self):\n        pass\n"
-        )
+        (tmp_path / "main.py").write_text("class App:\n    def run(self):\n        pass\n")
         result = build_structural_index(str(tmp_path), ["main.py"])
         assert "## main.py" in result
         assert "App" in result
@@ -383,9 +381,7 @@ class TestBuildDirectoryClusters:
         assert import_line.count(",") <= 9
 
     def test_missing_files_skipped(self, tmp_path):
-        text, groups = build_directory_clusters(
-            str(tmp_path), ["nonexistent/file.py"]
-        )
+        text, groups = build_directory_clusters(str(tmp_path), ["nonexistent/file.py"])
         assert "nonexistent/" in groups
         # No structural info extracted, but group exists
         assert "(1 files)" in text
@@ -414,9 +410,13 @@ class TestBuildModuleFileLookup:
         assert lookup == {}
 
     def test_multiple_files(self):
-        lookup = _build_module_file_lookup([
-            "pkg/mod_a.py", "pkg/mod_b.py", "pkg/__init__.py",
-        ])
+        lookup = _build_module_file_lookup(
+            [
+                "pkg/mod_a.py",
+                "pkg/mod_b.py",
+                "pkg/__init__.py",
+            ]
+        )
         assert lookup["pkg.mod_a"] == "pkg/mod_a.py"
         assert lookup["pkg.mod_b"] == "pkg/mod_b.py"
         assert lookup["pkg"] == "pkg/__init__.py"
@@ -521,16 +521,11 @@ class TestBuildImportGraph:
         pkg = tmp_path / "pkg"
         pkg.mkdir()
         (pkg / "governor.py").write_text("class Gov: pass\n")
-        (pkg / "decider.py").write_text(
-            "from pkg.governor import Gov\n"
-            "class Decider: pass\n"
-        )
+        (pkg / "decider.py").write_text("from pkg.governor import Gov\nclass Decider: pass\n")
         engines = tmp_path / "engines"
         engines.mkdir()
         (engines / "engine.py").write_text(
-            "class Engine:\n"
-            "    def init(self):\n"
-            "        from pkg.decider import Decider\n"
+            "class Engine:\n    def init(self):\n        from pkg.decider import Decider\n"
         )
         files = ["pkg/governor.py", "pkg/decider.py", "engines/engine.py"]
         forward, _lookup = build_import_graph(str(tmp_path), files)
@@ -545,11 +540,7 @@ class TestBuildImportGraph:
 # ---------------------------------------------------------------------------
 class TestExtractSignaturesFromPython:
     def test_class_with_typed_methods(self):
-        code = (
-            "class ChatProvider:\n"
-            "    def chat(self, prompt: str) -> str:\n"
-            "        pass\n"
-        )
+        code = "class ChatProvider:\n    def chat(self, prompt: str) -> str:\n        pass\n"
         result = _extract_signatures_from_python(code)
         assert "class ChatProvider:" in result
         assert "chat(prompt: str) -> str" in result
@@ -564,20 +555,12 @@ class TestExtractSignaturesFromPython:
         assert "class OpenAIChat(ChatProvider):" in result
 
     def test_async_method(self):
-        code = (
-            "class Engine:\n"
-            "    async def run(self, query: str) -> dict:\n"
-            "        pass\n"
-        )
+        code = "class Engine:\n    async def run(self, query: str) -> dict:\n        pass\n"
         result = _extract_signatures_from_python(code)
         assert "async run(query: str) -> dict" in result
 
     def test_no_annotations(self):
-        code = (
-            "class Foo:\n"
-            "    def bar(self, x, y):\n"
-            "        pass\n"
-        )
+        code = "class Foo:\n    def bar(self, x, y):\n        pass\n"
         result = _extract_signatures_from_python(code)
         assert "bar(x, y)" in result
         assert "->" not in result
@@ -588,11 +571,7 @@ class TestExtractSignaturesFromPython:
         assert "process(data: list[str]) -> bool" in result
 
     def test_skips_self(self):
-        code = (
-            "class Foo:\n"
-            "    def bar(self, x: int) -> None:\n"
-            "        pass\n"
-        )
+        code = "class Foo:\n    def bar(self, x: int) -> None:\n        pass\n"
         result = _extract_signatures_from_python(code)
         assert "self" not in result
 
@@ -609,9 +588,7 @@ class TestExtractSignaturesFromPython:
 class TestExtractInterfaceSignatures:
     def test_extracts_from_python_files(self, tmp_path):
         (tmp_path / "main.py").write_text(
-            "class Engine:\n"
-            "    def run(self, query: str) -> str:\n"
-            "        pass\n"
+            "class Engine:\n    def run(self, query: str) -> str:\n        pass\n"
         )
         result = extract_interface_signatures(str(tmp_path), ["main.py"])
         assert "## main.py" in result
@@ -626,9 +603,7 @@ class TestExtractInterfaceSignatures:
         # Create many files — should stop at budget
         for i in range(100):
             (tmp_path / f"mod{i}.py").write_text(
-                f"class Class{i}:\n"
-                f"    def method(self, x: int) -> str:\n"
-                f"        pass\n"
+                f"class Class{i}:\n    def method(self, x: int) -> str:\n        pass\n"
             )
         files = [f"mod{i}.py" for i in range(100)]
         result = extract_interface_signatures(str(tmp_path), files)
@@ -655,7 +630,9 @@ class TestExtractLibrarySignatures:
         """Should extract signatures from an importable stdlib package."""
         (tmp_path / "app.py").write_text("import json\nx = json.dumps({})\n")
         result = extract_library_signatures(
-            str(tmp_path), ["app.py"], ["app.py"],
+            str(tmp_path),
+            ["app.py"],
+            ["app.py"],
         )
         assert "## json" in result
         assert "dumps" in result
@@ -665,7 +642,9 @@ class TestExtractLibrarySignatures:
         (tmp_path / "mymod.py").write_text("def foo(): pass\n")
         (tmp_path / "app.py").write_text("import mymod\nmymod.foo()\n")
         result = extract_library_signatures(
-            str(tmp_path), ["app.py"], ["app.py", "mymod.py"],
+            str(tmp_path),
+            ["app.py"],
+            ["app.py", "mymod.py"],
         )
         assert "mymod" not in result
 
@@ -673,7 +652,9 @@ class TestExtractLibrarySignatures:
         """Uninstalled packages should be silently skipped."""
         (tmp_path / "app.py").write_text("import nonexistent_pkg_xyz\n")
         result = extract_library_signatures(
-            str(tmp_path), ["app.py"], ["app.py"],
+            str(tmp_path),
+            ["app.py"],
+            ["app.py"],
         )
         assert result == ""
 
@@ -685,28 +666,46 @@ class TestExtractLibrarySignatures:
         """typing is excluded since it's not useful as API reference."""
         (tmp_path / "app.py").write_text("from typing import Any, Dict\n")
         result = extract_library_signatures(
-            str(tmp_path), ["app.py"], ["app.py"],
+            str(tmp_path),
+            ["app.py"],
+            ["app.py"],
         )
         assert "typing" not in result
 
     def test_caps_output_length(self, tmp_path):
         """Output should be capped to avoid context bloat."""
         # Import many packages
-        imports = "\n".join(f"import {pkg}" for pkg in [
-            "json", "os", "sys", "re", "ast", "pathlib",
-            "logging", "inspect", "importlib", "hashlib",
-            "sqlite3", "email",
-        ])
+        imports = "\n".join(
+            f"import {pkg}"
+            for pkg in [
+                "json",
+                "os",
+                "sys",
+                "re",
+                "ast",
+                "pathlib",
+                "logging",
+                "inspect",
+                "importlib",
+                "hashlib",
+                "sqlite3",
+                "email",
+            ]
+        )
         (tmp_path / "app.py").write_text(imports + "\n")
         result = extract_library_signatures(
-            str(tmp_path), ["app.py"], ["app.py"],
+            str(tmp_path),
+            ["app.py"],
+            ["app.py"],
         )
         assert len(result) <= 5000  # ~4000 cap + header tolerance
 
     def test_non_python_files_skipped(self, tmp_path):
         (tmp_path / "config.yaml").write_text("key: value\n")
         result = extract_library_signatures(
-            str(tmp_path), ["config.yaml"], ["config.yaml"],
+            str(tmp_path),
+            ["config.yaml"],
+            ["config.yaml"],
         )
         assert result == ""
 
@@ -736,10 +735,7 @@ class TestParseClassHierarchies:
         assert "Mixin" in result
 
     def test_multiple_base_classes(self):
-        sigs = (
-            "class A(Base):\nclass B(Base):\n"
-            "class X(Other):\nclass Y(Other):\nclass Z(Other):"
-        )
+        sigs = "class A(Base):\nclass B(Base):\nclass X(Other):\nclass Y(Other):\nclass Z(Other):"
         result = _parse_class_hierarchies(sigs)
         assert len(result["Base"]) == 2
         assert len(result["Other"]) == 3
@@ -803,7 +799,9 @@ class TestGenerateInvestigationQuestions:
 
     def test_hub_file_question(self):
         result = generate_investigation_questions(
-            "", {}, {"core/engine.py": 7},
+            "",
+            {},
+            {"core/engine.py": 7},
         )
         assert len(result) == 1
         assert "core/engine.py" in result[0]
@@ -824,7 +822,9 @@ class TestGenerateInvestigationQuestions:
             "## mod.py\n  do(a: int, b: int, c: int) -> str"
         )
         result = generate_investigation_questions(
-            sigs, {}, {"hub.py": 10},
+            sigs,
+            {},
+            {"hub.py": 10},
         )
         assert len(result) <= 3
 
@@ -834,7 +834,9 @@ class TestGenerateInvestigationQuestions:
 
     def test_hub_below_threshold_ignored(self):
         result = generate_investigation_questions(
-            "", {}, {"small.py": 3},
+            "",
+            {},
+            {"small.py": 3},
         )
         assert result == []
 
@@ -844,7 +846,9 @@ class TestGenerateInvestigationQuestions:
             "## svc.py\n  process(a: int, b: int, c: int) -> bool"
         )
         result = generate_investigation_questions(
-            sigs, {}, {"hub.py": 6},
+            sigs,
+            {},
+            {"hub.py": 6},
         )
         # All 3 heuristics fire = exactly 3 (at cap)
         assert len(result) == 3

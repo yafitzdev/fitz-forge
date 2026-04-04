@@ -65,9 +65,7 @@ class SQLiteJobStore(JobStore):
             await db.commit()
 
             if recovered > 0:
-                logger.warning(
-                    f"Crash recovery: marked {recovered} running job(s) as interrupted"
-                )
+                logger.warning(f"Crash recovery: marked {recovered} running job(s) as interrupted")
 
     async def add(self, record: JobRecord) -> None:
         """
@@ -294,6 +292,7 @@ class SQLiteJobStore(JobStore):
         Returns:
             JobRecord instance
         """
+
         # Helper to safely get column value with default
         def safe_get(name: str, default=None):
             try:
@@ -317,9 +316,7 @@ class SQLiteJobStore(JobStore):
             file_path=row["file_path"],
             error=row["error"],
             pipeline_state=row["pipeline_state"],
-            updated_at=datetime.fromisoformat(row["updated_at"])
-            if row["updated_at"]
-            else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
             api_review=bool(safe_get("api_review", 0)),
             source_dir=safe_get("source_dir"),
             cost_estimate_json=safe_get("cost_estimate_json"),

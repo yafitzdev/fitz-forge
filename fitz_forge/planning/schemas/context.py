@@ -1,7 +1,7 @@
 # fitz_forge/planning/schemas/context.py
 """Schema for context understanding stage output."""
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Assumption(BaseModel):

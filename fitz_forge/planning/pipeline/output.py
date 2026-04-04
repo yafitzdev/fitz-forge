@@ -5,9 +5,6 @@ Plan renderer for converting PipelineResult to structured markdown.
 Converts pipeline outputs into a formatted markdown file with metadata frontmatter.
 """
 
-from datetime import datetime
-from typing import Any
-
 from fitz_forge.planning.schemas.plan_output import PlanOutput
 
 
@@ -134,7 +131,9 @@ class PlanRenderer:
             for comp in plan.design.components:
                 sections.append(f"**{comp.name}**")
                 sections.append(f"- Purpose: {comp.purpose}")
-                sections.append(f"- Responsibilities: {', '.join(comp.responsibilities) if comp.responsibilities else 'None listed'}")
+                sections.append(
+                    f"- Responsibilities: {', '.join(comp.responsibilities) if comp.responsibilities else 'None listed'}"
+                )
                 sections.append(
                     f"- Interfaces: {', '.join(comp.interfaces) if comp.interfaces else 'None listed'}"
                 )
@@ -157,8 +156,16 @@ class PlanRenderer:
                 sections.append("")
                 # Detect language from extension for syntax highlighting
                 ext = artifact.filename.rsplit(".", 1)[-1] if "." in artifact.filename else ""
-                lang_map = {"yaml": "yaml", "yml": "yaml", "sql": "sql", "py": "python",
-                            "json": "json", "toml": "toml", "sh": "bash", "dockerfile": "dockerfile"}
+                lang_map = {
+                    "yaml": "yaml",
+                    "yml": "yaml",
+                    "sql": "sql",
+                    "py": "python",
+                    "json": "json",
+                    "toml": "toml",
+                    "sh": "bash",
+                    "dockerfile": "dockerfile",
+                }
                 lang = lang_map.get(ext.lower(), "")
                 sections.append(f"```{lang}")
                 sections.append(artifact.content)
@@ -168,7 +175,7 @@ class PlanRenderer:
         # Roadmap
         sections.append("## Roadmap")
         sections.append("")
-        for i, phase in enumerate(plan.roadmap.phases, start=1):
+        for _i, phase in enumerate(plan.roadmap.phases, start=1):
             sections.append(f"### Phase {phase.number}: {phase.name}")
             sections.append(f"**Objective:** {phase.objective}")
             sections.append("")
@@ -181,7 +188,9 @@ class PlanRenderer:
                 sections.append(f"**Effort:** {phase.estimated_effort}")
                 sections.append("")
             if phase.dependencies:
-                sections.append(f"**Dependencies:** Phases {', '.join(str(d) for d in phase.dependencies)}")
+                sections.append(
+                    f"**Dependencies:** Phases {', '.join(str(d) for d in phase.dependencies)}"
+                )
                 sections.append("")
             if phase.verification_command:
                 sections.append("**Verify:**")
@@ -208,7 +217,9 @@ class PlanRenderer:
                 sections.append("**Verify:**")
                 sections.append(f"```\n{risk.verification}\n```")
             if risk.affected_phases:
-                sections.append(f"**Affected Phases:** {', '.join(str(p) for p in risk.affected_phases)}")
+                sections.append(
+                    f"**Affected Phases:** {', '.join(str(p) for p in risk.affected_phases)}"
+                )
             sections.append("")
 
         # API Review (if requested)
@@ -224,10 +235,12 @@ class PlanRenderer:
                 sections.append(f"- Sections reviewed: {cost.get('sections_reviewed', 0)}")
                 sections.append(f"- Input tokens: {cost.get('actual_input_tokens', 0):,}")
                 sections.append(f"- Output tokens: {cost.get('actual_output_tokens', 0):,}")
-                sections.append(f"- Cost: ${cost.get('actual_cost_usd', 0.0):.4f} USD (€{cost.get('actual_cost_eur', 0.0):.4f} EUR)")
+                sections.append(
+                    f"- Cost: ${cost.get('actual_cost_usd', 0.0):.4f} USD (€{cost.get('actual_cost_eur', 0.0):.4f} EUR)"
+                )
 
                 # Show model from estimate if available
-                if cost.get('estimate') and cost['estimate'].get('model'):
+                if cost.get("estimate") and cost["estimate"].get("model"):
                     sections.append(f"- Model: {cost['estimate']['model']}")
                 sections.append("")
 
@@ -291,20 +304,15 @@ class PlanRenderer:
                 scan_hits = agent_files.get("scan_hits", [])
                 selected = agent_files.get("selected", [])
                 included = agent_files.get("included", [])
-                sections.append(
-                    f"**Screened**: {total} files"
-                )
+                sections.append(f"**Screened**: {total} files")
                 sections.append("")
                 if scan_hits:
-                    sections.append(
-                        f"**Structural scan** ({len(scan_hits)} hits):"
-                    )
+                    sections.append(f"**Structural scan** ({len(scan_hits)} hits):")
                     for f in scan_hits:
                         sections.append(f"- {f}")
                     sections.append("")
                 sections.append(
-                    f"**Selected**: {len(selected)} files, "
-                    f"**Included**: {len(included)} files"
+                    f"**Selected**: {len(selected)} files, **Included**: {len(included)} files"
                 )
                 sections.append("")
 
@@ -313,23 +321,13 @@ class PlanRenderer:
                 if provenance:
                     sections.append("### File Provenance")
                     sections.append("")
-                    sections.append(
-                        "| File | Signals | Role |"
-                    )
-                    sections.append(
-                        "|------|---------|------|"
-                    )
+                    sections.append("| File | Signals | Role |")
+                    sections.append("|------|---------|------|")
                     for path in included:
                         info = provenance.get(path, {})
-                        signals = ", ".join(
-                            info.get("signals", [])
-                        ) or "priority"
-                        role = (
-                            "seed" if info.get("in_prompt") else "tool_pool"
-                        )
-                        sections.append(
-                            f"| {path} | {signals} | {role} |"
-                        )
+                        signals = ", ".join(info.get("signals", [])) or "priority"
+                        role = "seed" if info.get("in_prompt") else "tool_pool"
+                        sections.append(f"| {path} | {signals} | {role} |")
                     sections.append("")
 
         return "\n".join(sections)

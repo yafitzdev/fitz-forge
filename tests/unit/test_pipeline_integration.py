@@ -64,13 +64,59 @@ async def test_full_pipeline_execution(store: SQLiteJobStore):
     # 3 merged stages with single-pass: each returns valid JSON directly.
     # If single-pass fails, falls back to two-pass (reasoning + JSON).
     import json
-    _context_json = json.dumps({"project_description": "API service", "key_requirements": [], "constraints": [], "existing_context": "", "stakeholders": [], "scope_boundaries": {}, "existing_files": [], "needed_artifacts": [], "assumptions": []})
-    _arch_design_json = json.dumps({"approaches": [{"name": "Monolith", "description": "Single app", "pros": ["Simple"], "cons": ["Scale"], "complexity": "low", "best_for": ["MVPs"]}], "recommended": "Monolith", "reasoning": "Best for now", "key_tradeoffs": {}, "technology_considerations": [], "scope_statement": "", "adrs": [], "components": [], "data_model": {}, "integration_points": [], "artifacts": []})
-    _roadmap_risk_json = json.dumps({"phases": [], "critical_path": [], "parallel_opportunities": [], "total_phases": 0, "risks": [], "overall_risk_level": "low", "recommended_contingencies": []})
+
+    _context_json = json.dumps(
+        {
+            "project_description": "API service",
+            "key_requirements": [],
+            "constraints": [],
+            "existing_context": "",
+            "stakeholders": [],
+            "scope_boundaries": {},
+            "existing_files": [],
+            "needed_artifacts": [],
+            "assumptions": [],
+        }
+    )
+    _arch_design_json = json.dumps(
+        {
+            "approaches": [
+                {
+                    "name": "Monolith",
+                    "description": "Single app",
+                    "pros": ["Simple"],
+                    "cons": ["Scale"],
+                    "complexity": "low",
+                    "best_for": ["MVPs"],
+                }
+            ],
+            "recommended": "Monolith",
+            "reasoning": "Best for now",
+            "key_tradeoffs": {},
+            "technology_considerations": [],
+            "scope_statement": "",
+            "adrs": [],
+            "components": [],
+            "data_model": {},
+            "integration_points": [],
+            "artifacts": [],
+        }
+    )
+    _roadmap_risk_json = json.dumps(
+        {
+            "phases": [],
+            "critical_path": [],
+            "parallel_opportunities": [],
+            "total_phases": 0,
+            "risks": [],
+            "overall_risk_level": "low",
+            "recommended_contingencies": [],
+        }
+    )
 
     stage_responses = [
-        _context_json,       # context (single-pass)
-        _arch_design_json,   # architecture_design (single-pass)
+        _context_json,  # context (single-pass)
+        _arch_design_json,  # architecture_design (single-pass)
         _roadmap_risk_json,  # roadmap_risk (single-pass)
     ]
 

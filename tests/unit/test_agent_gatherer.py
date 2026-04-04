@@ -148,15 +148,14 @@ class TestGatherEndToEnd:
             _make_read_result("util.py", "def helper(): pass", "neighbor"),
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
             instance.get_file_paths.return_value = ["main.py", "util.py"]
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             result = await gatherer.gather(mock_client, "how does run work?")
 
@@ -172,15 +171,14 @@ class TestGatherEndToEnd:
 
     @pytest.mark.asyncio
     async def test_empty_results_returns_empty(self, tmp_path, mock_client):
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = []
             instance.get_file_paths.return_value = ["main.py"]
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             result = await gatherer.gather(mock_client, "task")
 
@@ -199,15 +197,14 @@ class TestGatherEndToEnd:
             _make_read_result("c.py", "class C: pass", "neighbor"),
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
             instance.get_file_paths.return_value = ["a.py", "b.py", "c.py"]
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             result = await gatherer.gather(mock_client, "task")
 
@@ -218,14 +215,13 @@ class TestGatherEndToEnd:
 
     @pytest.mark.asyncio
     async def test_total_failure_returns_empty(self, tmp_path, mock_client):
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.side_effect = RuntimeError("total fail")
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             result = await gatherer.gather(mock_client, "task")
 
@@ -236,9 +232,7 @@ class TestGatherEndToEnd:
     async def test_retriever_receives_correct_config(self, tmp_path, mock_client):
         (tmp_path / "a.py").write_text("x = 1")
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
                 _make_read_result("a.py", "x = 1", "selected"),
@@ -266,9 +260,7 @@ class TestProgressCallback:
     async def test_all_phases_reported(self, tmp_path, mock_client):
         (tmp_path / "main.py").write_text("def run(): pass")
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
                 _make_read_result("main.py", "def run(): pass", "selected"),
@@ -281,7 +273,8 @@ class TestProgressCallback:
                 phases.append(phase)
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             await gatherer.gather(mock_client, "task", progress_callback=track)
 
@@ -294,9 +287,7 @@ class TestProgressCallback:
     async def test_async_callback_awaited(self, tmp_path, mock_client):
         (tmp_path / "main.py").write_text("def run(): pass")
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = [
                 _make_read_result("main.py", "def run(): pass", "selected"),
@@ -309,10 +300,13 @@ class TestProgressCallback:
                 calls.append(phase)
 
             gatherer = AgentContextGatherer(
-                config=_make_config(), source_dir=str(tmp_path),
+                config=_make_config(),
+                source_dir=str(tmp_path),
             )
             await gatherer.gather(
-                mock_client, "task", progress_callback=async_track,
+                mock_client,
+                "task",
+                progress_callback=async_track,
             )
 
         assert len(calls) > 0
@@ -332,9 +326,7 @@ class TestSeedAndFetch:
             _make_read_result("util.py", "def helper(): pass", "selected"),
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
             instance.get_file_paths.return_value = ["main.py", "util.py"]
@@ -355,18 +347,13 @@ class TestSeedAndFetch:
             (tmp_path / f"file{i}.py").write_text(f"def func{i}(): pass")
 
         mock_results = [
-            _make_read_result(f"file{i}.py", f"def func{i}(): pass", "selected")
-            for i in range(5)
+            _make_read_result(f"file{i}.py", f"def func{i}(): pass", "selected") for i in range(5)
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = [
-                f"file{i}.py" for i in range(5)
-            ]
+            instance.get_file_paths.return_value = [f"file{i}.py" for i in range(5)]
 
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=2),
@@ -392,13 +379,12 @@ class TestSeedAndFetch:
             _make_read_result("neighbor.py", "def matched(): pass", "neighbor"),
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
             instance.get_file_paths.return_value = [
-                "scan_hit.py", "neighbor.py",
+                "scan_hit.py",
+                "neighbor.py",
             ]
 
             gatherer = AgentContextGatherer(
@@ -418,18 +404,13 @@ class TestSeedAndFetch:
             (tmp_path / f"m{i}.py").write_text(f"def f{i}(): pass")
 
         mock_results = [
-            _make_read_result(f"m{i}.py", f"def f{i}(): pass", "selected")
-            for i in range(4)
+            _make_read_result(f"m{i}.py", f"def f{i}(): pass", "selected") for i in range(4)
         ]
 
-        with patch(
-            "fitz_forge.planning.agent.gatherer.CodeRetriever"
-        ) as MockRetriever:
+        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
             instance = MockRetriever.return_value
             instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = [
-                f"m{i}.py" for i in range(4)
-            ]
+            instance.get_file_paths.return_value = [f"m{i}.py" for i in range(4)]
 
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=2),

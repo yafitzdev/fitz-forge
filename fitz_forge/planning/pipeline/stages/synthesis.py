@@ -41,40 +41,58 @@ _CONTEXT_FIELD_GROUPS = [
     {
         "label": "description",
         "fields": ["project_description", "key_requirements", "constraints", "existing_context"],
-        "schema": json.dumps({
-            "project_description": "1-3 sentence specific description of what is being built",
-            "key_requirements": ["concrete testable requirement 1", "requirement 2"],
-            "constraints": ["real binding constraint 1", "constraint 2"],
-            "existing_context": "existing codebase or tech context, or empty string if none",
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "project_description": "1-3 sentence specific description of what is being built",
+                "key_requirements": ["concrete testable requirement 1", "requirement 2"],
+                "constraints": ["real binding constraint 1", "constraint 2"],
+                "existing_context": "existing codebase or tech context, or empty string if none",
+            },
+            indent=2,
+        ),
     },
     {
         "label": "stakeholders",
         "fields": ["stakeholders", "scope_boundaries"],
-        "schema": json.dumps({
-            "stakeholders": ["stakeholder with specific concern"],
-            "scope_boundaries": {
-                "in_scope": ["specific feature or capability"],
-                "out_of_scope": ["explicitly excluded feature"],
+        "schema": json.dumps(
+            {
+                "stakeholders": ["stakeholder with specific concern"],
+                "scope_boundaries": {
+                    "in_scope": ["specific feature or capability"],
+                    "out_of_scope": ["explicitly excluded feature"],
+                },
             },
-        }, indent=2),
+            indent=2,
+        ),
     },
     {
         "label": "files",
         "fields": ["existing_files", "needed_artifacts"],
-        "schema": json.dumps({
-            "existing_files": ["path/to/relevant/file.py -- what it does"],
-            "needed_artifacts": ["new_file.py -- what it produces (empty list [] if already implemented)"],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "existing_files": ["path/to/relevant/file.py -- what it does"],
+                "needed_artifacts": [
+                    "new_file.py -- what it produces (empty list [] if already implemented)"
+                ],
+            },
+            indent=2,
+        ),
     },
     {
         "label": "assumptions",
         "fields": ["assumptions"],
-        "schema": json.dumps({
-            "assumptions": [
-                {"assumption": "what you assumed", "impact": "what changes if wrong", "confidence": "low|medium|high"}
-            ],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "assumptions": [
+                    {
+                        "assumption": "what you assumed",
+                        "impact": "what changes if wrong",
+                        "confidence": "low|medium|high",
+                    }
+                ],
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -82,29 +100,35 @@ _ARCH_FIELD_GROUPS = [
     {
         "label": "approaches",
         "fields": ["approaches", "recommended", "reasoning", "scope_statement"],
-        "schema": json.dumps({
-            "approaches": [
-                {
-                    "name": "Approach A",
-                    "description": "What it looks like in production",
-                    "pros": ["advantage"],
-                    "cons": ["disadvantage"],
-                    "complexity": "low|medium|high",
-                    "best_for": ["scenario"],
-                },
-            ],
-            "recommended": "must match one approach name exactly",
-            "reasoning": "why this approach is right AND why the other is wrong",
-            "scope_statement": "1-2 sentences characterizing the effort",
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Approach A",
+                        "description": "What it looks like in production",
+                        "pros": ["advantage"],
+                        "cons": ["disadvantage"],
+                        "complexity": "low|medium|high",
+                        "best_for": ["scenario"],
+                    },
+                ],
+                "recommended": "must match one approach name exactly",
+                "reasoning": "why this approach is right AND why the other is wrong",
+                "scope_statement": "1-2 sentences characterizing the effort",
+            },
+            indent=2,
+        ),
     },
     {
         "label": "tradeoffs",
         "fields": ["key_tradeoffs", "technology_considerations"],
-        "schema": json.dumps({
-            "key_tradeoffs": {"tradeoff_name": "description"},
-            "technology_considerations": ["technology with reason"],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "key_tradeoffs": {"tradeoff_name": "description"},
+                "technology_considerations": ["technology with reason"],
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -112,54 +136,66 @@ _DESIGN_FIELD_GROUPS = [
     {
         "label": "adrs",
         "fields": ["adrs"],
-        "schema": json.dumps({
-            "adrs": [
-                {
-                    "title": "ADR: Decision Title",
-                    "context": "What problem this solves",
-                    "decision": "What was decided",
-                    "rationale": "Why this is right",
-                    "consequences": ["consequence"],
-                    "alternatives_considered": ["Alternative -- rejected because reason"],
-                }
-            ],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "adrs": [
+                    {
+                        "title": "ADR: Decision Title",
+                        "context": "What problem this solves",
+                        "decision": "What was decided",
+                        "rationale": "Why this is right",
+                        "consequences": ["consequence"],
+                        "alternatives_considered": ["Alternative -- rejected because reason"],
+                    }
+                ],
+            },
+            indent=2,
+        ),
     },
     {
         "label": "components",
         "fields": ["components", "data_model"],
-        "schema": json.dumps({
-            "components": [
-                {
-                    "name": "ComponentName",
-                    "purpose": "What it does",
-                    "responsibilities": ["responsibility"],
-                    "interfaces": ["methodName(param: Type) -> ReturnType"],
-                    "dependencies": ["OtherComponent"],
-                }
-            ],
-            "data_model": {"EntityName": ["field: type"]},
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "components": [
+                    {
+                        "name": "ComponentName",
+                        "purpose": "What it does",
+                        "responsibilities": ["responsibility"],
+                        "interfaces": ["methodName(param: Type) -> ReturnType"],
+                        "dependencies": ["OtherComponent"],
+                    }
+                ],
+                "data_model": {"EntityName": ["field: type"]},
+            },
+            indent=2,
+        ),
     },
     {
         "label": "integrations",
         "fields": ["integration_points"],
-        "schema": json.dumps({
-            "integration_points": ["ExternalSystem -- what and how"],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "integration_points": ["ExternalSystem -- what and how"],
+            },
+            indent=2,
+        ),
     },
     {
         "label": "artifacts",
         "fields": ["artifacts"],
-        "schema": json.dumps({
-            "artifacts": [
-                {
-                    "filename": "path/to/file",
-                    "content": "complete file content",
-                    "purpose": "why this artifact exists",
-                }
-            ],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "filename": "path/to/file",
+                        "content": "complete file content",
+                        "purpose": "why this artifact exists",
+                    }
+                ],
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -167,30 +203,36 @@ _ROADMAP_FIELD_GROUPS = [
     {
         "label": "phases",
         "fields": ["phases"],
-        "schema": json.dumps({
-            "phases": [
-                {
-                    "number": 1,
-                    "name": "Phase Name",
-                    "objective": "What this phase achieves",
-                    "deliverables": ["specific deliverable"],
-                    "dependencies": [],
-                    "estimated_complexity": "low|medium|high",
-                    "key_risks": ["risk"],
-                    "verification_command": "pytest tests/test_something.py -v",
-                    "estimated_effort": "~2 hours",
-                }
-            ],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "phases": [
+                    {
+                        "number": 1,
+                        "name": "Phase Name",
+                        "objective": "What this phase achieves",
+                        "deliverables": ["specific deliverable"],
+                        "dependencies": [],
+                        "estimated_complexity": "low|medium|high",
+                        "key_risks": ["risk"],
+                        "verification_command": "pytest tests/test_something.py -v",
+                        "estimated_effort": "~2 hours",
+                    }
+                ],
+            },
+            indent=2,
+        ),
     },
     {
         "label": "scheduling",
         "fields": ["critical_path", "parallel_opportunities", "total_phases"],
-        "schema": json.dumps({
-            "critical_path": [1, 2, 4],
-            "parallel_opportunities": [[3, 5]],
-            "total_phases": 5,
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "critical_path": [1, 2, 4],
+                "parallel_opportunities": [[3, 5]],
+                "total_phases": 5,
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -198,22 +240,25 @@ _RISK_FIELD_GROUPS = [
     {
         "label": "risks",
         "fields": ["risks", "overall_risk_level", "recommended_contingencies"],
-        "schema": json.dumps({
-            "risks": [
-                {
-                    "category": "technical|external|resource|schedule|quality|security",
-                    "description": "What could go wrong",
-                    "impact": "low|medium|high|critical",
-                    "likelihood": "low|medium|high",
-                    "mitigation": "Specific mitigation action",
-                    "contingency": "What to do if it happens",
-                    "affected_phases": [1, 3],
-                    "verification": "assert something",
-                }
-            ],
-            "overall_risk_level": "low|medium|high",
-            "recommended_contingencies": ["contingency action"],
-        }, indent=2),
+        "schema": json.dumps(
+            {
+                "risks": [
+                    {
+                        "category": "technical|external|resource|schedule|quality|security",
+                        "description": "What could go wrong",
+                        "impact": "low|medium|high|critical",
+                        "likelihood": "low|medium|high",
+                        "mitigation": "Specific mitigation action",
+                        "contingency": "What to do if it happens",
+                        "affected_phases": [1, 3],
+                        "verification": "assert something",
+                    }
+                ],
+                "overall_risk_level": "low|medium|high",
+                "recommended_contingencies": ["contingency action"],
+            },
+            indent=2,
+        ),
     },
 ]
 
@@ -290,15 +335,33 @@ def _resolve_imported_type_apis(
                         imported_types.add(name)
 
     # Filter out builtins and stdlib types
-    _SKIP = {"Any", "Optional", "Iterator", "AsyncIterator", "Callable",
-             "Dict", "List", "Tuple", "Set", "Type", "Union", "None",
-             "Depends", "Request", "Response", "HTTPException",
-             "BaseModel", "Field", "Query"}
+    _SKIP = {
+        "Any",
+        "Optional",
+        "Iterator",
+        "AsyncIterator",
+        "Callable",
+        "Dict",
+        "List",
+        "Tuple",
+        "Set",
+        "Type",
+        "Union",
+        "None",
+        "Depends",
+        "Request",
+        "Response",
+        "HTTPException",
+        "BaseModel",
+        "Field",
+        "Query",
+    }
 
     # Resolve return types of imported functions (e.g. get_service -> FitzService)
     source_dir = prior_outputs.get("_source_dir", "")
     if imported_funcs and source_dir:
         from pathlib import Path as _P
+
         for func_name, module_path in imported_funcs.items():
             rel_path = module_path.replace(".", "/") + ".py"
             func_file = _P(source_dir) / rel_path
@@ -310,10 +373,12 @@ def _resolve_imported_type_apis(
             except (OSError, SyntaxError):
                 continue
             for fnode in _ast.walk(func_tree):
-                if (isinstance(fnode, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-                        and fnode.name == func_name
-                        and fnode.returns
-                        and isinstance(fnode.returns, _ast.Name)):
+                if (
+                    isinstance(fnode, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                    and fnode.name == func_name
+                    and fnode.returns
+                    and isinstance(fnode.returns, _ast.Name)
+                ):
                     ret_type = fnode.returns.id
                     if ret_type[0].isupper() and ret_type not in _SKIP:
                         imported_types.add(ret_type)
@@ -335,15 +400,13 @@ def _resolve_imported_type_apis(
 
     if full_index:
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
         lookup = StructuralIndexLookup(full_index)
 
         for type_name in sorted(imported_types):
             cls = lookup.find_class(type_name)
             if cls and cls.methods:
-                meths = [
-                    m for m in cls.methods
-                    if not m.startswith("__")
-                ]
+                meths = [m for m in cls.methods if not m.startswith("__")]
                 if meths:
                     sig_parts = []
                     for mname in meths[:10]:
@@ -352,13 +415,12 @@ def _resolve_imported_type_apis(
                         if minfo.return_type:
                             sig += f" -> {minfo.return_type}"
                         sig_parts.append(sig)
-                    lines.append(
-                        f"{type_name} methods: {', '.join(sig_parts)}"
-                    )
+                    lines.append(f"{type_name} methods: {', '.join(sig_parts)}")
 
     # Fallback: parse source files on disk for types not found in index
     if source_dir:
         from pathlib import Path as _Path
+
         found_in_index = {l.split(" methods:")[0] for l in lines}
         missing = imported_types - found_in_index
 
@@ -369,8 +431,12 @@ def _resolve_imported_type_apis(
                     continue
                 stem = py.stem.lower()
                 tn_lower = type_name.lower()
-                if len(stem) < 3 or (tn_lower not in stem and stem not in tn_lower
-                                      and "service" not in stem and "model" not in stem):
+                if len(stem) < 3 or (
+                    tn_lower not in stem
+                    and stem not in tn_lower
+                    and "service" not in stem
+                    and "model" not in stem
+                ):
                     continue
                 try:
                     src = py.read_text(encoding="utf-8", errors="replace")
@@ -389,10 +455,7 @@ def _resolve_imported_type_apis(
                             if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
                                 if child.name.startswith("_"):
                                     continue
-                                params = [
-                                    a.arg for a in child.args.args
-                                    if a.arg != "self"
-                                ]
+                                params = [a.arg for a in child.args.args if a.arg != "self"]
                                 sig = f"{child.name}({', '.join(params)})"
                                 if child.returns:
                                     try:
@@ -401,9 +464,7 @@ def _resolve_imported_type_apis(
                                         pass
                                 meths.append(sig)
                         if meths:
-                            lines.append(
-                                f"{type_name} methods: {', '.join(meths[:10])}"
-                            )
+                            lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
                         break
                 if type_name in {l.split(" methods:")[0] for l in lines}:
                     break
@@ -425,20 +486,21 @@ def _extract_param_type_fields(
     the model that Query has (text, constraints, metadata) so it doesn't
     fabricate fields like conversation_context or history.
     """
-    import ast as _ast
     import re as _re
-    from pathlib import Path as _Path
 
     if not source_dir:
         return ""
 
     # Extract type names from the method signature (first line)
     # Match patterns like `param: TypeName` or `param: TypeName | None`
-    type_names = set(_re.findall(
-        r':\s*([A-Z][A-Za-z]+)\b', reference_body.split("\n")[0],
-    ))
+    type_names = set(
+        _re.findall(
+            r":\s*([A-Z][A-Za-z]+)\b",
+            reference_body.split("\n")[0],
+        )
+    )
     # Also catch return types
-    ret_match = _re.search(r'->\s*([A-Z][A-Za-z]+)', reference_body.split("\n")[0])
+    ret_match = _re.search(r"->\s*([A-Z][A-Za-z]+)", reference_body.split("\n")[0])
     if ret_match:
         type_names.add(ret_match.group(1))
 
@@ -448,8 +510,19 @@ def _extract_param_type_fields(
     lines = []
     for type_name in sorted(type_names):
         # Skip builtins
-        if type_name in ("None", "Any", "Optional", "Iterator", "Callable",
-                         "Dict", "List", "Tuple", "Set", "Type", "Union"):
+        if type_name in (
+            "None",
+            "Any",
+            "Optional",
+            "Iterator",
+            "Callable",
+            "Dict",
+            "List",
+            "Tuple",
+            "Set",
+            "Type",
+            "Union",
+        ):
             continue
         # Find source file containing this class
         fields = _extract_class_fields(type_name, {}, source_dir)
@@ -481,11 +554,12 @@ def _extract_reference_method(
     # Detect variant patterns: "streaming version of X", "parallel to X",
     # "same as X but", "mirrors X", "variant of X"
     import re as _re
+
     variant_patterns = [
-        r'(?:stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)',
-        r'(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)',
-        r'(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)',
-        r'(\w+)\(\)\s+(?:but|except|with)\s+stream',
+        r"(?:stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)",
+        r"(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)",
+        r"(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)",
+        r"(\w+)\(\)\s+(?:but|except|with)\s+stream",
     ]
     target_methods: list[str] = []
     for pat in variant_patterns:
@@ -495,16 +569,19 @@ def _extract_reference_method(
                 target_methods.append(name)
 
     # Also check for common patterns: "answer_stream" implies "answer" is the ref
-    method_refs = _re.findall(r'(\w+)_stream\b', combined)
+    method_refs = _re.findall(r"(\w+)_stream\b", combined)
     target_methods.extend(method_refs)
-    method_refs = _re.findall(r'stream_(\w+)\b', combined)
+    method_refs = _re.findall(r"stream_(\w+)\b", combined)
     target_methods.extend(method_refs)
 
     # Deduplicate, filter out noise
-    target_methods = list(dict.fromkeys(
-        m for m in target_methods
-        if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
-    ))
+    target_methods = list(
+        dict.fromkeys(
+            m
+            for m in target_methods
+            if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
+        )
+    )
 
     if not target_methods:
         return ""
@@ -540,10 +617,7 @@ def _extract_reference_method(
         # Cap at 16K chars to avoid blowing prompt budget
         if len(best_body) > 16000:
             best_body = best_body[:16000] + "\n    # ... (truncated)"
-        logger.info(
-            f"F9: extracted reference method '{best_name}' "
-            f"({len(best_body)} chars)"
-        )
+        logger.info(f"F9: extracted reference method '{best_name}' ({len(best_body)} chars)")
 
     return best_body
 
@@ -559,7 +633,11 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
 
     sigs = []
     # Try parsing the artifact content
-    for attempt in [content, _tw.dedent(content), f"class _:\n    " + content.replace("\n", "\n    ")]:
+    for attempt in [
+        content,
+        _tw.dedent(content),
+        "class _:\n    " + content.replace("\n", "\n    "),
+    ]:
         try:
             tree = _ast.parse(attempt)
             break
@@ -616,12 +694,22 @@ def _compress_reasoning_for_artifact(reasoning: str) -> str:
                 current_section = "context"
             elif any(kw in header for kw in ("architect", "approach", "pattern")):
                 current_section = "architecture"
-            elif any(kw in header for kw in ("design", "component", "interface",
-                                              "artifact", "adr", "integration",
-                                              "data model")):
+            elif any(
+                kw in header
+                for kw in (
+                    "design",
+                    "component",
+                    "interface",
+                    "artifact",
+                    "adr",
+                    "integration",
+                    "data model",
+                )
+            ):
                 current_section = "design"
-            elif any(kw in header for kw in ("roadmap", "phase", "milestone",
-                                              "implementation plan")):
+            elif any(
+                kw in header for kw in ("roadmap", "phase", "milestone", "implementation plan")
+            ):
                 current_section = "roadmap"
             elif any(kw in header for kw in ("risk", "mitigation")):
                 current_section = "risk"
@@ -680,8 +768,9 @@ def _extract_class_fields(
             if ".venv" in str(py) or "__pycache__" in str(py):
                 continue
             stem = py.stem.lower()
-            if len(stem) >= 4 and (cn_lower in stem or stem in cn_lower
-                                    or "schema" in stem or "model" in stem):
+            if len(stem) >= 4 and (
+                cn_lower in stem or stem in cn_lower or "schema" in stem or "model" in stem
+            ):
                 try:
                     content = py.read_text(encoding="utf-8", errors="replace")
                     if class_marker in content:
@@ -721,7 +810,6 @@ def _build_type_attr_map(
     semantic renames like _governance_decider -> _governor (via GovernanceDecider).
     """
     import ast as _ast
-    import re as _re
 
     if not source:
         return {}
@@ -744,11 +832,13 @@ def _build_type_attr_map(
                 if not isinstance(node, _ast.Assign):
                     continue
                 for target in node.targets:
-                    if (isinstance(target, _ast.Attribute)
-                            and isinstance(target.value, _ast.Name)
-                            and target.value.id == "self"
-                            and target.attr.startswith("_")
-                            and not target.attr.startswith("__")):
+                    if (
+                        isinstance(target, _ast.Attribute)
+                        and isinstance(target.value, _ast.Name)
+                        and target.value.id == "self"
+                        and target.attr.startswith("_")
+                        and not target.attr.startswith("__")
+                    ):
                         rhs = ""
                         if isinstance(node.value, _ast.Call):
                             if isinstance(node.value.func, _ast.Name):
@@ -791,11 +881,13 @@ def _extract_init_attr_names(source: str) -> set[str]:
                 if not isinstance(node, _ast.Assign):
                     continue
                 for target in node.targets:
-                    if (isinstance(target, _ast.Attribute)
-                            and isinstance(target.value, _ast.Name)
-                            and target.value.id == "self"
-                            and target.attr.startswith("_")
-                            and not target.attr.startswith("__")):
+                    if (
+                        isinstance(target, _ast.Attribute)
+                        and isinstance(target.value, _ast.Name)
+                        and target.value.id == "self"
+                        and target.attr.startswith("_")
+                        and not target.attr.startswith("__")
+                    ):
                         attrs.add(target.attr)
 
     return attrs
@@ -825,6 +917,7 @@ def _build_attr_methods(
         full_index = prior_outputs.get("_gathered_context", "")
 
     from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
     lookup = StructuralIndexLookup(full_index) if full_index else None
 
     result: dict[str, str] = {}
@@ -849,12 +942,12 @@ def _build_attr_methods(
 
         if source_dir:
             from pathlib import Path as _Path
+
             for _py in _Path(source_dir).rglob("*.py"):
                 if not remaining:
                     break
                 _stem = _py.stem.lower()
-                if not any(t.lower() in _stem or _stem in t.lower()
-                           for t in remaining):
+                if not any(t.lower() in _stem or _stem in t.lower() for t in remaining):
                     continue
                 if ".venv" in str(_py) or "__pycache__" in str(_py):
                     continue
@@ -875,8 +968,9 @@ def _build_attr_methods(
             for _node in _ast.walk(_tree):
                 if isinstance(_node, _ast.ClassDef) and _node.name in remaining:
                     for _child in _ast.iter_child_nodes(_node):
-                        if (isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-                                and not _child.name.startswith("_")):
+                        if isinstance(
+                            _child, (_ast.FunctionDef, _ast.AsyncFunctionDef)
+                        ) and not _child.name.startswith("_"):
                             attr_name = remaining.pop(_node.name)
                             result[attr_name] = _child.name
                             break
@@ -948,12 +1042,18 @@ def _repair_fabricated_refs(
         return content, 0
 
     from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
     lookup = StructuralIndexLookup(full_index)
 
     # Try parsing — handle code fragments via dedent + class wrapper
     import textwrap as _tw
+
     tree = None
-    for attempt in [content, _tw.dedent(content), f"class _:\n    " + content.replace("\n", "\n    ")]:
+    for attempt in [
+        content,
+        _tw.dedent(content),
+        "class _:\n    " + content.replace("\n", "\n    "),
+    ]:
         try:
             tree = _ast.parse(attempt)
             break
@@ -978,18 +1078,22 @@ def _repair_fabricated_refs(
         is_call = False
 
         # self.method() calls
-        if (isinstance(node, _ast.Call)
-                and isinstance(node.func, _ast.Attribute)
-                and isinstance(node.func.value, _ast.Name)
-                and node.func.value.id == "self"):
+        if (
+            isinstance(node, _ast.Call)
+            and isinstance(node.func, _ast.Attribute)
+            and isinstance(node.func.value, _ast.Name)
+            and node.func.value.id == "self"
+        ):
             ref_name = node.func.attr
             is_call = True
 
         # self._attr references (not calls)
-        elif (isinstance(node, _ast.Attribute)
-              and isinstance(node.value, _ast.Name)
-              and node.value.id == "self"
-              and not isinstance(node.ctx, _ast.Store)):
+        elif (
+            isinstance(node, _ast.Attribute)
+            and isinstance(node.value, _ast.Name)
+            and node.value.id == "self"
+            and not isinstance(node.ctx, _ast.Store)
+        ):
             ref_name = node.attr
 
         if not ref_name or ref_name.startswith("__"):
@@ -1013,10 +1117,7 @@ def _repair_fabricated_refs(
             first_method = attr_methods.get(ref_name)
             if first_method:
                 fixes[f"{ref_name}("] = f"{ref_name}.{first_method}("
-                logger.info(
-                    f"  repair: self.{ref_name}() -> "
-                    f"self.{ref_name}.{first_method}()"
-                )
+                logger.info(f"  repair: self.{ref_name}() -> self.{ref_name}.{first_method}()")
             continue
         if type_attr_map and ref_name in type_attr_map.values():
             continue
@@ -1041,7 +1142,9 @@ def _repair_fabricated_refs(
         if suggestions:
             best = suggestions[0]
             ratio = difflib.SequenceMatcher(
-                None, ref_name, best,
+                None,
+                ref_name,
+                best,
             ).ratio()
             if ratio >= 0.82:
                 fixes[ref_name] = best
@@ -1050,23 +1153,17 @@ def _repair_fabricated_refs(
     repaired = content
     for fabricated, corrected in fixes.items():
         repaired = repaired.replace(
-            f"self.{fabricated}", f"self.{corrected}",
+            f"self.{fabricated}",
+            f"self.{corrected}",
         )
-        logger.info(
-            f"  repair: self.{fabricated} -> self.{corrected}"
-        )
+        logger.info(f"  repair: self.{fabricated} -> self.{corrected}")
 
     # Remove test method leak lines entirely
     for test_ref in removals:
         # Remove lines containing self.test_xxx(
         lines = repaired.split("\n")
-        repaired = "\n".join(
-            line for line in lines
-            if f"self.{test_ref}" not in line
-        )
-        logger.info(
-            f"  repair: removed test leak self.{test_ref}()"
-        )
+        repaired = "\n".join(line for line in lines if f"self.{test_ref}" not in line)
+        logger.info(f"  repair: removed test leak self.{test_ref}()")
 
     # NOTE: Hardcoded _INVALID_FIELD_PATTERNS removed. They were
     # codebase-specific (fitz-sage) and could produce wrong corrections
@@ -1081,17 +1178,31 @@ def _repair_fabricated_refs(
         import_lines = repaired.split("\n")
         new_lines = []
         for line in import_lines:
-            m = _re.match(r'^(\s*from\s+)([\w.]+)(\s+import\s+)(.+)$', line)
+            m = _re.match(r"^(\s*from\s+)([\w.]+)(\s+import\s+)(.+)$", line)
             if not m:
                 new_lines.append(line)
                 continue
             prefix, module_path, imp_kw, names_str = m.groups()
             # Skip stdlib / third-party
             top_pkg = module_path.split(".")[0]
-            if top_pkg in ("typing", "dataclasses", "collections", "abc",
-                           "enum", "pathlib", "os", "sys", "json", "re",
-                           "asyncio", "logging", "pydantic", "fastapi",
-                           "httpx", "pytest"):
+            if top_pkg in (
+                "typing",
+                "dataclasses",
+                "collections",
+                "abc",
+                "enum",
+                "pathlib",
+                "os",
+                "sys",
+                "json",
+                "re",
+                "asyncio",
+                "logging",
+                "pydantic",
+                "fastapi",
+                "httpx",
+                "pytest",
+            ):
                 new_lines.append(line)
                 continue
             # Check each imported name against structural index
@@ -1106,10 +1217,7 @@ def _repair_fabricated_refs(
                         correct_module = cls_module
                         break
                 elif classes and len(classes) > 1:
-                    logger.info(
-                        f"  import: skipping ambiguous '{name}' "
-                        f"({len(classes)} locations)"
-                    )
+                    logger.info(f"  import: skipping ambiguous '{name}' ({len(classes)} locations)")
             if correct_module:
                 new_line = f"{prefix}{correct_module}{imp_kw}{names_str}"
                 new_lines.append(new_line)
@@ -1183,11 +1291,13 @@ def _build_attribute_template(
                     if not isinstance(node, _ast.Assign):
                         continue
                     for target in node.targets:
-                        if (isinstance(target, _ast.Attribute)
-                                and isinstance(target.value, _ast.Name)
-                                and target.value.id == "self"
-                                and target.attr.startswith("_")
-                                and not target.attr.startswith("__")):
+                        if (
+                            isinstance(target, _ast.Attribute)
+                            and isinstance(target.value, _ast.Name)
+                            and target.value.id == "self"
+                            and target.attr.startswith("_")
+                            and not target.attr.startswith("__")
+                        ):
                             # Resolve type from RHS
                             rhs = ""
                             if isinstance(node.value, _ast.Call):
@@ -1209,8 +1319,9 @@ def _build_attribute_template(
                         if line.startswith("classes:") and cls_node.name in line:
                             # Extract method list from brackets
                             import re
+
                             bracket_match = re.search(
-                                rf'{cls_node.name}[^[]*\[([^\]]+)\]',
+                                rf"{cls_node.name}[^[]*\[([^\]]+)\]",
                                 line,
                             )
                             if bracket_match:
@@ -1224,6 +1335,7 @@ def _build_attribute_template(
             # Search both the structural index AND source code (for classes
             # not in the 30-file selected index).
             import re as _re
+
             component_methods: dict[str, list[str]] = {}  # type_name -> [method sigs]
 
             # Strategy 1: structural index
@@ -1234,7 +1346,7 @@ def _build_attribute_template(
                     for type_name in set(attrs.values()):
                         if type_name not in _line:
                             continue
-                        pattern = rf'{type_name}(?:\([^)]*\))?\s*(?:\[[^\]]*\])?\s*\[([^\]]+)\]'
+                        pattern = rf"{type_name}(?:\([^)]*\))?\s*(?:\[[^\]]*\])?\s*\[([^\]]+)\]"
                         _match = _re.search(pattern, _line)
                         if _match:
                             methods = []
@@ -1254,6 +1366,7 @@ def _build_attribute_template(
             # Also read from disk for files not in the agent's pool
             if missing_types and source_dir:
                 from pathlib import Path as _Path
+
                 for _py in _Path(source_dir).rglob("*.py"):
                     if not missing_types:
                         break
@@ -1331,7 +1444,9 @@ class SynthesisStage(PipelineStage):
         return (0.75, 0.95)
 
     def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
     ) -> list[dict]:
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
@@ -1375,8 +1490,7 @@ class SynthesisStage(PipelineStage):
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
         covered_text = " ".join(
-            r.get("decision", "") + " " + " ".join(r.get("evidence", []))
-            for r in resolutions
+            r.get("decision", "") + " " + " ".join(r.get("evidence", [])) for r in resolutions
         ).lower()
 
         def is_mentioned(path: str) -> bool:
@@ -1424,7 +1538,8 @@ class SynthesisStage(PipelineStage):
 
         # Get full structural index (covers all codebase files)
         full_index = prior_outputs.get(
-            "_agent_context", {},
+            "_agent_context",
+            {},
         ).get("full_structural_index", "")
         if not full_index:
             full_index = prior_outputs.get("_gathered_context", "")
@@ -1459,7 +1574,11 @@ class SynthesisStage(PipelineStage):
         for ref_path in sorted(referenced_files):
             # Match against index sections (may need partial match)
             for idx_path, idx_lines in sections.items():
-                if ref_path == idx_path or ref_path.endswith(idx_path) or idx_path.endswith(ref_path):
+                if (
+                    ref_path == idx_path
+                    or ref_path.endswith(idx_path)
+                    or idx_path.endswith(ref_path)
+                ):
                     parts.append(f"\n### {idx_path}")
                     for line in idx_lines:
                         # Include classes and functions lines, skip imports/exports
@@ -1474,7 +1593,9 @@ class SynthesisStage(PipelineStage):
         # Build instance attribute template from source code
         # This tells the model what self._ attributes ACTUALLY exist
         attr_template = _build_attribute_template(
-            referenced_files, prior_outputs, sections,
+            referenced_files,
+            prior_outputs,
+            sections,
         )
         if attr_template:
             parts.append(attr_template)
@@ -1504,7 +1625,7 @@ class SynthesisStage(PipelineStage):
         resolutions = resolution_output.get("resolutions", [])
 
         # Extract CamelCase class names (2+ words, e.g. FitzKragEngine)
-        camel = re.compile(r'\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b')
+        camel = re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b")
         names: set[str] = set()
 
         for r in resolutions:
@@ -1518,16 +1639,47 @@ class SynthesisStage(PipelineStage):
 
         # Filter out stdlib / framework / generic names
         _SKIP = {
-            "True", "False", "None",
-            "Optional", "Dict", "List", "Tuple", "Type", "Any", "Union",
-            "Callable", "Iterator", "AsyncIterator", "Generator",
-            "AsyncGenerator", "Sequence", "Mapping", "Iterable",
-            "Exception", "ValueError", "TypeError", "KeyError",
-            "AttributeError", "NotImplementedError", "RuntimeError",
-            "ImportError", "FileNotFoundError", "IOError", "OSError",
-            "FastAPI", "BaseModel", "APIRouter", "StreamingResponse",
-            "JSONResponse", "HTTPException", "Depends", "Response",
-            "ReturnType", "TypeVar", "FieldInfo", "ConfigDict",
+            "True",
+            "False",
+            "None",
+            "Optional",
+            "Dict",
+            "List",
+            "Tuple",
+            "Type",
+            "Any",
+            "Union",
+            "Callable",
+            "Iterator",
+            "AsyncIterator",
+            "Generator",
+            "AsyncGenerator",
+            "Sequence",
+            "Mapping",
+            "Iterable",
+            "Exception",
+            "ValueError",
+            "TypeError",
+            "KeyError",
+            "AttributeError",
+            "NotImplementedError",
+            "RuntimeError",
+            "ImportError",
+            "FileNotFoundError",
+            "IOError",
+            "OSError",
+            "FastAPI",
+            "BaseModel",
+            "APIRouter",
+            "StreamingResponse",
+            "JSONResponse",
+            "HTTPException",
+            "Depends",
+            "Response",
+            "ReturnType",
+            "TypeVar",
+            "FieldInfo",
+            "ConfigDict",
         }
         names -= _SKIP
 
@@ -1556,29 +1708,30 @@ class SynthesisStage(PipelineStage):
 
         for i, name in enumerate(class_names):
             result = lookup_class(class_name=name)
-            call_key = (
-                f'lookup_class:'
-                f'{json.dumps({"class_name": name}, sort_keys=True)}'
-            )
+            call_key = f"lookup_class:{json.dumps({'class_name': name}, sort_keys=True)}"
             seen[call_key] = result
 
             if "NOT FOUND" in result:
                 continue
 
             tc_id = f"pre_{i}"
-            tool_calls_list.append({
-                "id": tc_id,
-                "type": "function",
-                "function": {
-                    "name": "lookup_class",
-                    "arguments": json.dumps({"class_name": name}),
-                },
-            })
-            tool_results.append({
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": result,
-            })
+            tool_calls_list.append(
+                {
+                    "id": tc_id,
+                    "type": "function",
+                    "function": {
+                        "name": "lookup_class",
+                        "arguments": json.dumps({"class_name": name}),
+                    },
+                }
+            )
+            tool_results.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result,
+                }
+            )
             found += 1
 
         if not tool_calls_list:
@@ -1592,10 +1745,7 @@ class SynthesisStage(PipelineStage):
             },
             *tool_results,
         ]
-        logger.info(
-            f"Stage 'synthesis': injected {found} class lookups "
-            f"as tool history"
-        )
+        logger.info(f"Stage 'synthesis': injected {found} class lookups as tool history")
         return messages, seen
 
     async def _build_artifacts_per_file(
@@ -1619,11 +1769,12 @@ class SynthesisStage(PipelineStage):
         if not needed:
             # No needed_artifacts extracted — fall back to template
             logger.info(
-                "Stage 'synthesis': no needed_artifacts, "
-                "falling back to template extraction"
+                "Stage 'synthesis': no needed_artifacts, falling back to template extraction"
             )
             return await self._artifacts_template_fallback(
-                client, reasoning, prior_outputs,
+                client,
+                reasoning,
+                prior_outputs,
             )
 
         # Parse needed_artifacts into (filename, purpose) pairs
@@ -1638,11 +1789,12 @@ class SynthesisStage(PipelineStage):
 
         # F12 fix: clean up corrupted artifact filenames
         import re as _re
+
         cleaned_specs: list[tuple[str, str]] = []
         for fname, purpose in artifact_specs:
             # Pattern A: strip method suffix (engine.py.answer_stream() -> engine.py)
             # Also handles :: separator (engine.py::answer_stream())
-            fname = _re.sub(r'\.py[.#:].*', '.py', fname)
+            fname = _re.sub(r"\.py[.#:].*", ".py", fname)
             # Pattern B: skip generic filenames without path separators
             # (new_chat_stream_endpoint.py -> not a real codebase path)
             if "/" not in fname and fname not in ("__init__.py",):
@@ -1656,7 +1808,9 @@ class SynthesisStage(PipelineStage):
 
         if not artifact_specs:
             return await self._artifacts_template_fallback(
-                client, reasoning, prior_outputs,
+                client,
+                reasoning,
+                prior_outputs,
             )
 
         # Get source code pool and relevant decisions
@@ -1676,12 +1830,15 @@ class SynthesisStage(PipelineStage):
         for filename, purpose in artifact_specs:
             # Find the real source code for this file
             source = self._find_file_source(
-                filename, file_contents, source_dir,
+                filename,
+                file_contents,
+                source_dir,
             )
 
             # Filter decisions relevant to this file
             relevant_decisions = self._filter_decisions_for_file(
-                filename, resolutions,
+                filename,
+                resolutions,
             )
 
             # F3 fix: inject prior artifact signatures for cross-consistency
@@ -1693,15 +1850,21 @@ class SynthesisStage(PipelineStage):
                 )
 
             artifact = await self._generate_single_artifact(
-                client, filename, purpose, source,
-                relevant_decisions, reasoning, prior_outputs,
+                client,
+                filename,
+                purpose,
+                source,
+                relevant_decisions,
+                reasoning,
+                prior_outputs,
                 prior_artifact_sigs=sig_context,
             )
             if artifact:
                 artifacts.append(artifact)
                 # Extract method signatures for subsequent artifacts
                 sigs = _extract_method_signatures(
-                    artifact.get("content", ""), filename,
+                    artifact.get("content", ""),
+                    filename,
                 )
                 prior_signatures.extend(sigs)
 
@@ -1714,11 +1877,12 @@ class SynthesisStage(PipelineStage):
 
         if not artifacts:
             logger.warning(
-                "Stage 'synthesis': per-file artifacts produced 0, "
-                "falling back to template"
+                "Stage 'synthesis': per-file artifacts produced 0, falling back to template"
             )
             return await self._artifacts_template_fallback(
-                client, reasoning, prior_outputs,
+                client,
+                reasoning,
+                prior_outputs,
             )
 
         return artifacts
@@ -1741,6 +1905,7 @@ class SynthesisStage(PipelineStage):
         # Disk fallback
         if source_dir:
             from pathlib import Path
+
             candidates = [
                 Path(source_dir) / filename,
             ]
@@ -1755,7 +1920,8 @@ class SynthesisStage(PipelineStage):
                 if candidate.exists():
                     try:
                         return candidate.read_text(
-                            encoding="utf-8", errors="replace",
+                            encoding="utf-8",
+                            errors="replace",
                         )
                     except OSError:
                         continue
@@ -1817,6 +1983,7 @@ class SynthesisStage(PipelineStage):
             return ""
 
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
         lookup = StructuralIndexLookup(full_index)
 
         # Find CamelCase names that look like schemas/models
@@ -1826,7 +1993,8 @@ class SynthesisStage(PipelineStage):
         candidates.update(_re.findall(r"\b([A-Z][a-z]{2,})\b", text))
         # Also include common request/response patterns
         candidates.update(
-            name for name in lookup.classes
+            name
+            for name in lookup.classes
             if any(kw in name.lower() for kw in ("request", "response", "query", "chat", "answer"))
         )
 
@@ -1886,11 +2054,13 @@ class SynthesisStage(PipelineStage):
                     if not isinstance(node, _ast.Assign):
                         continue
                     for target in node.targets:
-                        if (isinstance(target, _ast.Attribute)
-                                and isinstance(target.value, _ast.Name)
-                                and target.value.id == "self"
-                                and target.attr.startswith("_")
-                                and not target.attr.startswith("__")):
+                        if (
+                            isinstance(target, _ast.Attribute)
+                            and isinstance(target.value, _ast.Name)
+                            and target.value.id == "self"
+                            and target.attr.startswith("_")
+                            and not target.attr.startswith("__")
+                        ):
                             rhs = ""
                             if isinstance(node.value, _ast.Call):
                                 if isinstance(node.value.func, _ast.Name):
@@ -1913,6 +2083,7 @@ class SynthesisStage(PipelineStage):
         component_methods: dict[str, list[str]] = {}  # type_name -> [method sigs]
         if full_index:
             from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
             lookup = StructuralIndexLookup(full_index)
             for type_name in set(attrs.values()):
                 cls = lookup.find_class(type_name)
@@ -1937,12 +2108,12 @@ class SynthesisStage(PipelineStage):
 
             if source_dir:
                 from pathlib import Path as _Path
+
                 for _py in _Path(source_dir).rglob("*.py"):
                     if not missing_types:
                         break
                     _stem = _py.stem.lower()
-                    if not any(t.lower() in _stem or _stem in t.lower()
-                               for t in missing_types):
+                    if not any(t.lower() in _stem or _stem in t.lower() for t in missing_types):
                         continue
                     if ".venv" in str(_py) or "__pycache__" in str(_py):
                         continue
@@ -1967,8 +2138,7 @@ class SynthesisStage(PipelineStage):
                             if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
                                 if _child.name.startswith("__"):
                                     continue
-                                params = [a.arg for a in _child.args.args
-                                          if a.arg != "self"]
+                                params = [a.arg for a in _child.args.args if a.arg != "self"]
                                 sig = f"{_child.name}({', '.join(params)})"
                                 if _child.returns:
                                     try:
@@ -1989,13 +2159,13 @@ class SynthesisStage(PipelineStage):
             if meths:
                 sig_str = ", ".join(meths[:8])
                 lines.append(f"self.{attr_name} → {type_name}: {sig_str}")
-            elif (type_name[0].islower()
-                  and ("factory" in type_name.lower()
-                       or type_name.startswith("get_"))):
+            elif type_name[0].islower() and (
+                "factory" in type_name.lower() or type_name.startswith("get_")
+            ):
                 # Callable/factory — not a class, call it directly
                 lines.append(
                     f'self.{attr_name} → CALLABLE (use as self.{attr_name}("arg"), '
-                    f'NOT self.{attr_name}.get_xxx())'
+                    f"NOT self.{attr_name}.get_xxx())"
                 )
             else:
                 lines.append(f"self.{attr_name} → {type_name}")
@@ -2042,18 +2212,21 @@ class SynthesisStage(PipelineStage):
             disk_source = ""
             if source_dir:
                 from pathlib import Path as _Path
+
                 disk_path = _Path(source_dir) / filename
                 if disk_path.is_file():
                     try:
                         disk_source = disk_path.read_text(
-                            encoding="utf-8", errors="replace",
+                            encoding="utf-8",
+                            errors="replace",
                         )
                     except OSError:
                         pass
             # Use disk source for interface extraction, fall back to source param
             interface_source = disk_source or source
             class_interfaces = self._resolve_class_interfaces(
-                interface_source, prior_outputs,
+                interface_source,
+                prior_outputs,
             )
             type_attr_map = _build_type_attr_map(interface_source)
             init_attrs = _extract_init_attr_names(interface_source)
@@ -2064,17 +2237,18 @@ class SynthesisStage(PipelineStage):
             # calls service.xxx(), the model needs to know what methods
             # the service object actually has.
             imported_type_apis = _resolve_imported_type_apis(
-                interface_source, prior_outputs,
+                interface_source,
+                prior_outputs,
             )
             if imported_type_apis:
                 logger.info(
-                    f"Stage 'synthesis': {filename} imported APIs: "
-                    f"{len(imported_type_apis)} chars"
+                    f"Stage 'synthesis': {filename} imported APIs: {len(imported_type_apis)} chars"
                 )
             if imported_type_apis:
                 class_interfaces = (
                     class_interfaces + "\n" + imported_type_apis
-                    if class_interfaces else imported_type_apis
+                    if class_interfaces
+                    else imported_type_apis
                 )
 
             logger.info(
@@ -2087,6 +2261,7 @@ class SynthesisStage(PipelineStage):
         # Compress source if it's very large
         if len(source) > 8000:
             from fitz_forge.planning.agent.compressor import compress_file
+
             source = compress_file(source, filename)
 
         # F9 fix: inject reference method body when creating a variant.
@@ -2095,7 +2270,9 @@ class SynthesisStage(PipelineStage):
         reference_body = ""
         if disk_source and purpose:
             reference_body = _extract_reference_method(
-                disk_source, purpose, relevant_decisions,
+                disk_source,
+                purpose,
+                relevant_decisions,
             )
             if reference_body:
                 logger.info(
@@ -2109,14 +2286,17 @@ class SynthesisStage(PipelineStage):
         param_type_fields = ""
         if reference_body and prior_outputs:
             param_type_fields = _extract_param_type_fields(
-                reference_body, prior_outputs.get("_source_dir", ""),
+                reference_body,
+                prior_outputs.get("_source_dir", ""),
             )
 
         # Resolve schema fields deterministically
         schema_fields = ""
         if prior_outputs:
             schema_fields = self._resolve_schema_fields(
-                relevant_decisions, reasoning, prior_outputs,
+                relevant_decisions,
+                reasoning,
+                prior_outputs,
             )
 
         # Compress reasoning: keep architecture + design, drop roadmap/risk
@@ -2155,10 +2335,7 @@ class SynthesisStage(PipelineStage):
         schema_section = ""
         all_schema = "\n".join(filter(None, [schema_fields, param_type_fields]))
         if all_schema:
-            schema_section = (
-                f"\n\n## DATA MODEL FIELDS (use these exact field names)\n"
-                f"{all_schema}"
-            )
+            schema_section = f"\n\n## DATA MODEL FIELDS (use these exact field names)\n{all_schema}"
 
         interface_section = ""
         if class_interfaces:
@@ -2168,32 +2345,37 @@ class SynthesisStage(PipelineStage):
                 f"{class_interfaces}"
             )
 
-        schema = json.dumps({
-            "filename": filename,
-            "content": "ONLY the new methods/classes to add — not the entire file",
-            "purpose": "why this artifact exists",
-        }, indent=2)
+        schema = json.dumps(
+            {
+                "filename": filename,
+                "content": "ONLY the new methods/classes to add — not the entire file",
+                "purpose": "why this artifact exists",
+            },
+            indent=2,
+        )
 
         rules = (
-            f"Rules:\n"
-            f"- Write ONLY the new or modified code (not the entire file)\n"
-            f"- Use exact attribute names from the source code above\n"
-            f"- When calling self._xxx.method(), use ONLY methods listed "
-            f"in AVAILABLE METHODS above\n"
-            f"- When calling imported objects (e.g. service.xxx()), use ONLY "
-            f"methods listed in IMPORTED TYPE APIs above. If a method is not "
-            f"listed, it does NOT exist — do NOT assume it will be added later\n"
-            f"- When adding a parallel method (e.g. generate_stream), "
-            f"match the original method's parameters\n"
-            f"- Do NOT fabricate method names — if unsure, omit the call\n"
+            "Rules:\n"
+            "- Write ONLY the new or modified code (not the entire file)\n"
+            "- Use exact attribute names from the source code above\n"
+            "- When calling self._xxx.method(), use ONLY methods listed "
+            "in AVAILABLE METHODS above\n"
+            "- When calling imported objects (e.g. service.xxx()), use ONLY "
+            "methods listed in IMPORTED TYPE APIs above. If a method is not "
+            "listed, it does NOT exist — do NOT assume it will be added later\n"
+            "- If a dependency has NO streaming method, implement streaming "
+            "at the caller level: call the regular method, then yield/stream "
+            "the response yourself. Do NOT invent streaming methods.\n"
+            "- When adding a parallel method (e.g. generate_stream), "
+            "match the original method's parameters\n"
+            "- Do NOT fabricate method names — if unsure, omit the call\n"
         )
 
         # Build grounding block — goes FIRST after purpose to avoid
         # lost-in-the-middle effect (same fix as F7 for attr fabrication)
         grounding = ""
         grounding_parts = [
-            s for s in [interface_section, schema_section, prior_artifact_sigs]
-            if s.strip()
+            s for s in [interface_section, schema_section, prior_artifact_sigs] if s.strip()
         ]
         if grounding_parts:
             grounding = "\n".join(grounding_parts)
@@ -2240,14 +2422,14 @@ class SynthesisStage(PipelineStage):
         messages = self._make_messages(prompt)
 
         logger.info(
-            f"Stage 'synthesis': {filename} prompt={len(prompt)} chars "
-            f"(~{len(prompt)//4} tok)"
+            f"Stage 'synthesis': {filename} prompt={len(prompt)} chars (~{len(prompt) // 4} tok)"
         )
 
         try:
             t0 = time.monotonic()
             raw = await client.generate(
-                messages=messages, max_tokens=4096,
+                messages=messages,
+                max_tokens=4096,
             )
             elapsed = time.monotonic() - t0
 
@@ -2255,15 +2437,15 @@ class SynthesisStage(PipelineStage):
             content = data.get("content", "")
             if not content:
                 logger.warning(
-                    f"Stage 'synthesis': artifact for {filename} "
-                    f"had empty content ({elapsed:.1f}s)"
+                    f"Stage 'synthesis': artifact for {filename} had empty content ({elapsed:.1f}s)"
                 )
                 return None
 
             # Post-generation repair: auto-correct fabricated method refs
             if prior_outputs:
                 content, n_fixes = _repair_fabricated_refs(
-                    content, prior_outputs,
+                    content,
+                    prior_outputs,
                     type_attr_map=type_attr_map,
                     init_attrs=init_attrs,
                     attr_methods=attr_methods,
@@ -2271,13 +2453,11 @@ class SynthesisStage(PipelineStage):
                 )
                 if n_fixes:
                     logger.info(
-                        f"Stage 'synthesis': repaired {n_fixes} fabricated "
-                        f"refs in {filename}"
+                        f"Stage 'synthesis': repaired {n_fixes} fabricated refs in {filename}"
                     )
 
             logger.info(
-                f"Stage 'synthesis': artifact for {filename} "
-                f"({len(content)} chars, {elapsed:.1f}s)"
+                f"Stage 'synthesis': artifact for {filename} ({len(content)} chars, {elapsed:.1f}s)"
             )
             return {
                 "filename": data.get("filename", filename),
@@ -2286,9 +2466,7 @@ class SynthesisStage(PipelineStage):
             }
 
         except Exception as e:
-            logger.warning(
-                f"Stage 'synthesis': artifact for {filename} failed: {e}"
-            )
+            logger.warning(f"Stage 'synthesis': artifact for {filename} failed: {e}")
             return None
 
     async def _artifacts_template_fallback(
@@ -2304,7 +2482,9 @@ class SynthesisStage(PipelineStage):
         )
         extra = artifact_source_context if artifact_source_context else extract_context
         partial = await self._extract_field_group(
-            client, reasoning, ["artifacts"],
+            client,
+            reasoning,
+            ["artifacts"],
             _DESIGN_FIELD_GROUPS[-1]["schema"],
             "artifacts",
             extra_context=extra,
@@ -2357,13 +2537,18 @@ class SynthesisStage(PipelineStage):
         tools = [fn for fn in tools if fn.__name__ != "check_exists"]
         tools_map = {fn.__name__: fn for fn in tools}
 
-        schema = json.dumps({
-            "artifacts": [{
-                "filename": "path/to/file.py",
-                "content": "ONLY the new methods/classes to add",
-                "purpose": "why this artifact exists",
-            }]
-        }, indent=2)
+        schema = json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "filename": "path/to/file.py",
+                        "content": "ONLY the new methods/classes to add",
+                        "purpose": "why this artifact exists",
+                    }
+                ]
+            },
+            indent=2,
+        )
 
         # Note: pre-calling lookup_class for resolution classes was tested
         # (run 29) and HURT scores (39.0 vs 43.4) because it seeds the
@@ -2427,7 +2612,8 @@ class SynthesisStage(PipelineStage):
         try:
             for round_num in range(max_rounds):
                 response = await client.generate_with_tools(
-                    messages, tools,
+                    messages,
+                    tools,
                 )
 
                 if not response.tool_calls:
@@ -2448,8 +2634,7 @@ class SynthesisStage(PipelineStage):
                             return artifacts, tool_ctx
                     except ValueError:
                         logger.warning(
-                            f"Stage 'synthesis': tool-assisted artifacts "
-                            f"failed to parse JSON"
+                            "Stage 'synthesis': tool-assisted artifacts failed to parse JSON"
                         )
                     return None, tool_ctx
 
@@ -2464,16 +2649,12 @@ class SynthesisStage(PipelineStage):
                         k: (v.rsplit(".", 1)[-1] if isinstance(v, str) else v)
                         for k, v in tc.arguments.items()
                     }
-                    call_key = (
-                        f"{tc.name}:"
-                        f"{json.dumps(norm_args, sort_keys=True)}"
-                    )
+                    call_key = f"{tc.name}:{json.dumps(norm_args, sort_keys=True)}"
 
                     if call_key in seen_calls:
                         result = seen_calls[call_key]
                         logger.info(
-                            f"Stage 'synthesis': DUPLICATE tool call "
-                            f"{tc.name} — returning cached"
+                            f"Stage 'synthesis': DUPLICATE tool call {tc.name} — returning cached"
                         )
                     else:
                         fn = tools_map.get(tc.name)
@@ -2493,11 +2674,13 @@ class SynthesisStage(PipelineStage):
                         else:
                             result = f"Unknown tool: {tc.name}"
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        }
+                    )
 
                 # Early exit: 2 consecutive all-duplicate rounds means
                 # the model has exhausted useful research. Return the
@@ -2532,9 +2715,7 @@ class SynthesisStage(PipelineStage):
             return None, tool_ctx
 
         except Exception as e:
-            logger.warning(
-                f"Stage 'synthesis': tool-assisted artifacts failed: {e}"
-            )
+            logger.warning(f"Stage 'synthesis': tool-assisted artifacts failed: {e}")
             return None, ""
 
     @staticmethod
@@ -2573,7 +2754,9 @@ class SynthesisStage(PipelineStage):
             lines.append("### Integration Points")
             for ip in integrations:
                 if isinstance(ip, dict):
-                    lines.append(f"- {ip.get('point', ip.get('name', ''))}: {ip.get('description', '')}")
+                    lines.append(
+                        f"- {ip.get('point', ip.get('name', ''))}: {ip.get('description', '')}"
+                    )
                 else:
                     lines.append(f"- {ip}")
             lines.append("")
@@ -2609,7 +2792,8 @@ class SynthesisStage(PipelineStage):
 
     @staticmethod
     def _score_reasoning(
-        reasoning: str, resolutions: list[dict[str, Any]],
+        reasoning: str,
+        resolutions: list[dict[str, Any]],
     ) -> tuple[float, dict[str, float]]:
         """Score synthesis reasoning for best-of-2 selection.
 
@@ -2619,20 +2803,17 @@ class SynthesisStage(PipelineStage):
         breakdown: dict[str, float] = {}
 
         # File path references (0-25)
-        file_refs = re.findall(r'\b[\w/]+\.py\b', reasoning)
+        file_refs = re.findall(r"\b[\w/]+\.py\b", reasoning)
         breakdown["files"] = min(len(set(file_refs)) * 2.5, 25.0)
 
         # Section coverage (0-20)
         section_patterns = {
-            "arch": r'(?i)(architecture|approach|pattern)',
-            "design": r'(?i)(component|interface|data.?model|class)',
-            "roadmap": r'(?i)(phase|milestone|step\s+\d|deliverable)',
-            "risk": r'(?i)(risk|mitigation|fallback|concern)',
+            "arch": r"(?i)(architecture|approach|pattern)",
+            "design": r"(?i)(component|interface|data.?model|class)",
+            "roadmap": r"(?i)(phase|milestone|step\s+\d|deliverable)",
+            "risk": r"(?i)(risk|mitigation|fallback|concern)",
         }
-        found = sum(
-            1 for p in section_patterns.values()
-            if re.search(p, reasoning)
-        )
+        found = sum(1 for p in section_patterns.values() if re.search(p, reasoning))
         breakdown["sections"] = found * 5.0
 
         # Decision coverage (0-25)
@@ -2656,8 +2837,8 @@ class SynthesisStage(PipelineStage):
             breakdown["length"] = 0.0
 
         # Concreteness: identifier density (0-15)
-        camel = set(re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', reasoning))
-        snake = set(re.findall(r'\b[a-z]+(?:_[a-z]+){1,}\b', reasoning))
+        camel = set(re.findall(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b", reasoning))
+        snake = set(re.findall(r"\b[a-z]+(?:_[a-z]+){1,}\b", reasoning))
         breakdown["concrete"] = min(len(camel | snake) * 0.3, 15.0)
 
         return sum(breakdown.values()), breakdown
@@ -2669,8 +2850,8 @@ class SynthesisStage(PipelineStage):
         Counts files mentioned for modification + new types proposed.
         Used by best-of-3 to detect outliers (over/under-scoped).
         """
-        files = set(re.findall(r'\b[\w/]+\.py\b', reasoning))
-        new_types = set(re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', reasoning))
+        files = set(re.findall(r"\b[\w/]+\.py\b", reasoning))
+        new_types = set(re.findall(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b", reasoning))
         return len(files) + len(new_types)
 
     def _format_resolutions(self, resolutions: list[dict]) -> str:
@@ -2722,31 +2903,27 @@ class SynthesisStage(PipelineStage):
                 try:
                     t0 = time.monotonic()
                     r = await client.generate(
-                        messages=messages, temperature=0.7,
+                        messages=messages,
+                        temperature=0.7,
                     )
                     t1 = time.monotonic()
                     logger.info(
-                        f"Stage '{self.name}': reasoning candidate {i+1} "
+                        f"Stage '{self.name}': reasoning candidate {i + 1} "
                         f"took {t1 - t0:.1f}s ({len(r)} chars)"
                     )
                     score, breakdown = self._score_reasoning(r, resolutions)
                     scope = self._scope_size(r)
                     candidates.append((score, r, breakdown, scope))
                     logger.info(
-                        f"Stage '{self.name}': candidate {i+1} "
+                        f"Stage '{self.name}': candidate {i + 1} "
                         f"score={score:.1f} scope={scope} {breakdown}"
                     )
                 except Exception as e:
                     last_error = e
-                    logger.warning(
-                        f"Stage '{self.name}': reasoning candidate "
-                        f"{i+1} failed: {e}"
-                    )
+                    logger.warning(f"Stage '{self.name}': reasoning candidate {i + 1} failed: {e}")
 
             if not candidates:
-                raise last_error or RuntimeError(
-                    "All synthesis reasoning candidates failed"
-                )
+                raise last_error or RuntimeError("All synthesis reasoning candidates failed")
 
             # Scope consensus: compute median scope, penalize outliers
             if len(candidates) >= 2:
@@ -2785,7 +2962,10 @@ class SynthesisStage(PipelineStage):
             # 2. Self-critique the winner
             krag_context = self._get_gathered_context(prior_outputs)
             reasoning = await self._self_critique(
-                client, reasoning, job_description, krag_context=krag_context,
+                client,
+                reasoning,
+                job_description,
+                krag_context=krag_context,
             )
 
             # 3. Per-field extraction into all five schema sections
@@ -2796,20 +2976,30 @@ class SynthesisStage(PipelineStage):
             for group in _CONTEXT_FIELD_GROUPS:
                 extra = extract_context if group["label"] in {"files", "description"} else ""
                 partial = await self._extract_field_group(
-                    client, reasoning, group["fields"],
-                    group["schema"], group["label"],
+                    client,
+                    reasoning,
+                    group["fields"],
+                    group["schema"],
+                    group["label"],
                     extra_context=extra,
                 )
                 context_merged.update(partial)
 
             # Architecture fields
             # F6: retry approaches if empty (critical for plan quality)
-            _RETRY_FIELDS = {"approaches": "approaches", "components": "components", "phases": "phases"}
+            _RETRY_FIELDS = {
+                "approaches": "approaches",
+                "components": "components",
+                "phases": "phases",
+            }
             arch_merged: dict[str, Any] = {}
             for group in _ARCH_FIELD_GROUPS:
                 partial = await self._extract_field_group(
-                    client, reasoning, group["fields"],
-                    group["schema"], group["label"],
+                    client,
+                    reasoning,
+                    group["fields"],
+                    group["schema"],
+                    group["label"],
                     extra_context=extract_context,
                     retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
@@ -2820,10 +3010,17 @@ class SynthesisStage(PipelineStage):
             for group in _DESIGN_FIELD_GROUPS:
                 if group["label"] == "artifacts":
                     continue  # handled via tool-assisted loop below
-                extra = extract_context if group["label"] in {"adrs", "components", "integrations"} else ""
+                extra = (
+                    extract_context
+                    if group["label"] in {"adrs", "components", "integrations"}
+                    else ""
+                )
                 partial = await self._extract_field_group(
-                    client, reasoning, group["fields"],
-                    group["schema"], group["label"],
+                    client,
+                    reasoning,
+                    group["fields"],
+                    group["schema"],
+                    group["label"],
                     extra_context=extra,
                     retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
@@ -2834,7 +3031,10 @@ class SynthesisStage(PipelineStage):
             # file's real source code, so the model sees actual method
             # names, attributes, and signatures — not just an index.
             design_merged["artifacts"] = await self._build_artifacts_per_file(
-                client, reasoning, prior_outputs, context_merged,
+                client,
+                reasoning,
+                prior_outputs,
+                context_merged,
             )
 
             # Roadmap + Risk: use Design output + constraints instead of
@@ -2851,8 +3051,11 @@ class SynthesisStage(PipelineStage):
             roadmap_merged: dict[str, Any] = {}
             for group in _ROADMAP_FIELD_GROUPS:
                 partial = await self._extract_field_group(
-                    client, reasoning, group["fields"],
-                    group["schema"], group["label"],
+                    client,
+                    reasoning,
+                    group["fields"],
+                    group["schema"],
+                    group["label"],
                     extra_context=roadmap_risk_context,
                     retry_if_empty=_RETRY_FIELDS.get(group["label"]),
                 )
@@ -2862,8 +3065,11 @@ class SynthesisStage(PipelineStage):
             risk_merged: dict[str, Any] = {}
             for group in _RISK_FIELD_GROUPS:
                 partial = await self._extract_field_group(
-                    client, reasoning, group["fields"],
-                    group["schema"], group["label"],
+                    client,
+                    reasoning,
+                    group["fields"],
+                    group["schema"],
+                    group["label"],
                     extra_context=roadmap_risk_context,
                 )
                 risk_merged.update(partial)
@@ -2876,7 +3082,10 @@ class SynthesisStage(PipelineStage):
             recommended = arch_merged.get("recommended", "")
             if recommended not in approach_names and approach_names:
                 matches = difflib.get_close_matches(
-                    recommended, approach_names, n=1, cutoff=0.4,
+                    recommended,
+                    approach_names,
+                    n=1,
+                    cutoff=0.4,
                 )
                 if matches:
                     arch_merged["recommended"] = matches[0]
@@ -2887,19 +3096,18 @@ class SynthesisStage(PipelineStage):
             # F13C fix: if approaches is empty but key_tradeoffs exists,
             # derive a single approach from available architecture data
             if not arch_merged["approaches"] and arch_merged.get("key_tradeoffs"):
-                logger.warning(
-                    "Stage 'synthesis': approaches empty, deriving from "
-                    "key_tradeoffs"
-                )
+                logger.warning("Stage 'synthesis': approaches empty, deriving from key_tradeoffs")
                 tradeoffs = arch_merged["key_tradeoffs"]
-                arch_merged["approaches"] = [{
-                    "name": "Recommended Approach",
-                    "description": arch_merged.get("scope_statement", "")
-                    or "See key tradeoffs for design rationale",
-                    "pros": list(tradeoffs.keys())[:3],
-                    "cons": ["Single approach evaluated"],
-                    "recommended": True,
-                }]
+                arch_merged["approaches"] = [
+                    {
+                        "name": "Recommended Approach",
+                        "description": arch_merged.get("scope_statement", "")
+                        or "See key tradeoffs for design rationale",
+                        "pros": list(tradeoffs.keys())[:3],
+                        "cons": ["Single approach evaluated"],
+                        "recommended": True,
+                    }
+                ]
                 arch_merged["recommended"] = "Recommended Approach"
             arch_merged.setdefault("recommended", "")
             arch_merged.setdefault("reasoning", "")
@@ -2919,26 +3127,24 @@ class SynthesisStage(PipelineStage):
             from fitz_forge.planning.pipeline.stages.roadmap_risk import (
                 _remove_dependency_cycles,
             )
+
             if "phases" in roadmap_merged:
                 for phase in roadmap_merged["phases"]:
                     if "num" in phase and "number" not in phase:
                         phase["number"] = phase.pop("num")
-                roadmap_merged["phases"] = _remove_dependency_cycles(
-                    roadmap_merged["phases"]
-                )
+                roadmap_merged["phases"] = _remove_dependency_cycles(roadmap_merged["phases"])
             roadmap_merged.setdefault("phases", [])
 
             # F4 fix: filter phantom phase references
             valid_phase_nums = {
-                p.get("number", i + 1)
-                for i, p in enumerate(roadmap_merged["phases"])
+                p.get("number", i + 1) for i, p in enumerate(roadmap_merged["phases"])
             }
             roadmap_merged["critical_path"] = [
-                n for n in roadmap_merged.get("critical_path", [])
-                if n in valid_phase_nums
+                n for n in roadmap_merged.get("critical_path", []) if n in valid_phase_nums
             ]
             roadmap_merged["parallel_opportunities"] = [
-                grp for grp in (
+                grp
+                for grp in (
                     [n for n in group if n in valid_phase_nums]
                     for group in roadmap_merged.get("parallel_opportunities", [])
                 )
@@ -2954,8 +3160,7 @@ class SynthesisStage(PipelineStage):
             for risk_item in risk_merged["risks"]:
                 if "affected_phases" in risk_item:
                     risk_item["affected_phases"] = [
-                        n for n in risk_item["affected_phases"]
-                        if n in valid_phase_nums
+                        n for n in risk_item["affected_phases"] if n in valid_phase_nums
                     ]
             risk = RiskOutput(**risk_merged).model_dump()
 

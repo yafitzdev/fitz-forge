@@ -358,7 +358,11 @@ class TestPlanRenderer:
                 "agent_enabled": True,
                 "total_llm_calls": 15,
                 "total_generation_s": 120.5,
-                "stage_timings_s": {"context": 30.0, "architecture_design": 60.0, "roadmap_risk": 30.5},
+                "stage_timings_s": {
+                    "context": 30.0,
+                    "architecture_design": 60.0,
+                    "roadmap_risk": 30.5,
+                },
             },
         )
         md = renderer.render(plan)

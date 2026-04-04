@@ -53,9 +53,7 @@ class TestOllamaClientHealthCheck:
             model="qwen2.5-coder-next:80b-instruct",
         )
 
-        with patch.object(
-            client.client, "list", new_callable=AsyncMock
-        ) as mock_list:
+        with patch.object(client.client, "list", new_callable=AsyncMock) as mock_list:
             mock_list.side_effect = ConnectionError("Connection refused")
 
             result = await client.health_check()
@@ -202,9 +200,7 @@ class TestOllamaClientFallback:
         )
 
         with patch.object(client, "generate", new_callable=AsyncMock) as mock_gen:
-            mock_gen.side_effect = ResponseError(
-                error="Invalid model format", status_code=400
-            )
+            mock_gen.side_effect = ResponseError(error="Invalid model format", status_code=400)
 
             with pytest.raises(ResponseError) as exc_info:
                 await client.generate_with_fallback([{"role": "user", "content": "Hi"}])

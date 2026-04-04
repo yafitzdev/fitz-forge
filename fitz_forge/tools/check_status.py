@@ -39,14 +39,12 @@ async def check_status(job_id: str, store: JobStore) -> dict:
     except ToolError:
         raise
     except Exception as e:
-        raise ToolError(f"Invalid job ID: {e}")
+        raise ToolError(f"Invalid job ID: {e}") from e
 
     # Look up job
     record = await store.get(sanitized_id)
     if not record:
-        raise ToolError(
-            f"Job '{sanitized_id}' not found. Use list_plans to see available jobs."
-        )
+        raise ToolError(f"Job '{sanitized_id}' not found. Use list_plans to see available jobs.")
 
     # Parse cost estimate if present
     cost_estimate = None

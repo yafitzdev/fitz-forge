@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fitz-forge"
-version = "0.4.1"
+version = "0.5.0"
 description = "MCP server for local-first AI architectural planning using local LLMs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,6 +49,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
     "build>=1.0",
     "twine>=5.0",
 ]
@@ -66,10 +68,59 @@ fitz = "fitz_forge.cli:app"
 # -p fitz_forge: forces early import of fitz_forge/__init__.py which
 # patches platform._wmi_query before setuptools entry points (faker) load.
 # Without this, faker triggers a WMI deadlock on Windows (MS Store Python 3.12).
-addopts = "-p fitz_forge --cov=fitz_forge --cov-report=term-missing:skip-covered"
+addopts = "-p fitz_forge --cov --cov-report=term-missing"
 markers = [
+    "tier1: critical path tests — run on every commit (<30s)",
+    "tier2: unit tests with mocks — run on PR (<2min)",
+    "tier3: integration tests — run on merge to main (<10min)",
+    "tier4: heavy tests — run nightly (30min+)",
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may require LLM or database)",
+    "slow: marks tests as slow",
+    "llm: tests requiring a real LLM provider",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "SIM108", # ternary operator — readability preference
+    "SIM105", # suppressible-exception — contextlib.suppress() less readable in this codebase
+    "SIM102", # collapsible-if — nested ifs often clearer for multi-condition logic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"benchmarks/**" = ["E402", "B011"]
+"fitz_forge/__init__.py" = ["E402"]  # WMI deadlock patch requires early platform import
+"fitz_forge/cli.py" = ["E402"]       # imports after WMI patch
+"fitz_forge/server.py" = ["E402"]    # imports after WMI patch
+"fitz_forge/planning/pipeline/stages/synthesis.py" = ["E741", "B007", "F841"]  # active development
+
+[tool.ruff.lint.isort]
+known-first-party = ["fitz_forge"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["fitz_forge"]
+omit = ["fitz_forge/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
 ]
 
 [tool.setuptools.packages.find]

@@ -119,7 +119,10 @@ class ConfidenceScorer:
         self.ollama_client = ollama_client
 
     async def score_section(
-        self, section_name: str, content: str, codebase_context: str = "",
+        self,
+        section_name: str,
+        content: str,
+        codebase_context: str = "",
     ) -> float:
         """
         Score a plan section's quality.
@@ -144,7 +147,10 @@ class ConfidenceScorer:
         return round(hybrid_score, 2)
 
     async def _llm_assessment(
-        self, section_name: str, content: str, codebase_context: str = "",
+        self,
+        section_name: str,
+        content: str,
+        codebase_context: str = "",
     ) -> float:
         """
         Ask LLM to rate section quality on a 1-10 scale.
@@ -189,7 +195,7 @@ class ConfidenceScorer:
         try:
             messages = [{"role": "user", "content": prompt}]
             response = await self.ollama_client.generate(messages)
-            match = re.search(r'\b(10|[1-9])\b', response.strip())
+            match = re.search(r"\b(10|[1-9])\b", response.strip())
             if match:
                 digit = int(match.group())
                 return digit / 10.0
@@ -233,9 +239,7 @@ class ConfidenceScorer:
         specificity_count = sum(
             1 for keyword in self.SPECIFICITY_KEYWORDS if keyword in content_lower
         )
-        vague_count = sum(
-            1 for keyword in self.VAGUE_KEYWORDS if keyword in content_lower
-        )
+        vague_count = sum(1 for keyword in self.VAGUE_KEYWORDS if keyword in content_lower)
 
         # Penalize vague keywords, reward specific keywords
         if specificity_count == 0 and vague_count > 0:

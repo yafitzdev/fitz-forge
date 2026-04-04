@@ -6,7 +6,6 @@ All models use extra="ignore" for forward compatibility.
 """
 
 from datetime import datetime, timezone
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,9 +31,7 @@ class CostEstimate(BaseModel):
 
     sections_count: int = Field(ge=0, description="Number of sections to review")
     input_tokens: int = Field(ge=0, description="Estimated input tokens")
-    estimated_output_tokens: int = Field(
-        ge=0, description="Estimated output tokens (1.5x input)"
-    )
+    estimated_output_tokens: int = Field(ge=0, description="Estimated output tokens (1.5x input)")
     cost_usd: float = Field(ge=0.0, description="Estimated cost in USD")
     cost_eur: float = Field(ge=0.0, description="Estimated cost in EUR")
     model: str = Field(description="Model to use for review")
@@ -66,9 +63,7 @@ class ReviewResult(BaseModel):
 
     section_name: str = Field(description="Name of the reviewed section")
     success: bool = Field(description="Whether review completed successfully")
-    feedback: str | None = Field(
-        default=None, description="Expert review feedback from API"
-    )
+    feedback: str | None = Field(default=None, description="Expert review feedback from API")
     input_tokens: int = Field(default=0, description="Actual input tokens used")
     output_tokens: int = Field(default=0, description="Actual output tokens used")
     error: str | None = Field(default=None, description="Error message if failed")

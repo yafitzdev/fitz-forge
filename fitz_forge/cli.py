@@ -7,7 +7,6 @@ All commands delegate to the same functions that MCP wraps.
 """
 
 import asyncio
-import re
 import sys
 import time
 from collections import deque
@@ -20,6 +19,7 @@ def _fmt_duration(seconds: float) -> str:
         return f"{s}s"
     m, s = divmod(s, 60)
     return f"{m}m{s:02d}s"
+
 
 import typer
 
@@ -76,12 +76,12 @@ def _state_color(state: str) -> str:
 
 # Stage list for live progress display: (display_name, progress_threshold_for_complete)
 _DISPLAY_STAGES = [
-    ("Health check",        0.05),
-    ("Codebase analysis",   0.09),
-    ("Requirements",        0.25),
+    ("Health check", 0.05),
+    ("Codebase analysis", 0.09),
+    ("Requirements", 0.25),
     ("Architecture+Design", 0.65),
-    ("Roadmap+Risk",        0.95),
-    ("Finalizing",          1.00),
+    ("Roadmap+Risk", 0.95),
+    ("Finalizing", 1.00),
 ]
 
 
@@ -179,7 +179,7 @@ def _get_phase_description(phase: str | None) -> str:
         return _PHASE_DESCRIPTIONS[phase]
     # Agent confirming: "agent:confirming:3/50 file.py (42 tok/s)" → "Confirming 3/50 file.py (42 tok/s)"
     if phase.startswith("agent:confirming:"):
-        detail = phase[len("agent:confirming:"):]
+        detail = phase[len("agent:confirming:") :]
         return f"Confirming {detail}"
     # Agent summarizing: "agent:summarizing:path/to/file.py" → "Summarizing file.py..."
     if phase.startswith("agent:summarizing:"):
@@ -252,8 +252,8 @@ def _make_live_display(
     bar = "█" * filled + "░" * (bar_width - filled)
     pct = f"{progress * 100:.0f}%"
 
-    from rich.panel import Panel
     from rich.console import Group
+    from rich.panel import Panel
     from rich.text import Text as RichText
 
     title = RichText(f" {description[:60]}{'…' if len(description) > 60 else ''} ", style="bold")
@@ -261,7 +261,9 @@ def _make_live_display(
 
     # Status line: current activity
     status_desc = _get_phase_description(current_phase)
-    status_text = RichText(f"\n  {status_desc}", style="dim italic") if status_desc else RichText("")
+    status_text = (
+        RichText(f"\n  {status_desc}", style="dim italic") if status_desc else RichText("")
+    )
 
     # Left side: progress info
     left_parts: list = [table, bar_text, status_text]
@@ -291,11 +293,15 @@ def _make_live_display(
     )
 
 
-async def _gather_context_for_clarification(client, config, description: str, source_dir: str, console) -> str:
+async def _gather_context_for_clarification(
+    client, config, description: str, source_dir: str, console
+) -> str:
     """Run agent context gathering standalone for use in clarification flow."""
-    from rich.status import Status
-    from fitz_forge.planning.agent import AgentContextGatherer
     from pathlib import Path
+
+    from rich.status import Status
+
+    from fitz_forge.planning.agent import AgentContextGatherer
 
     if not Path(source_dir).is_dir():
         return ""
@@ -324,12 +330,11 @@ async def _run_inline(
     If ``live`` is provided, uses the existing Live display instead of
     creating a new one (allows the caller to show the GUI before setup).
     """
-    from rich.live import Live
     from rich.console import Console
+    from rich.live import Live
 
     from fitz_forge.background.worker import BackgroundWorker
     from fitz_forge.llm.factory import create_llm_client
-
     from fitz_forge.llm.llama_cpp import LlamaCppClient
 
     client = create_llm_client(config)
@@ -390,11 +395,15 @@ async def _run_inline(
                 phase = job.current_phase or ""
 
                 # Track stage transitions for timing
-                for i, (name, threshold) in enumerate(_DISPLAY_STAGES):
+                for i, (_name, threshold) in enumerate(_DISPLAY_STAGES):
                     if progress >= threshold and i not in stage_durations:
                         if i in stage_started:
                             stage_durations[i] = time.monotonic() - stage_started[i]
-                    elif progress >= prev_thresholds[i] and i not in stage_started and i not in stage_durations:
+                    elif (
+                        progress >= prev_thresholds[i]
+                        and i not in stage_started
+                        and i not in stage_durations
+                    ):
                         stage_started[i] = time.monotonic()
 
                 # Track phase changes for activity log
@@ -408,15 +417,19 @@ async def _run_inline(
                 if isinstance(client, LlamaCppClient):
                     model_name = client.active_model
 
-                live.update(_make_live_display(
-                    description, progress, elapsed,
-                    current_phase=phase,
-                    stage_durations=stage_durations,
-                    stage_started=stage_started,
-                    log_lines=list(log_lines),
-                    tick=tick,
-                    model_name=model_name,
-                ))
+                live.update(
+                    _make_live_display(
+                        description,
+                        progress,
+                        elapsed,
+                        current_phase=phase,
+                        stage_durations=stage_durations,
+                        stage_started=stage_started,
+                        log_lines=list(log_lines),
+                        tick=tick,
+                        model_name=model_name,
+                    )
+                )
             tick += 1
             await asyncio.sleep(0.3)
 
@@ -424,15 +437,19 @@ async def _run_inline(
         job = await store.get(job_id)
         if job:
             elapsed = time.monotonic() - start
-            live.update(_make_live_display(
-                description, job.progress or 0.0, elapsed,
-                current_phase=job.current_phase or "",
-                stage_durations=stage_durations,
-                stage_started=stage_started,
-                log_lines=list(log_lines),
-                tick=tick,
-                model_name=model_name,
-            ))
+            live.update(
+                _make_live_display(
+                    description,
+                    job.progress or 0.0,
+                    elapsed,
+                    current_phase=job.current_phase or "",
+                    stage_durations=stage_durations,
+                    stage_started=stage_started,
+                    log_lines=list(log_lines),
+                    tick=tick,
+                    model_name=model_name,
+                )
+            )
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         job_task.cancel()
@@ -444,7 +461,7 @@ async def _run_inline(
             await client.stop()
         if owns_live:
             live.stop()
-        raise KeyboardInterrupt
+        raise KeyboardInterrupt from None
     finally:
         if owns_live:
             live.stop()
@@ -473,7 +490,9 @@ async def _run_inline(
             console.print(f"[dim]View:[/dim]  fitz-forge get {job_id}")
         console.print()
     elif state == "awaiting_review":
-        console.print(f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-forge confirm {job_id}' to proceed.")
+        console.print(
+            f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-forge confirm {job_id}' to proceed."
+        )
     else:
         error = final_job.error or "unknown error"
         console.print(f"[red]✗ Failed[/red]: {error}")
@@ -488,7 +507,9 @@ def plan(
     api_review: bool = typer.Option(False, "--api-review", help="Enable API review"),
     source_dir: str = typer.Option(None, "--source-dir", help="Path to codebase for agent context"),
     detach: bool = typer.Option(False, "--detach", "-d", help="Queue only, don't run inline"),
-    clarify: bool = typer.Option(False, "--clarify", help="Ask clarifying questions before planning"),
+    clarify: bool = typer.Option(
+        False, "--clarify", help="Ask clarifying questions before planning"
+    ),
 ):
     """Queue and run a planning job with live progress. Use --detach to queue only."""
     from fitz_forge.config.loader import load_config
@@ -496,6 +517,7 @@ def plan(
 
     async def _plan():
         import logging as _logging
+
         from rich.console import Console as _Console
         from rich.live import Live
 
@@ -506,8 +528,8 @@ def plan(
         # Clarification flow needs interactive terminal — runs before GUI
         if clarify and not detach and sys.stdin.isatty():
             try:
-                from fitz_forge.planning.clarification import get_clarifying_questions
                 from fitz_forge.llm.factory import create_llm_client
+                from fitz_forge.planning.clarification import get_clarifying_questions
 
                 console = _Console(stderr=True)
                 client = create_llm_client(config)
@@ -530,9 +552,7 @@ def plan(
                                 answers.append(f"Q: {q}\nA: {answer}")
                         if answers:
                             enriched_description = (
-                                description
-                                + "\n\n## Clarifications\n\n"
-                                + "\n\n".join(answers)
+                                description + "\n\n## Clarifications\n\n" + "\n\n".join(answers)
                             )
                         typer.echo()
             except Exception as e:
@@ -542,9 +562,13 @@ def plan(
             store = await _get_store()
             try:
                 result = await create_plan(
-                    description=enriched_description, timeline=timeline,
-                    context=context, integration_points=None,
-                    api_review=api_review, store=store, config=config,
+                    description=enriched_description,
+                    timeline=timeline,
+                    context=context,
+                    integration_points=None,
+                    api_review=api_review,
+                    store=store,
+                    config=config,
                     source_dir=source_dir,
                 )
             finally:
@@ -572,17 +596,25 @@ def plan(
         try:
             store = await _get_store()
             result = await create_plan(
-                description=enriched_description, timeline=timeline,
-                context=context, integration_points=None,
-                api_review=api_review, store=store, config=config,
+                description=enriched_description,
+                timeline=timeline,
+                context=context,
+                integration_points=None,
+                api_review=api_review,
+                store=store,
+                config=config,
                 source_dir=source_dir,
             )
             job_id = result["job_id"]
 
             await _run_inline(
-                job_id, store, config, enriched_description,
+                job_id,
+                store,
+                config,
+                enriched_description,
                 pre_gathered_context=pre_gathered_context,
-                live=live, console=console,
+                live=live,
+                console=console,
             )
         except Exception:
             live.stop()
@@ -594,7 +626,7 @@ def plan(
         _run(_plan())
     except KeyboardInterrupt:
         typer.echo("\nCancelled.", err=True)
-        raise typer.Exit(130)
+        raise typer.Exit(130) from None
     except RuntimeError as e:
         msg = str(e)
         if "Failed to load model" in msg:
@@ -608,13 +640,13 @@ def plan(
             typer.echo(f"\nERROR: {msg}", err=True)
         else:
             typer.echo(f"\nERROR: {msg}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except ConnectionError as e:
         typer.echo(f"\nERROR: LLM server not reachable. Is LM Studio running?\n  {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as e:
         typer.echo(f"\nERROR: {type(e).__name__}: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command("run")
@@ -623,13 +655,16 @@ def run_worker():
     import logging
     import sys
 
+    from platformdirs import user_config_path
+
     from fitz_forge.background.lifecycle import ServerLifecycle
     from fitz_forge.config.loader import load_config
-    from platformdirs import user_config_path
 
     # Simple human-readable logging to stderr for CLI mode
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S")
+    )
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
@@ -690,6 +725,7 @@ def list_jobs():
         project = ""
         if p.get("file_path"):
             from pathlib import Path as _Path
+
             parts = _Path(p["file_path"]).parts
             # Find the part before .fitz-forge
             for i, part in enumerate(parts):
@@ -703,7 +739,10 @@ def list_jobs():
             + f"{quality:<9} {desc}"
         )
         if project:
-            typer.echo(f"{'':14} {'':18} {'':9} " + typer.style(f"↳ {project}", fg=typer.colors.BRIGHT_BLACK))
+            typer.echo(
+                f"{'':14} {'':18} {'':9} "
+                + typer.style(f"↳ {project}", fg=typer.colors.BRIGHT_BLACK)
+            )
 
 
 @app.command()
@@ -722,7 +761,7 @@ def status(job_id: str = typer.Argument(..., help="Job ID to check")):
         result = _run(_status())
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     state = result["state"]
     typer.echo(f"Job:      {result['job_id']}")
@@ -739,7 +778,9 @@ def status(job_id: str = typer.Argument(..., help="Job ID to check")):
 @app.command()
 def get(
     job_id: str = typer.Argument(..., help="Job ID to retrieve"),
-    format: str = typer.Option("full", "--format", "-f", help="Output format: full, summary, roadmap_only"),
+    format: str = typer.Option(
+        "full", "--format", "-f", help="Output format: full, summary, roadmap_only"
+    ),
 ):
     """Retrieve a completed plan."""
     from fitz_forge.tools.get_plan import get_plan
@@ -755,7 +796,7 @@ def get(
         result = _run(_get())
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Print raw markdown to stdout (pipeable)
     typer.echo(result["content"])
@@ -783,10 +824,16 @@ def resume(job_id: str = typer.Argument(..., help="Job ID to resume")):
         elif job.state.value == "running":
             # Stale running state from killed worker — reset to queued
             from fitz_forge.models.jobs import JobState
-            await store.update(job_id, state=JobState.QUEUED, progress=0.0, error=None, current_phase=None)
+
+            await store.update(
+                job_id, state=JobState.QUEUED, progress=0.0, error=None, current_phase=None
+            )
         elif job.state.value == "complete":
             await store.close()
-            typer.echo(f"Job '{job_id}' is already complete. Use 'fitz-forge get {job_id}' to view.", err=True)
+            typer.echo(
+                f"Job '{job_id}' is already complete. Use 'fitz-forge get {job_id}' to view.",
+                err=True,
+            )
             raise typer.Exit(1)
         # queued / awaiting_review — just run it
 
@@ -801,7 +848,7 @@ def resume(job_id: str = typer.Argument(..., help="Job ID to resume")):
         _run(_resume())
     except KeyboardInterrupt:
         typer.echo("\nCancelled.", err=True)
-        raise typer.Exit(130)
+        raise typer.Exit(130) from None
 
 
 @app.command()
@@ -820,9 +867,11 @@ def retry(job_id: str = typer.Argument(..., help="Job ID to retry")):
         result = _run(_retry())
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
-    typer.echo(f"Job {result['job_id']} re-queued. Run 'fitz-forge resume {result['job_id']}' or 'fitz-forge run' to process.")
+    typer.echo(
+        f"Job {result['job_id']} re-queued. Run 'fitz-forge resume {result['job_id']}' or 'fitz-forge run' to process."
+    )
 
 
 @app.command()
@@ -841,7 +890,7 @@ def confirm(job_id: str = typer.Argument(..., help="Job ID to approve API review
         result = _run(_confirm())
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     typer.echo(f"API review approved for {result['job_id']}. Run 'fitz-forge run' to process.")
 
@@ -862,7 +911,7 @@ def cancel(job_id: str = typer.Argument(..., help="Job ID to skip API review")):
         result = _run(_cancel())
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     typer.echo(f"API review skipped for {result['job_id']}. Plan finalized.")
 
@@ -876,7 +925,9 @@ def serve():
 
 
 @app.command()
-def replay(job_id: str = typer.Argument("last", help="Job ID to replay from, or 'last' for most recent")):
+def replay(
+    job_id: str = typer.Argument("last", help="Job ID to replay from, or 'last' for most recent"),
+):
     """Re-run planning stages using agent context from a completed job.
 
     Skips the expensive codebase exploration (~15-20 min) and re-runs
@@ -921,7 +972,7 @@ def replay(job_id: str = typer.Argument("last", help="Job ID to replay from, or 
         _run(_replay())
     except KeyboardInterrupt:
         typer.echo("\nCancelled.", err=True)
-        raise typer.Exit(130)
+        raise typer.Exit(130) from None
 
 
 @app.command()
@@ -929,8 +980,10 @@ def purge(
     include_complete: bool = typer.Option(False, "--all", help="Also remove completed jobs"),
 ):
     """Kill all zombie jobs (interrupted, queued, running, failed)."""
+
     async def _purge():
         import aiosqlite
+
         store = await _get_store()
         try:
             states = ["interrupted", "queued", "running", "failed"]

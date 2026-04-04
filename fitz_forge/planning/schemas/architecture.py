@@ -1,7 +1,7 @@
 # fitz_forge/planning/schemas/architecture.py
 """Schema for architecture exploration stage output."""
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Approach(BaseModel):

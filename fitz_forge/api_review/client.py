@@ -36,7 +36,7 @@ class AnthropicReviewClient:
         """
         self._api_key = api_key
         self._model = model
-        self._client: "anthropic.AsyncAnthropic | None" = None
+        self._client: anthropic.AsyncAnthropic | None = None
 
     @property
     def client(self) -> "anthropic.AsyncAnthropic":

@@ -1,11 +1,30 @@
-.idea/
-.planning/
+# Python
 __pycache__/
 *.pyc
+*.pyo
 *.egg-info/
 dist/
 build/
+
+# Virtual environment
 .venv/
-docs/qwen3-coder-next-assessment/
+
+# IDE
+.idea/
+
+# Testing & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Linting & type checking
+.mypy_cache/
+.ruff_cache/
+
+# Project internals
+.planning/
 .fitz-forge
+
+# Large assets (excluded from repo)
 benchmarks
+docs/qwen3-coder-next-assessment/

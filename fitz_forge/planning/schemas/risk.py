@@ -1,7 +1,7 @@
 # fitz_forge/planning/schemas/risk.py
 """Schema for risk analysis stage output."""
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from fitz_forge.planning.schemas.roadmap import PhaseRef
 

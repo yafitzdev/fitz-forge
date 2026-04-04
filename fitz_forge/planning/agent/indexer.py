@@ -19,7 +19,6 @@ import json
 import logging
 import re
 from pathlib import Path, PurePosixPath
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,22 +34,39 @@ _PYTHON_EXTS = {".py"}
 _CONFIG_EXTS = {".yaml", ".yml", ".json", ".toml"}
 _MARKDOWN_EXTS = {".md", ".rst"}
 _GENERIC_CODE_EXTS = {
-    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
     ".go",
     ".rs",
-    ".java", ".kt", ".scala",
-    ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx",
+    ".java",
+    ".kt",
+    ".scala",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".cc",
+    ".cxx",
     ".rb",
     ".cs",
     ".swift",
     ".php",
     ".lua",
     ".zig",
-    ".ex", ".exs",
-    ".erl", ".hrl",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".hrl",
     ".hs",
-    ".ml", ".mli",
-    ".sh", ".bash", ".zsh",
+    ".ml",
+    ".mli",
+    ".sh",
+    ".bash",
+    ".zsh",
 }
 
 # All extensions the indexer can extract structure from.
@@ -58,10 +74,16 @@ _GENERIC_CODE_EXTS = {
 INDEXABLE_EXTENSIONS = _PYTHON_EXTS | _CONFIG_EXTS | _MARKDOWN_EXTS | _GENERIC_CODE_EXTS
 
 # Decorators worth showing in the structural index (architectural cues).
-_KEY_DECORATORS = frozenset({
-    "dataclass", "abstractmethod", "property", "staticmethod",
-    "classmethod", "override",
-})
+_KEY_DECORATORS = frozenset(
+    {
+        "dataclass",
+        "abstractmethod",
+        "property",
+        "staticmethod",
+        "classmethod",
+        "override",
+    }
+)
 
 
 def build_structural_index(
@@ -214,7 +236,8 @@ def _extract_python(content: str) -> str:
                 if isinstance(target, ast.Name) and target.id == "__all__":
                     if isinstance(node.value, (ast.List, ast.Tuple)):
                         names = [
-                            elt.value for elt in node.value.elts
+                            elt.value
+                            for elt in node.value.elts
                             if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
                         ]
                         if names:
@@ -227,18 +250,61 @@ def _extract_python(content: str) -> str:
 # Method flow extraction — internal pipeline of complex methods
 # ---------------------------------------------------------------------------
 
-_FLOW_SKIP_METHODS = frozenset({
-    "info", "debug", "warning", "error", "exception",
-    "get", "set", "append", "extend", "update", "pop", "items", "keys", "values",
-    "strip", "lower", "upper", "replace", "split", "join", "format", "encode", "decode",
-    "result", "submit", "add", "remove", "clear", "copy",
-    "startswith", "endswith", "isinstance", "issubclass",
-})
+_FLOW_SKIP_METHODS = frozenset(
+    {
+        "info",
+        "debug",
+        "warning",
+        "error",
+        "exception",
+        "get",
+        "set",
+        "append",
+        "extend",
+        "update",
+        "pop",
+        "items",
+        "keys",
+        "values",
+        "strip",
+        "lower",
+        "upper",
+        "replace",
+        "split",
+        "join",
+        "format",
+        "encode",
+        "decode",
+        "result",
+        "submit",
+        "add",
+        "remove",
+        "clear",
+        "copy",
+        "startswith",
+        "endswith",
+        "isinstance",
+        "issubclass",
+    }
+)
 
-_FLOW_SKIP_OBJECTS = frozenset({
-    "logger", "log", "timings", "time", "uuid", "re", "os", "sys", "json",
-    "pool", "math", "hashlib", "threading",
-})
+_FLOW_SKIP_OBJECTS = frozenset(
+    {
+        "logger",
+        "log",
+        "timings",
+        "time",
+        "uuid",
+        "re",
+        "os",
+        "sys",
+        "json",
+        "pool",
+        "math",
+        "hashlib",
+        "threading",
+    }
+)
 
 # Minimum method body lines to extract flow (short methods aren't pipelines)
 _MIN_METHOD_LINES = 30
@@ -269,15 +335,20 @@ def extract_method_flows(content: str, min_lines: int = _MIN_METHOD_LINES) -> st
         # self._synthesizer = CodeSynthesizer(...) → _synthesizer → CodeSynthesizer
         component_types: dict[str, str] = {}
         for method in ast.iter_child_nodes(cls_node):
-            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name == "__init__":
+            if (
+                isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and method.name == "__init__"
+            ):
                 for node in ast.walk(method):
                     if not isinstance(node, ast.Assign):
                         continue
                     for target in node.targets:
-                        if (isinstance(target, ast.Attribute)
-                                and isinstance(target.value, ast.Name)
-                                and target.value.id == "self"
-                                and target.attr.startswith("_")):
+                        if (
+                            isinstance(target, ast.Attribute)
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id == "self"
+                            and target.attr.startswith("_")
+                        ):
                             if isinstance(node.value, ast.Call):
                                 if isinstance(node.value.func, ast.Name):
                                     component_types[target.attr] = node.value.func.id
@@ -298,10 +369,7 @@ def extract_method_flows(content: str, min_lines: int = _MIN_METHOD_LINES) -> st
             if len(steps) < 3:
                 continue
 
-            results.append(
-                f"flow {cls_node.name}.{method.name}(): "
-                + " → ".join(steps)
-            )
+            results.append(f"flow {cls_node.name}.{method.name}(): " + " → ".join(steps))
 
     return "\n".join(results)
 
@@ -325,9 +393,11 @@ def _extract_flow_steps(
                 continue
 
             # self._component.method()
-            if (isinstance(node.func.value, ast.Attribute)
-                    and isinstance(node.func.value.value, ast.Name)
-                    and node.func.value.value.id == "self"):
+            if (
+                isinstance(node.func.value, ast.Attribute)
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "self"
+            ):
                 component = node.func.value.attr
                 if component in _FLOW_SKIP_OBJECTS:
                     continue
@@ -335,8 +405,7 @@ def _extract_flow_steps(
                 calls.append((line, f"{comp_type}.{attr}()"))
 
             # self.method()
-            elif (isinstance(node.func.value, ast.Name)
-                  and node.func.value.id == "self"):
+            elif isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
                 if not attr.startswith("__"):
                     calls.append((line, f"self.{attr}()"))
 
@@ -346,7 +415,9 @@ def _extract_flow_steps(
                 continue
             # Include constructors and notable functions
             if name[0].isupper() or name in (
-                "run_constraints", "extract_features", "compress_results",
+                "run_constraints",
+                "extract_features",
+                "compress_results",
                 "build_retrieval_profile",
             ):
                 calls.append((line, f"{name}()"))
@@ -397,20 +468,20 @@ def _extract_python_regex(content: str) -> str:
     """Fallback Python extraction using regex when AST fails."""
     lines: list[str] = []
 
-    classes = re.findall(r'^class\s+(\w+)(?:\(([^)]*)\))?:', content, re.MULTILINE)
+    classes = re.findall(r"^class\s+(\w+)(?:\(([^)]*)\))?:", content, re.MULTILINE)
     if classes:
         cls_strs = []
         for name, bases in classes:
             cls_strs.append(f"{name}({bases})" if bases else name)
         lines.append(f"classes: {'; '.join(cls_strs)}")
 
-    functions = re.findall(r'^(?:async\s+)?def\s+(\w+)\(([^)]*)\)', content, re.MULTILINE)
+    functions = re.findall(r"^(?:async\s+)?def\s+(\w+)\(([^)]*)\)", content, re.MULTILINE)
     if functions:
         func_strs = [f"{name}({params})" for name, params in functions]
         lines.append(f"functions: {', '.join(func_strs)}")
 
     imports = set()
-    for m in re.finditer(r'^(?:from\s+(\S+)\s+)?import\s+(\S+)', content, re.MULTILINE):
+    for m in re.finditer(r"^(?:from\s+(\S+)\s+)?import\s+(\S+)", content, re.MULTILINE):
         mod = m.group(1) or m.group(2)
         imports.add(mod.split(".")[0])
     if imports:
@@ -425,11 +496,13 @@ def _extract_config(suffix: str, content: str) -> str:
         if suffix in (".yaml", ".yml"):
             # Only import yaml if needed — it's optional
             import yaml
+
             data = yaml.safe_load(content)
         elif suffix == ".json":
             data = json.loads(content)
         elif suffix == ".toml":
             import tomllib
+
             data = tomllib.loads(content)
         else:
             return ""
@@ -445,13 +518,13 @@ def _extract_config(suffix: str, content: str) -> str:
 def _extract_markdown(content: str) -> str:
     """Extract headings from markdown/RST files."""
     # Markdown headings
-    headings = re.findall(r'^(#{1,3})\s+(.+)', content, re.MULTILINE)
+    headings = re.findall(r"^(#{1,3})\s+(.+)", content, re.MULTILINE)
     if headings:
         items = [f"{'#' * len(h[0])} {h[1].strip()}" for h in headings[:15]]
         return f"headings: {'; '.join(items)}"
 
     # RST headings (line of = or - under text)
-    rst_headings = re.findall(r'^(.+)\n[=\-~^]+$', content, re.MULTILINE)
+    rst_headings = re.findall(r"^(.+)\n[=\-~^]+$", content, re.MULTILINE)
     if rst_headings:
         items = [h.strip() for h in rst_headings[:15]]
         return f"headings: {'; '.join(items)}"
@@ -468,10 +541,11 @@ def _extract_generic_code(content: str) -> str:
 
     # Classes / structs / interfaces / traits / enums
     type_defs = re.findall(
-        r'^(?:export\s+)?(?:pub\s+)?(?:public\s+|private\s+|protected\s+|abstract\s+|sealed\s+)?'
-        r'(?:class|struct|interface|trait|enum|type)\s+'
-        r'(\w+)',
-        content, re.MULTILINE,
+        r"^(?:export\s+)?(?:pub\s+)?(?:public\s+|private\s+|protected\s+|abstract\s+|sealed\s+)?"
+        r"(?:class|struct|interface|trait|enum|type)\s+"
+        r"(\w+)",
+        content,
+        re.MULTILINE,
     )
     if type_defs:
         lines.append(f"types: {', '.join(dict.fromkeys(type_defs))}")
@@ -479,26 +553,33 @@ def _extract_generic_code(content: str) -> str:
     # Functions / methods (various languages)
     func_patterns = [
         # Go: func Name(
-        r'^func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(',
+        r"^func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(",
         # Rust: fn name(  / pub fn name(
-        r'^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*[<(]',
+        r"^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*[<(]",
         # JS/TS: function name( / export function name(
-        r'^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*[<(]',
+        r"^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*[<(]",
         # JS/TS: const name = (...) => / const name = function
-        r'^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)\s*=>|function)',
+        r"^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)\s*=>|function)",
         # Java/C#/Kotlin: public void name( / fun name(
-        r'^\s+(?:public|private|protected|static|override|virtual|abstract|final|\s)*'
-        r'(?:fun|void|int|string|bool|float|double|var|val|Task|async)\s+(\w+)\s*[<(]',
+        r"^\s+(?:public|private|protected|static|override|virtual|abstract|final|\s)*"
+        r"(?:fun|void|int|string|bool|float|double|var|val|Task|async)\s+(\w+)\s*[<(]",
         # Ruby: def name
-        r'^(?:\s+)?def\s+(\w+)',
+        r"^(?:\s+)?def\s+(\w+)",
         # C/C++: type name( at start of line (heuristic)
-        r'^(?:static\s+)?(?:inline\s+)?(?:const\s+)?\w[\w:*&<> ]*\s+(\w+)\s*\([^;]*$',
+        r"^(?:static\s+)?(?:inline\s+)?(?:const\s+)?\w[\w:*&<> ]*\s+(\w+)\s*\([^;]*$",
     ]
     functions: list[str] = []
     for pat in func_patterns:
         for m in re.finditer(pat, content, re.MULTILINE):
             name = m.group(1)
-            if name not in functions and name not in ("if", "for", "while", "switch", "return", "main"):
+            if name not in functions and name not in (
+                "if",
+                "for",
+                "while",
+                "switch",
+                "return",
+                "main",
+            ):
                 functions.append(name)
     if functions:
         lines.append(f"functions: {', '.join(functions[:20])}")
@@ -506,15 +587,15 @@ def _extract_generic_code(content: str) -> str:
     # Imports / requires / use statements
     imports: set[str] = set()
     import_patterns = [
-        r'^import\s+["\']([^"\']+)["\']',           # JS/TS import "x"
-        r'^import\s+.*\s+from\s+["\']([^"\']+)["\']', # JS/TS import x from "y"
+        r'^import\s+["\']([^"\']+)["\']',  # JS/TS import "x"
+        r'^import\s+.*\s+from\s+["\']([^"\']+)["\']',  # JS/TS import x from "y"
         r'^(?:const|let|var)\s+.*=\s*require\(["\']([^"\']+)["\']\)',  # Node require
-        r'^import\s+"([^"]+)"',                       # Go import
-        r'^use\s+([\w:]+)',                            # Rust use
-        r'^import\s+([\w.]+)',                         # Java/Kotlin
-        r'^using\s+([\w.]+)',                          # C#
-        r'^require\s+["\']([^"\']+)["\']',             # Ruby
-        r'^#include\s+[<"]([^>"]+)[>"]',               # C/C++
+        r'^import\s+"([^"]+)"',  # Go import
+        r"^use\s+([\w:]+)",  # Rust use
+        r"^import\s+([\w.]+)",  # Java/Kotlin
+        r"^using\s+([\w.]+)",  # C#
+        r'^require\s+["\']([^"\']+)["\']',  # Ruby
+        r'^#include\s+[<"]([^>"]+)[>"]',  # C/C++
     ]
     for pat in import_patterns:
         for m in re.finditer(pat, content, re.MULTILINE):
@@ -630,9 +711,9 @@ def _extract_full_imports_regex(content: str) -> set[str]:
     indented imports too — critical for lazy imports inside functions.
     """
     imports: set[str] = set()
-    for m in re.finditer(r'^\s*from\s+(\S+)\s+import', content, re.MULTILINE):
+    for m in re.finditer(r"^\s*from\s+(\S+)\s+import", content, re.MULTILINE):
         imports.add(m.group(1))
-    for m in re.finditer(r'^\s*import\s+(\S+)', content, re.MULTILINE):
+    for m in re.finditer(r"^\s*import\s+(\S+)", content, re.MULTILINE):
         imports.add(m.group(1).split(",")[0].strip())
     return imports
 
@@ -744,22 +825,14 @@ def _extract_signatures_from_python(content: str) -> str:
 
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    params = [
-                        _format_param(a)
-                        for a in child.args.args
-                        if a.arg != "self"
-                    ]
+                    params = [_format_param(a) for a in child.args.args if a.arg != "self"]
                     ret = _format_annotation(child.returns)
                     ret_str = f" -> {ret}" if ret else ""
                     async_prefix = "async " if isinstance(child, ast.AsyncFunctionDef) else ""
                     lines.append(f"  {async_prefix}{child.name}({', '.join(params)}){ret_str}")
 
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            params = [
-                _format_param(a)
-                for a in node.args.args
-                if a.arg != "self"
-            ]
+            params = [_format_param(a) for a in node.args.args if a.arg != "self"]
             ret = _format_annotation(node.returns)
             ret_str = f" -> {ret}" if ret else ""
             async_prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
@@ -924,15 +997,12 @@ def extract_library_signatures(
     if not blocks:
         return ""
 
-    logger.info(
-        f"Library signatures: extracted {len(blocks)} packages ({used} chars)"
-    )
+    logger.info(f"Library signatures: extracted {len(blocks)} packages ({used} chars)")
     return "\n\n".join(blocks)
 
 
 def _extract_class_public_methods(cls: type) -> list[str]:
     """Extract public method names + signatures from a class."""
-    import inspect
 
     methods: list[str] = []
     for name in sorted(dir(cls)):
@@ -1071,7 +1141,8 @@ def _parse_simple_return_methods(
         # Match method lines like: "  chat(prompt: str, model: str) -> str"
         # or top-level: "process(data: list, config: dict) -> bool"
         match = re.match(
-            r"\s*(?:async\s+)?(\w+)\(([^)]*)\)\s*->\s*(\w+)", line,
+            r"\s*(?:async\s+)?(\w+)\(([^)]*)\)\s*->\s*(\w+)",
+            line,
         )
         if not match:
             continue
@@ -1101,7 +1172,8 @@ _CLUSTERING_THRESHOLD = 100
 
 
 def _group_by_directory(
-    file_list: list[str], max_depth: int = 2,
+    file_list: list[str],
+    max_depth: int = 2,
 ) -> dict[str, list[str]]:
     """Group file paths by their directory prefix up to *max_depth* levels.
 
@@ -1177,15 +1249,15 @@ def build_directory_clusters(
             for line in info.splitlines():
                 if line.startswith("classes:"):
                     all_classes.extend(
-                        c.strip() for c in line[len("classes:"):].split(";") if c.strip()
+                        c.strip() for c in line[len("classes:") :].split(";") if c.strip()
                     )
                 elif line.startswith("functions:"):
                     all_functions.extend(
-                        f.strip() for f in line[len("functions:"):].split(",") if f.strip()
+                        f.strip() for f in line[len("functions:") :].split(",") if f.strip()
                     )
                 elif line.startswith("imports:"):
                     all_imports.update(
-                        i.strip() for i in line[len("imports:"):].split(",") if i.strip()
+                        i.strip() for i in line[len("imports:") :].split(",") if i.strip()
                     )
 
         entry = f"## {dir_prefix}  ({len(files)} files)"
@@ -1203,7 +1275,6 @@ def build_directory_clusters(
 
     text = "\n\n".join(lines)
     logger.info(
-        f"Clustered {len(file_list)} files into {len(groups)} directories "
-        f"({len(text)} chars)"
+        f"Clustered {len(file_list)} files into {len(groups)} directories ({len(text)} chars)"
     )
     return text, groups

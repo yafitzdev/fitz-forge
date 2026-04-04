@@ -52,9 +52,7 @@ async def replay_plan(
 
     # Load checkpoint from source job
     async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            "SELECT pipeline_state FROM jobs WHERE id = ?", (source_job_id,)
-        )
+        cursor = await db.execute("SELECT pipeline_state FROM jobs WHERE id = ?", (source_job_id,))
         row = await cursor.fetchone()
 
     if not row or not row[0]:

@@ -1,5 +1,6 @@
 # tests/unit/test_decision_resolution.py
 """Tests for decision resolution topological sorting."""
+
 from fitz_forge.planning.pipeline.stages.decision_resolution import (
     _topological_sort,
 )

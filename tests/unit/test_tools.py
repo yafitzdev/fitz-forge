@@ -375,9 +375,7 @@ class TestGetPlan:
         """Roadmap-only format returns only roadmap section."""
         plan_file = tmp_path / "plan.md"
         plan_content = (
-            "# My Plan\n\n"
-            "## Context\nSome context.\n\n"
-            "## Roadmap\nPhase 1: Build\nPhase 2: Test\n"
+            "# My Plan\n\n## Context\nSome context.\n\n## Roadmap\nPhase 1: Build\nPhase 2: Test\n"
         )
         plan_file.write_text(plan_content, encoding="utf-8")
 

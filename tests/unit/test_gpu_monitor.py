@@ -90,7 +90,10 @@ class TestPreflight:
     @pytest.mark.asyncio
     async def test_proceeds_on_cooldown_timeout(self):
         guard = GPUTemperatureGuard(
-            threshold=80, cooldown_margin=10, check_interval=0.01, cooldown_timeout=0,
+            threshold=80,
+            cooldown_margin=10,
+            check_interval=0.01,
+            cooldown_timeout=0,
         )
         with patch.object(guard, "get_gpu_temp", return_value=85):
             await guard.preflight()  # Should proceed after timeout
@@ -136,6 +139,7 @@ class TestMaybeThrottle:
         guard = GPUTemperatureGuard(threshold=80, check_interval=60)
         # Simulate recent check
         import time
+
         guard._last_check = time.monotonic()
         with patch.object(guard, "get_gpu_temp") as mock_temp:
             await guard.maybe_throttle()

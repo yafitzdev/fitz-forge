@@ -99,7 +99,9 @@ async def ensure_min_adrs(
         components = prior_outputs["design"].get("components", [])
 
     needed = _MIN_ADRS - len(adrs)
-    comp_summary = ", ".join(c.get("name", c) if isinstance(c, dict) else str(c) for c in components[:5])
+    comp_summary = ", ".join(
+        c.get("name", c) if isinstance(c, dict) else str(c) for c in components[:5]
+    )
 
     prompt = (
         f"Architecture: {recommended}\n"
@@ -212,10 +214,7 @@ def _is_vague_verification(cmd: str) -> bool:
     cmd = cmd.strip()
     if not cmd:
         return True
-    for pattern in _VAGUE_PATTERNS:
-        if pattern.match(cmd):
-            return True
-    return False
+    return any(pattern.match(cmd) for pattern in _VAGUE_PATTERNS)
 
 
 def _fallback_verification(phase: dict) -> str:
@@ -349,7 +348,9 @@ def ensure_grounded_risks(
 
     if ungrounded:
         removed_descs = [r.get("description", "")[:60] for r in ungrounded]
-        logger.info(f"ensure_grounded_risks: removed {len(ungrounded)} ungrounded risks: {removed_descs}")
+        logger.info(
+            f"ensure_grounded_risks: removed {len(ungrounded)} ungrounded risks: {removed_descs}"
+        )
 
     merged["risks"] = grounded
     return merged
@@ -358,6 +359,7 @@ def ensure_grounded_risks(
 # ---------------------------------------------------------------------------
 # Artifact code validators
 # ---------------------------------------------------------------------------
+
 
 def _extract_known_methods(reference_text: str) -> set[str]:
     """Extract known method/function names from signatures + library reference blocks."""
@@ -409,21 +411,79 @@ def ensure_valid_artifacts(
     reference = raw_summaries[:first_source] if first_source > 0 else ""
     known_methods = _extract_known_methods(reference)
     # Add common builtins/stdlib that are always valid
-    known_methods.update({
-        "append", "extend", "insert", "remove", "pop", "get", "set",
-        "update", "items", "keys", "values", "strip", "split", "join",
-        "format", "replace", "startswith", "endswith", "lower", "upper",
-        "encode", "decode", "read", "write", "close", "open",
-        "dumps", "loads", "dump", "load",  # json
-        "info", "warning", "error", "debug", "exception",  # logging
-        "add", "discard", "copy", "clear",
-        "resolve", "exists", "is_file", "is_dir",  # pathlib
-        "isinstance", "hasattr", "getattr", "setattr", "len", "str",
-        "int", "float", "bool", "list", "dict", "tuple", "type",
-        "print", "range", "enumerate", "zip", "map", "filter", "sorted",
-        "run", "gather", "create_task", "sleep",  # asyncio
-        "model_dump", "model_validate",  # pydantic
-    })
+    known_methods.update(
+        {
+            "append",
+            "extend",
+            "insert",
+            "remove",
+            "pop",
+            "get",
+            "set",
+            "update",
+            "items",
+            "keys",
+            "values",
+            "strip",
+            "split",
+            "join",
+            "format",
+            "replace",
+            "startswith",
+            "endswith",
+            "lower",
+            "upper",
+            "encode",
+            "decode",
+            "read",
+            "write",
+            "close",
+            "open",
+            "dumps",
+            "loads",
+            "dump",
+            "load",  # json
+            "info",
+            "warning",
+            "error",
+            "debug",
+            "exception",  # logging
+            "add",
+            "discard",
+            "copy",
+            "clear",
+            "resolve",
+            "exists",
+            "is_file",
+            "is_dir",  # pathlib
+            "isinstance",
+            "hasattr",
+            "getattr",
+            "setattr",
+            "len",
+            "str",
+            "int",
+            "float",
+            "bool",
+            "list",
+            "dict",
+            "tuple",
+            "type",
+            "print",
+            "range",
+            "enumerate",
+            "zip",
+            "map",
+            "filter",
+            "sorted",
+            "run",
+            "gather",
+            "create_task",
+            "sleep",  # asyncio
+            "model_dump",
+            "model_validate",  # pydantic
+        }
+    )
 
     annotated = 0
     for artifact in artifacts:
@@ -496,9 +556,7 @@ async def ensure_correct_artifacts(
     if not reference:
         return merged
 
-    artifact_text = "\n\n".join(
-        f"--- {a['filename']} ---\n{a['content']}" for a in py_artifacts
-    )
+    artifact_text = "\n\n".join(f"--- {a['filename']} ---\n{a['content']}" for a in py_artifacts)
 
     prompt = (
         "Review these Python code artifacts for API correctness.\n"

@@ -14,6 +14,7 @@ from fitz_forge.llm.types import AgentMessage, AgentToolCall
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_client(**kwargs):
     """Create LMStudioClient with openai patched out."""
     with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
@@ -48,6 +49,7 @@ def _make_openai_tool_call(call_id, name, arguments_dict):
 # ---------------------------------------------------------------------------
 # _callable_to_openai_tool
 # ---------------------------------------------------------------------------
+
 
 class TestCallableToOpenaiTool:
     def test_basic_function(self):
@@ -100,6 +102,7 @@ class TestCallableToOpenaiTool:
 # health_check
 # ---------------------------------------------------------------------------
 
+
 class TestHealthCheck:
     @pytest.mark.asyncio
     async def test_returns_true_on_200(self):
@@ -107,8 +110,10 @@ class TestHealthCheck:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http, \
-             patch.object(client, "is_model_loaded", AsyncMock(return_value=True)):
+        with (
+            patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http,
+            patch.object(client, "is_model_loaded", AsyncMock(return_value=True)),
+        ):
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_http.return_value.get = AsyncMock(return_value=mock_response)
@@ -123,9 +128,7 @@ class TestHealthCheck:
         with patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http:
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_http.return_value.get = AsyncMock(
-                side_effect=Exception("connection refused")
-            )
+            mock_http.return_value.get = AsyncMock(side_effect=Exception("connection refused"))
             result = await client.health_check()
 
         assert result is False
@@ -134,6 +137,7 @@ class TestHealthCheck:
 # ---------------------------------------------------------------------------
 # generate
 # ---------------------------------------------------------------------------
+
 
 async def _async_iter(items):
     for item in items:
@@ -152,9 +156,7 @@ class TestGenerate:
             chunk.choices[0].delta.content = text
             chunks.append(chunk)
 
-        client._client.chat.completions.create = AsyncMock(
-            return_value=_async_iter(chunks)
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         result = await client.generate([{"role": "user", "content": "hi"}])
         assert result == "Hello, world"
@@ -170,9 +172,7 @@ class TestGenerate:
             chunk.choices[0].delta.content = text
             chunks.append(chunk)
 
-        client._client.chat.completions.create = AsyncMock(
-            return_value=_async_iter(chunks)
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         result = await client.generate([{"role": "user", "content": "hi"}])
         assert result == "datamore"
@@ -181,6 +181,7 @@ class TestGenerate:
 # ---------------------------------------------------------------------------
 # generate_with_tools
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateWithTools:
     @pytest.mark.asyncio
@@ -279,6 +280,7 @@ class TestGenerateWithTools:
 # tool_result_message
 # ---------------------------------------------------------------------------
 
+
 class TestToolResultMessage:
     def test_includes_tool_call_id(self):
         client = _make_client()
@@ -297,6 +299,7 @@ class TestToolResultMessage:
 # ---------------------------------------------------------------------------
 # Retry logic
 # ---------------------------------------------------------------------------
+
 
 class TestRetryBehavior:
     @pytest.mark.asyncio
@@ -329,9 +332,7 @@ class TestRetryBehavior:
     async def test_no_retry_on_non_retryable_error(self):
         client = _make_client(model="test-model")
 
-        client._client.chat.completions.create = AsyncMock(
-            side_effect=ValueError("bad input")
-        )
+        client._client.chat.completions.create = AsyncMock(side_effect=ValueError("bad input"))
 
         with pytest.raises(ValueError, match="bad input"):
             await client.generate([{"role": "user", "content": "hi"}])

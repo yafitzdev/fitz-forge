@@ -49,9 +49,7 @@ class TestContextStageGatheredContext:
 
     def test_uses_gathered_context(self):
         stage = ContextStage()
-        result = stage._get_gathered_context(
-            {"_gathered_context": GATHERED_CONTEXT}
-        )
+        result = stage._get_gathered_context({"_gathered_context": GATHERED_CONTEXT})
         assert result == GATHERED_CONTEXT
 
     def test_prompt_contains_gathered_context(self):
@@ -105,6 +103,7 @@ class TestNoKragImports:
         """ContextStage should not reference KragClient."""
         import inspect
         import fitz_forge.planning.pipeline.stages.context as mod
+
         source = inspect.getsource(mod)
         assert "KragClient" not in source
         assert "_get_krag_context" not in source
@@ -112,6 +111,7 @@ class TestNoKragImports:
     def test_base_has_no_krag_dependency(self):
         import inspect
         import fitz_forge.planning.pipeline.stages.base as mod
+
         source = inspect.getsource(mod)
         assert "KragClient" not in source
         assert "_get_krag_context" not in source

@@ -97,9 +97,7 @@ async def test_worker_uses_pipeline(store: SQLiteJobStore, tmp_path: Path):
     await store.add(job)
 
     # Create worker with mocked pipeline execution
-    worker = BackgroundWorker(
-        store, config=config, poll_interval=0.1, ollama_client=mock_client
-    )
+    worker = BackgroundWorker(store, config=config, poll_interval=0.1, ollama_client=mock_client)
 
     # Mock the pipeline execute method
     with patch.object(
@@ -142,6 +140,7 @@ async def test_worker_progress_updates(store: SQLiteJobStore, tmp_path: Path):
     mock_client.health_check = AsyncMock(return_value=True)
     mock_client.model = "test-model"
     mock_client.context_size = 65536
+
     # Mock pipeline that calls progress callback
     async def mock_execute(client, job_id, job_description, resume, progress_callback, **kwargs):
         # Simulate stage progress updates
@@ -157,10 +156,28 @@ async def test_worker_progress_updates(store: SQLiteJobStore, tmp_path: Path):
         result.success = True
         result.git_sha = "abc1234"
         result.outputs = {
-            "context": {"project_description": "Test", "key_requirements": [], "constraints": [], "existing_context": "", "stakeholders": [], "scope_boundaries": {}},
-            "architecture": {"approaches": [], "recommended": "Test", "reasoning": "Test", "key_tradeoffs": {}, "technology_considerations": []},
+            "context": {
+                "project_description": "Test",
+                "key_requirements": [],
+                "constraints": [],
+                "existing_context": "",
+                "stakeholders": [],
+                "scope_boundaries": {},
+            },
+            "architecture": {
+                "approaches": [],
+                "recommended": "Test",
+                "reasoning": "Test",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+            },
             "design": {"adrs": [], "components": [], "data_model": {}, "integration_points": []},
-            "roadmap": {"phases": [], "critical_path": [], "parallel_opportunities": [], "total_phases": 0},
+            "roadmap": {
+                "phases": [],
+                "critical_path": [],
+                "parallel_opportunities": [],
+                "total_phases": 0,
+            },
             "risk": {"risks": []},
         }
         return result
@@ -181,9 +198,7 @@ async def test_worker_progress_updates(store: SQLiteJobStore, tmp_path: Path):
     await store.add(job)
 
     # Create worker
-    worker = BackgroundWorker(
-        store, config=config, poll_interval=0.1, ollama_client=mock_client
-    )
+    worker = BackgroundWorker(store, config=config, poll_interval=0.1, ollama_client=mock_client)
 
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", side_effect=mock_execute):
@@ -230,9 +245,7 @@ async def test_worker_pipeline_failure(store: SQLiteJobStore, tmp_path: Path):
     await store.add(job)
 
     # Create worker
-    worker = BackgroundWorker(
-        store, config=config, poll_interval=0.1, ollama_client=mock_client
-    )
+    worker = BackgroundWorker(store, config=config, poll_interval=0.1, ollama_client=mock_client)
 
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", return_value=mock_pipeline_result):

@@ -21,7 +21,6 @@ operate on full source for accurate relevance scoring.
 
 import ast
 import logging
-import textwrap
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +112,9 @@ def compress_python(source: str) -> str:
                 and isinstance(node.body[0].value, (ast.Constant,))
             ):
                 doc_node = node.body[0]
-                if isinstance(doc_node.value, ast.Constant) and isinstance(doc_node.value.value, str):
+                if isinstance(doc_node.value, ast.Constant) and isinstance(
+                    doc_node.value.value, str
+                ):
                     removals.append((doc_node.lineno, doc_node.end_lineno))
 
         # Compress function/method bodies
@@ -144,10 +145,7 @@ def compress_python(source: str) -> str:
                 continue  # Keep short bodies verbatim
 
             # Check if body is just `pass` or `...`
-            if (
-                len(real_body) == 1
-                and isinstance(real_body[0], (ast.Pass, ast.Expr))
-            ):
+            if len(real_body) == 1 and isinstance(real_body[0], (ast.Pass, ast.Expr)):
                 continue
 
             # __init__ and _init_components define instance attributes
@@ -156,7 +154,11 @@ def compress_python(source: str) -> str:
             # Keep self._xxx assignment lines, collapse the rest.
             if node.name in ("__init__", "_init_components", "setup", "_setup"):
                 _keep_init_assignments(
-                    lines, body_start, body_end, replacements, removals,
+                    lines,
+                    body_start,
+                    body_end,
+                    replacements,
+                    removals,
                 )
                 continue
 
@@ -238,10 +240,7 @@ def compress_file(source: str, path: str) -> str:
 
     # Test files: keep only imports and signatures
     parts = path.replace("\\", "/").split("/")
-    is_test = (
-        any(p.startswith("test") for p in parts)
-        or any(p == "tests" for p in parts)
-    )
+    is_test = any(p.startswith("test") for p in parts) or any(p == "tests" for p in parts)
 
     compressed = compress_python(source)
 
@@ -304,8 +303,6 @@ def _collapse_all_bodies(source: str) -> str:
         last_body = real_body[-1]
         body_start = first_body.lineno
         body_end = last_body.end_lineno
-        body_lines = body_end - body_start + 1
-
         first_line = lines[body_start - 1] if body_start <= len(lines) else ""
         indent = len(first_line) - len(first_line.lstrip())
         indent_str = first_line[:indent] if indent > 0 else "        "

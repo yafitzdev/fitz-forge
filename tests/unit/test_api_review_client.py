@@ -114,9 +114,7 @@ class TestAnthropicReviewClient:
             await review_client._review_single_section(section)
 
     @pytest.mark.asyncio
-    async def test_review_sections_all_success(
-        self, review_client, mock_anthropic, sample_section
-    ):
+    async def test_review_sections_all_success(self, review_client, mock_anthropic, sample_section):
         """Test concurrent review of multiple sections."""
         sections = [
             sample_section,

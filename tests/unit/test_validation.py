@@ -189,6 +189,7 @@ class TestSanitizeProjectPath:
     def test_returns_path_object(self, tmp_path):
         """Return type is a Path object."""
         from pathlib import Path
+
         result = sanitize_project_path(str(tmp_path))
         assert isinstance(result, Path)
 

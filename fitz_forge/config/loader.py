@@ -9,8 +9,8 @@ import logging
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
 from platformdirs import user_config_path
+from pydantic import BaseModel
 
 from .schema import FitzPlannerConfig
 

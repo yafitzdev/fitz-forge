@@ -106,7 +106,7 @@ Some trailing text
         entries = [{"id": i, "name": f"entry_{i}", "desc": "x" * 50} for i in range(20)]
         full = json.dumps({"items": entries})
         # Truncate at ~60% — leaves many unclosed delimiters
-        truncated = full[:int(len(full) * 0.6)]
+        truncated = full[: int(len(full) * 0.6)]
         result = extract_json(truncated)
         assert "items" in result
         assert len(result["items"]) > 0
@@ -167,70 +167,105 @@ class TestArchitectureDesignRecommendedValidation:
         return ArchitectureDesignStage()
 
     def test_exact_match_unchanged(self, stage):
-        raw = json.dumps({
-            "approaches": [{"name": "Monolith", "description": "Single app", "pros": [], "cons": [], "complexity": "low", "best_for": []}],
-            "recommended": "Monolith",
-            "reasoning": "Best for MVP",
-            "key_tradeoffs": {},
-            "technology_considerations": [],
-            "adrs": [],
-            "components": [],
-            "data_model": {},
-            "integration_points": [],
-            "artifacts": [],
-            "scope_statement": "",
-        })
+        raw = json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Monolith",
+                        "description": "Single app",
+                        "pros": [],
+                        "cons": [],
+                        "complexity": "low",
+                        "best_for": [],
+                    }
+                ],
+                "recommended": "Monolith",
+                "reasoning": "Best for MVP",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+                "adrs": [],
+                "components": [],
+                "data_model": {},
+                "integration_points": [],
+                "artifacts": [],
+                "scope_statement": "",
+            }
+        )
         result = stage.parse_output(raw)
         assert result["architecture"]["recommended"] == "Monolith"
 
     def test_fuzzy_match_corrected(self, stage):
-        raw = json.dumps({
-            "approaches": [{"name": "Microservices Architecture", "description": "Distributed", "pros": [], "cons": [], "complexity": "high", "best_for": []}],
-            "recommended": "Microservices",
-            "reasoning": "Best for scale",
-            "key_tradeoffs": {},
-            "technology_considerations": [],
-            "adrs": [],
-            "components": [],
-            "data_model": {},
-            "integration_points": [],
-            "artifacts": [],
-            "scope_statement": "",
-        })
+        raw = json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Microservices Architecture",
+                        "description": "Distributed",
+                        "pros": [],
+                        "cons": [],
+                        "complexity": "high",
+                        "best_for": [],
+                    }
+                ],
+                "recommended": "Microservices",
+                "reasoning": "Best for scale",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+                "adrs": [],
+                "components": [],
+                "data_model": {},
+                "integration_points": [],
+                "artifacts": [],
+                "scope_statement": "",
+            }
+        )
         result = stage.parse_output(raw)
         assert result["architecture"]["recommended"] == "Microservices Architecture"
 
     def test_no_match_uses_first(self, stage):
-        raw = json.dumps({
-            "approaches": [{"name": "Monolith", "description": "Single", "pros": [], "cons": [], "complexity": "low", "best_for": []}],
-            "recommended": "Something Completely Different",
-            "reasoning": "Reason",
-            "key_tradeoffs": {},
-            "technology_considerations": [],
-            "adrs": [],
-            "components": [],
-            "data_model": {},
-            "integration_points": [],
-            "artifacts": [],
-            "scope_statement": "",
-        })
+        raw = json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Monolith",
+                        "description": "Single",
+                        "pros": [],
+                        "cons": [],
+                        "complexity": "low",
+                        "best_for": [],
+                    }
+                ],
+                "recommended": "Something Completely Different",
+                "reasoning": "Reason",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+                "adrs": [],
+                "components": [],
+                "data_model": {},
+                "integration_points": [],
+                "artifacts": [],
+                "scope_statement": "",
+            }
+        )
         result = stage.parse_output(raw)
         assert result["architecture"]["recommended"] == "Monolith"
 
     def test_empty_approaches_unchanged(self, stage):
-        raw = json.dumps({
-            "approaches": [],
-            "recommended": "Anything",
-            "reasoning": "Reason",
-            "key_tradeoffs": {},
-            "technology_considerations": [],
-            "adrs": [],
-            "components": [],
-            "data_model": {},
-            "integration_points": [],
-            "artifacts": [],
-            "scope_statement": "",
-        })
+        raw = json.dumps(
+            {
+                "approaches": [],
+                "recommended": "Anything",
+                "reasoning": "Reason",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+                "adrs": [],
+                "components": [],
+                "data_model": {},
+                "integration_points": [],
+                "artifacts": [],
+                "scope_statement": "",
+            }
+        )
         result = stage.parse_output(raw)
         assert result["architecture"]["recommended"] == "Anything"
 
@@ -319,26 +354,34 @@ class TestContextStage:
             # 2. Self-critique
             "Reviewed and refined reasoning about project context...",
             # Group 1: description
-            json.dumps({
-                "project_description": "Test project",
-                "key_requirements": ["Req 1"],
-                "constraints": ["Python only"],
-                "existing_context": "",
-            }),
+            json.dumps(
+                {
+                    "project_description": "Test project",
+                    "key_requirements": ["Req 1"],
+                    "constraints": ["Python only"],
+                    "existing_context": "",
+                }
+            ),
             # Group 2: stakeholders
-            json.dumps({
-                "stakeholders": ["Developers"],
-                "scope_boundaries": {"in_scope": ["API"], "out_of_scope": ["UI"]},
-            }),
+            json.dumps(
+                {
+                    "stakeholders": ["Developers"],
+                    "scope_boundaries": {"in_scope": ["API"], "out_of_scope": ["UI"]},
+                }
+            ),
             # Group 3: files
-            json.dumps({
-                "existing_files": [],
-                "needed_artifacts": ["config.yaml"],
-            }),
+            json.dumps(
+                {
+                    "existing_files": [],
+                    "needed_artifacts": ["config.yaml"],
+                }
+            ),
             # Group 4: assumptions
-            json.dumps({
-                "assumptions": [],
-            }),
+            json.dumps(
+                {
+                    "assumptions": [],
+                }
+            ),
         ]
 
         result = await stage.execute(mock_client, "Build something", {})
@@ -358,12 +401,14 @@ class TestContextStage:
             "Reasoning...",
             "Reviewed reasoning...",
             # Group 1: description — valid
-            json.dumps({
-                "project_description": "Test project",
-                "key_requirements": ["Req 1"],
-                "constraints": [],
-                "existing_context": "",
-            }),
+            json.dumps(
+                {
+                    "project_description": "Test project",
+                    "key_requirements": ["Req 1"],
+                    "constraints": [],
+                    "existing_context": "",
+                }
+            ),
             # Group 2: stakeholders — FAILS
             "This is not JSON at all",
             # Group 3: files — valid
@@ -420,28 +465,41 @@ class TestArchitectureDesignStage:
 
     def test_parse_output_splits_correctly(self, stage):
         """parse_output splits combined JSON into architecture and design sub-dicts."""
-        raw = json.dumps({
-            "approaches": [
-                {"name": "Monolith", "description": "Single app", "pros": ["Simple"],
-                 "cons": ["Scaling"], "complexity": "low", "best_for": ["MVPs"]},
-            ],
-            "recommended": "Monolith",
-            "reasoning": "Best for MVP",
-            "key_tradeoffs": {"simplicity": "vs scalability"},
-            "technology_considerations": ["Python", "Flask"],
-            "adrs": [
-                {"title": "Use JWT", "context": "Need auth", "decision": "JWT tokens",
-                 "rationale": "Stateless", "consequences": ["Easy to scale"],
-                 "alternatives_considered": ["Sessions"]},
-            ],
-            "components": [],
-            "data_model": {"User": ["id", "email"]},
-            "integration_points": ["Stripe API"],
-            "artifacts": [
-                {"filename": "config.yaml", "content": "key: value", "purpose": "App config"},
-            ],
-            "scope_statement": "Small API — one service, one database.",
-        })
+        raw = json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Monolith",
+                        "description": "Single app",
+                        "pros": ["Simple"],
+                        "cons": ["Scaling"],
+                        "complexity": "low",
+                        "best_for": ["MVPs"],
+                    },
+                ],
+                "recommended": "Monolith",
+                "reasoning": "Best for MVP",
+                "key_tradeoffs": {"simplicity": "vs scalability"},
+                "technology_considerations": ["Python", "Flask"],
+                "adrs": [
+                    {
+                        "title": "Use JWT",
+                        "context": "Need auth",
+                        "decision": "JWT tokens",
+                        "rationale": "Stateless",
+                        "consequences": ["Easy to scale"],
+                        "alternatives_considered": ["Sessions"],
+                    },
+                ],
+                "components": [],
+                "data_model": {"User": ["id", "email"]},
+                "integration_points": ["Stripe API"],
+                "artifacts": [
+                    {"filename": "config.yaml", "content": "key: value", "purpose": "App config"},
+                ],
+                "scope_statement": "Small API — one service, one database.",
+            }
+        )
         result = stage.parse_output(raw)
 
         # Check split structure
@@ -473,41 +531,76 @@ class TestArchitectureDesignStage:
             "Detailed reasoning about architecture and design...",
             "Reviewed and refined reasoning...",
             # Group 1: approaches
-            json.dumps({
-                "approaches": [{"name": "Monolith", "description": "Single app", "pros": ["Simple"], "cons": ["Scaling"], "complexity": "low", "best_for": ["MVP"]}],
-                "recommended": "Monolith",
-                "reasoning": "Simple approach",
-                "scope_statement": "Small project",
-            }),
+            json.dumps(
+                {
+                    "approaches": [
+                        {
+                            "name": "Monolith",
+                            "description": "Single app",
+                            "pros": ["Simple"],
+                            "cons": ["Scaling"],
+                            "complexity": "low",
+                            "best_for": ["MVP"],
+                        }
+                    ],
+                    "recommended": "Monolith",
+                    "reasoning": "Simple approach",
+                    "scope_statement": "Small project",
+                }
+            ),
             # Group 2: tradeoffs
-            json.dumps({
-                "key_tradeoffs": {"simplicity": "vs scale"},
-                "technology_considerations": ["Python"],
-            }),
+            json.dumps(
+                {
+                    "key_tradeoffs": {"simplicity": "vs scale"},
+                    "technology_considerations": ["Python"],
+                }
+            ),
             # Group 3: adrs
-            json.dumps({
-                "adrs": [],
-            }),
+            json.dumps(
+                {
+                    "adrs": [],
+                }
+            ),
             # Group 4: components
-            json.dumps({
-                "components": [],
-                "data_model": {},
-            }),
+            json.dumps(
+                {
+                    "components": [],
+                    "data_model": {},
+                }
+            ),
             # Group 5: integrations
-            json.dumps({
-                "integration_points": [],
-            }),
+            json.dumps(
+                {
+                    "integration_points": [],
+                }
+            ),
             # Group 6: artifacts
-            json.dumps({
-                "artifacts": [],
-            }),
+            json.dumps(
+                {
+                    "artifacts": [],
+                }
+            ),
             # ensure_min_adrs validator (adrs was empty → repair)
-            json.dumps([
-                {"title": "ADR: Generated", "context": "c", "decision": "d",
-                 "rationale": "r", "consequences": [], "alternatives_considered": []},
-                {"title": "ADR: Generated 2", "context": "c", "decision": "d",
-                 "rationale": "r", "consequences": [], "alternatives_considered": []},
-            ]),
+            json.dumps(
+                [
+                    {
+                        "title": "ADR: Generated",
+                        "context": "c",
+                        "decision": "d",
+                        "rationale": "r",
+                        "consequences": [],
+                        "alternatives_considered": [],
+                    },
+                    {
+                        "title": "ADR: Generated 2",
+                        "context": "c",
+                        "decision": "d",
+                        "rationale": "r",
+                        "consequences": [],
+                        "alternatives_considered": [],
+                    },
+                ]
+            ),
         ]
 
         result = await stage.execute(mock_client, "Build API", {})
@@ -516,7 +609,9 @@ class TestArchitectureDesignStage:
         assert "design" in result.output
         assert result.output["architecture"]["recommended"] == "Monolith"
         assert result.output["architecture"]["key_tradeoffs"] == {"simplicity": "vs scale"}
-        assert mock_client.generate.call_count == 9  # 1 reasoning + 1 critique + 6 groups + 1 ADR validator (DA skipped, no context)
+        assert (
+            mock_client.generate.call_count == 9
+        )  # 1 reasoning + 1 critique + 6 groups + 1 ADR validator (DA skipped, no context)
 
     @pytest.mark.asyncio
     async def test_execute_passes_krag_context_selectively(self, stage):
@@ -541,7 +636,9 @@ class TestArchitectureDesignStage:
             "Assumption register...",
             "Reviewed reasoning...",  # critique
             # devil's advocate removed (opt4)
-            json.dumps({"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}),
+            json.dumps(
+                {"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}
+            ),
             json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
             json.dumps({"adrs": []}),
             json.dumps({"components": [], "data_model": {}}),
@@ -578,12 +675,23 @@ class TestArchitectureDesignStage:
             "Reasoning...",
             "Reviewed reasoning...",  # critique
             # Group 1: approaches — valid
-            json.dumps({
-                "approaches": [{"name": "Mono", "description": "Single", "pros": [], "cons": [], "complexity": "low", "best_for": []}],
-                "recommended": "Mono",
-                "reasoning": "Simple",
-                "scope_statement": "",
-            }),
+            json.dumps(
+                {
+                    "approaches": [
+                        {
+                            "name": "Mono",
+                            "description": "Single",
+                            "pros": [],
+                            "cons": [],
+                            "complexity": "low",
+                            "best_for": [],
+                        }
+                    ],
+                    "recommended": "Mono",
+                    "reasoning": "Simple",
+                    "scope_statement": "",
+                }
+            ),
             # Group 2: tradeoffs — FAILS (invalid JSON)
             "This is not JSON at all",
             # Group 3: adrs — valid
@@ -612,7 +720,12 @@ class TestArchitectureDesignStage:
             "Reasoning...",
             "Reviewed reasoning...",  # critique
             # All 6 groups fail
-            "not json", "not json", "not json", "not json", "not json", "not json",
+            "not json",
+            "not json",
+            "not json",
+            "not json",
+            "not json",
+            "not json",
         ]
 
         result = await stage.execute(mock_client, "Build API", {})
@@ -632,8 +745,10 @@ class TestArchitectureDesignStage:
         # Track call count to fail verification agents but succeed elsewhere
         call_count = [0]
         investigation_responses = [
-            "Investigation 1.", "Investigation 2.",
-            "Investigation 3.", "Investigation 4.",
+            "Investigation 1.",
+            "Investigation 2.",
+            "Investigation 3.",
+            "Investigation 4.",
         ]
         reasoning_response = "Architecture reasoning..."
         # 6 verification agents all raise
@@ -641,7 +756,23 @@ class TestArchitectureDesignStage:
         critique_response = "Reviewed reasoning..."
         advocate_response = "Challenged reasoning..."
         extraction_responses = [
-            json.dumps({"approaches": [{"name": "A", "description": "d", "pros": [], "cons": [], "complexity": "low", "best_for": []}], "recommended": "A", "reasoning": "r", "scope_statement": "s"}),
+            json.dumps(
+                {
+                    "approaches": [
+                        {
+                            "name": "A",
+                            "description": "d",
+                            "pros": [],
+                            "cons": [],
+                            "complexity": "low",
+                            "best_for": [],
+                        }
+                    ],
+                    "recommended": "A",
+                    "reasoning": "r",
+                    "scope_statement": "s",
+                }
+            ),
             json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
             json.dumps({"adrs": []}),
             json.dumps({"components": [], "data_model": {}}),
@@ -681,7 +812,10 @@ class TestArchitectureDesignStage:
 
         mock_client.generate.side_effect = [
             # 4 investigations
-            "Inv 1.", "Inv 2.", "Inv 3.", "Inv 4.",
+            "Inv 1.",
+            "Inv 2.",
+            "Inv 3.",
+            "Inv 4.",
             # reasoning
             "My architecture proposal...",
             # 6 verification agents
@@ -696,7 +830,23 @@ class TestArchitectureDesignStage:
             # devil's advocate
             "Challenged with verification...",
             # 6 field groups
-            json.dumps({"approaches": [{"name": "X", "description": "d", "pros": [], "cons": [], "complexity": "low", "best_for": []}], "recommended": "X", "reasoning": "r", "scope_statement": "s"}),
+            json.dumps(
+                {
+                    "approaches": [
+                        {
+                            "name": "X",
+                            "description": "d",
+                            "pros": [],
+                            "cons": [],
+                            "complexity": "low",
+                            "best_for": [],
+                        }
+                    ],
+                    "recommended": "X",
+                    "reasoning": "r",
+                    "scope_statement": "s",
+                }
+            ),
             json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
             json.dumps({"adrs": []}),
             json.dumps({"components": [], "data_model": {}}),
@@ -744,10 +894,29 @@ class TestRoadmapRiskStage:
                 "key_tradeoffs": {},
             },
             "design": {
-                "components": [{"name": "API", "purpose": "REST endpoints", "interfaces": ["GET /posts"], "dependencies": ["DB"]}],
-                "adrs": [{"title": "Use JWT", "decision": "JWT tokens for auth", "rationale": "Stateless"}],
+                "components": [
+                    {
+                        "name": "API",
+                        "purpose": "REST endpoints",
+                        "interfaces": ["GET /posts"],
+                        "dependencies": ["DB"],
+                    }
+                ],
+                "adrs": [
+                    {
+                        "title": "Use JWT",
+                        "decision": "JWT tokens for auth",
+                        "rationale": "Stateless",
+                    }
+                ],
                 "integration_points": ["Stripe"],
-                "artifacts": [{"filename": "schema.sql", "content": "CREATE TABLE posts;", "purpose": "DB schema"}],
+                "artifacts": [
+                    {
+                        "filename": "schema.sql",
+                        "content": "CREATE TABLE posts;",
+                        "purpose": "DB schema",
+                    }
+                ],
             },
         }
         messages = stage.build_prompt("Build blog", prior)
@@ -763,24 +932,37 @@ class TestRoadmapRiskStage:
 
     def test_parse_output_splits_correctly(self, stage):
         """parse_output splits combined JSON into roadmap and risk sub-dicts."""
-        raw = json.dumps({
-            "phases": [
-                {"number": 1, "name": "Foundation", "objective": "Setup",
-                 "deliverables": ["DB"], "dependencies": [],
-                 "estimated_complexity": "medium", "key_risks": []},
-            ],
-            "critical_path": [1],
-            "parallel_opportunities": [],
-            "total_phases": 1,
-            "risks": [
-                {"category": "technical", "description": "DB scaling",
-                 "impact": "high", "likelihood": "medium",
-                 "mitigation": "Use sharding", "contingency": "Managed DB",
-                 "affected_phases": [1]},
-            ],
-            "overall_risk_level": "medium",
-            "recommended_contingencies": ["Have backup"],
-        })
+        raw = json.dumps(
+            {
+                "phases": [
+                    {
+                        "number": 1,
+                        "name": "Foundation",
+                        "objective": "Setup",
+                        "deliverables": ["DB"],
+                        "dependencies": [],
+                        "estimated_complexity": "medium",
+                        "key_risks": [],
+                    },
+                ],
+                "critical_path": [1],
+                "parallel_opportunities": [],
+                "total_phases": 1,
+                "risks": [
+                    {
+                        "category": "technical",
+                        "description": "DB scaling",
+                        "impact": "high",
+                        "likelihood": "medium",
+                        "mitigation": "Use sharding",
+                        "contingency": "Managed DB",
+                        "affected_phases": [1],
+                    },
+                ],
+                "overall_risk_level": "medium",
+                "recommended_contingencies": ["Have backup"],
+            }
+        )
         result = stage.parse_output(raw)
 
         assert "roadmap" in result
@@ -799,25 +981,38 @@ class TestRoadmapRiskStage:
             "Reasoning about roadmap and risks...",
             "Reviewed and refined reasoning...",  # critique
             # Group 1: phases
-            json.dumps({
-                "phases": [
-                    {"number": 1, "name": "Setup", "objective": "Initialize", "deliverables": ["DB"],
-                     "dependencies": [], "estimated_complexity": "low", "key_risks": [],
-                     "verification_command": "python -m pytest tests/test_setup.py -v"},
-                ],
-            }),
+            json.dumps(
+                {
+                    "phases": [
+                        {
+                            "number": 1,
+                            "name": "Setup",
+                            "objective": "Initialize",
+                            "deliverables": ["DB"],
+                            "dependencies": [],
+                            "estimated_complexity": "low",
+                            "key_risks": [],
+                            "verification_command": "python -m pytest tests/test_setup.py -v",
+                        },
+                    ],
+                }
+            ),
             # Group 2: scheduling
-            json.dumps({
-                "critical_path": [1],
-                "parallel_opportunities": [],
-                "total_phases": 1,
-            }),
+            json.dumps(
+                {
+                    "critical_path": [1],
+                    "parallel_opportunities": [],
+                    "total_phases": 1,
+                }
+            ),
             # Group 3: risks
-            json.dumps({
-                "risks": [],
-                "overall_risk_level": "low",
-                "recommended_contingencies": [],
-            }),
+            json.dumps(
+                {
+                    "risks": [],
+                    "overall_risk_level": "low",
+                    "recommended_contingencies": [],
+                }
+            ),
         ]
 
         result = await stage.execute(mock_client, "Build", {})
@@ -826,7 +1021,9 @@ class TestRoadmapRiskStage:
         assert "risk" in result.output
         assert result.output["roadmap"]["total_phases"] == 1
         assert result.output["risk"]["overall_risk_level"] == "low"
-        assert mock_client.generate.call_count == 5  # 1 reasoning + 1 critique + 3 groups (concrete verification → no validator call)
+        assert (
+            mock_client.generate.call_count == 5
+        )  # 1 reasoning + 1 critique + 3 groups (concrete verification → no validator call)
 
     @pytest.mark.asyncio
     async def test_execute_partial_failure(self, stage):
@@ -870,9 +1067,9 @@ class TestDefaultStages:
         for i in range(len(ranges) - 1):
             current_end = ranges[i][1]
             next_start = ranges[i + 1][0]
-            assert (
-                current_end <= next_start
-            ), f"Overlap between stage {i} and {i+1}: {current_end} > {next_start}"
+            assert current_end <= next_start, (
+                f"Overlap between stage {i} and {i + 1}: {current_end} > {next_start}"
+            )
 
         assert ranges[0][0] >= 0.0
         assert ranges[-1][1] <= 1.0
@@ -951,9 +1148,7 @@ class TestExtractFieldGroup:
         mock_client = AsyncMock()
         mock_client.generate.return_value = '{"x": 1}'
 
-        await stage._extract_field_group(
-            mock_client, "reasoning", ["x"], '{"x": 0}', "my_group"
-        )
+        await stage._extract_field_group(mock_client, "reasoning", ["x"], '{"x": 0}', "my_group")
         assert "context:extracting:my_group" in reported
 
     @pytest.mark.asyncio
@@ -964,7 +1159,11 @@ class TestExtractFieldGroup:
         mock_client.generate.return_value = '{"x": 1}'
 
         await stage._extract_field_group(
-            mock_client, "reasoning", ["x"], '{"x": 0}', "grp",
+            mock_client,
+            "reasoning",
+            ["x"],
+            '{"x": 0}',
+            "grp",
             extra_context="## Codebase: has openai.py",
         )
         prompt = mock_client.generate.call_args.kwargs["messages"][1]["content"]
@@ -979,7 +1178,11 @@ class TestExtractFieldGroup:
         mock_client.generate.return_value = '{"x": 1}'
 
         await stage._extract_field_group(
-            mock_client, "reasoning", ["x"], '{"x": 0}', "grp",
+            mock_client,
+            "reasoning",
+            ["x"],
+            '{"x": 0}',
+            "grp",
         )
         prompt = mock_client.generate.call_args.kwargs["messages"][1]["content"]
         assert "CODEBASE CONTEXT" not in prompt
@@ -1010,14 +1213,16 @@ class TestSinglePassWithFallback:
         """Falls back to two-pass when single-pass returns non-JSON."""
         stage = ContextStage()
         mock_client = AsyncMock()
-        valid_json = json.dumps({
-            "project_description": "Test",
-            "key_requirements": [],
-            "constraints": [],
-            "existing_context": "",
-            "stakeholders": [],
-            "scope_boundaries": {},
-        })
+        valid_json = json.dumps(
+            {
+                "project_description": "Test",
+                "key_requirements": [],
+                "constraints": [],
+                "existing_context": "",
+                "stakeholders": [],
+                "scope_boundaries": {},
+            }
+        )
         # First call: single-pass returns prose
         # Second call: two-pass reasoning
         # Third call: two-pass formatting returns JSON
@@ -1055,7 +1260,14 @@ class TestSubstepCallback:
         mock_client.generate.side_effect = [
             "Reasoning...",
             "Reviewed reasoning...",  # critique
-            json.dumps({"project_description": "Test", "key_requirements": [], "constraints": [], "existing_context": ""}),
+            json.dumps(
+                {
+                    "project_description": "Test",
+                    "key_requirements": [],
+                    "constraints": [],
+                    "existing_context": "",
+                }
+            ),
             json.dumps({"stakeholders": [], "scope_boundaries": {}}),
             json.dumps({"existing_files": [], "needed_artifacts": []}),
             json.dumps({"assumptions": []}),
@@ -1085,7 +1297,9 @@ class TestSubstepCallback:
         mock_client.generate.side_effect = [
             "Reasoning...",
             "Reviewed reasoning...",  # critique
-            json.dumps({"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}),
+            json.dumps(
+                {"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}
+            ),
             json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
             json.dumps({"adrs": []}),
             json.dumps({"components": [], "data_model": {}}),
@@ -1113,7 +1327,9 @@ class TestSubstepCallback:
         mock_client.generate.side_effect = [
             "Reasoning...",
             "Reviewed reasoning...",  # critique
-            json.dumps({"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}),
+            json.dumps(
+                {"approaches": [], "recommended": "", "reasoning": "", "scope_statement": ""}
+            ),
             json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
             json.dumps({"adrs": []}),
             json.dumps({"components": [], "data_model": {}}),
@@ -1242,7 +1458,9 @@ class TestSelfCritique:
         mock_client.generate.return_value = "Refined and improved reasoning about the project."
 
         result = await stage._self_critique(
-            mock_client, "Original reasoning text.", "Build an API",
+            mock_client,
+            "Original reasoning text.",
+            "Build an API",
         )
         assert result == "Refined and improved reasoning about the project."
 
@@ -1254,7 +1472,9 @@ class TestSelfCritique:
         mock_client.generate.return_value = "Refined reasoning with codebase awareness."
 
         await stage._self_critique(
-            mock_client, "Original.", "Build API",
+            mock_client,
+            "Original.",
+            "Build API",
             krag_context="## Files\n- src/api.py: REST endpoints",
         )
         prompt = mock_client.generate.call_args.kwargs["messages"][1]["content"]
@@ -1269,7 +1489,9 @@ class TestSelfCritique:
         mock_client.generate.side_effect = RuntimeError("Connection failed")
 
         result = await stage._self_critique(
-            mock_client, "Original reasoning.", "Build API",
+            mock_client,
+            "Original reasoning.",
+            "Build API",
         )
         assert result == "Original reasoning."
 
@@ -1311,7 +1533,9 @@ class TestDevilAdvocate:
         mock_client.generate.return_value = "Corrected reasoning with fixed return types."
 
         result = await stage._devil_advocate(
-            mock_client, "Original reasoning.", "Build API",
+            mock_client,
+            "Original reasoning.",
+            "Build API",
             krag_context="## api.py\ndef chat() -> str: ...",
         )
         assert result == "Corrected reasoning with fixed return types."
@@ -1323,7 +1547,9 @@ class TestDevilAdvocate:
         mock_client = AsyncMock()
 
         result = await stage._devil_advocate(
-            mock_client, "Original reasoning.", "Build API",
+            mock_client,
+            "Original reasoning.",
+            "Build API",
         )
         assert result == "Original reasoning."
         mock_client.generate.assert_not_called()
@@ -1335,7 +1561,9 @@ class TestDevilAdvocate:
         mock_client.generate.return_value = "Corrected reasoning about chat()."
 
         await stage._devil_advocate(
-            mock_client, "Use hook to capture dict response.", "Build API",
+            mock_client,
+            "Use hook to capture dict response.",
+            "Build API",
             krag_context="def chat(prompt: str) -> str: ...",
         )
         prompt = mock_client.generate.call_args.kwargs["messages"][1]["content"]
@@ -1350,7 +1578,9 @@ class TestDevilAdvocate:
         mock_client.generate.side_effect = RuntimeError("LLM crashed")
 
         result = await stage._devil_advocate(
-            mock_client, "Original reasoning.", "Build API",
+            mock_client,
+            "Original reasoning.",
+            "Build API",
             krag_context="some code",
         )
         assert result == "Original reasoning."
@@ -1363,7 +1593,9 @@ class TestDevilAdvocate:
 
         original = "A" * 100
         result = await stage._devil_advocate(
-            mock_client, original, "Build API",
+            mock_client,
+            original,
+            "Build API",
             krag_context="some code",
         )
         assert result == original
@@ -1381,7 +1613,9 @@ class TestDevilAdvocate:
         mock_client.generate.return_value = "Corrected reasoning text here."
 
         await stage._devil_advocate(
-            mock_client, "Original.", "Build API",
+            mock_client,
+            "Original.",
+            "Build API",
             krag_context="some code",
         )
         assert "context:challenging" in reported
@@ -1570,9 +1804,11 @@ class TestEnsureCorrectArtifacts:
         from fitz_forge.planning.pipeline.validators import ensure_correct_artifacts
 
         mock_client = AsyncMock()
-        mock_client.generate.return_value = json.dumps([
-            {"filename": "app.py", "content": "fixed code"},
-        ])
+        mock_client.generate.return_value = json.dumps(
+            [
+                {"filename": "app.py", "content": "fixed code"},
+            ]
+        )
 
         merged = {
             "artifacts": [{"filename": "app.py", "content": "buggy code"}],
@@ -1639,15 +1875,20 @@ class TestReasonWithTools:
 
     def _make_agent_message(self, content=None, tool_calls=None):
         from fitz_forge.llm.types import AgentMessage
+
         return AgentMessage(
             content=content,
             tool_calls=tool_calls,
-            assistant_dict={"role": "assistant", "content": content,
-                           **({"tool_calls": []} if tool_calls else {})},
+            assistant_dict={
+                "role": "assistant",
+                "content": content,
+                **({"tool_calls": []} if tool_calls else {}),
+            },
         )
 
     def _make_tool_call(self, name, arguments, call_id="call_1"):
         from fitz_forge.llm.types import AgentToolCall
+
         return AgentToolCall(id=call_id, name=name, arguments=arguments)
 
     @pytest.mark.asyncio
@@ -1696,10 +1937,12 @@ class TestReasonWithTools:
         # Round 1: LLM requests a file
         tool_call = self._make_tool_call("read_file", {"path": "a.py"})
         # Round 2: LLM responds with analysis
-        client.generate_with_tools = AsyncMock(side_effect=[
-            self._make_agent_message(tool_calls=[tool_call]),
-            self._make_agent_message(content="After reading a.py: looks good"),
-        ])
+        client.generate_with_tools = AsyncMock(
+            side_effect=[
+                self._make_agent_message(tool_calls=[tool_call]),
+                self._make_agent_message(content="After reading a.py: looks good"),
+            ]
+        )
         client.tool_result_message = MagicMock(return_value={"role": "tool", "content": "x=1"})
         messages = [{"role": "user", "content": "test"}]
         prior = {"_file_contents": {"a.py": "x=1"}}
@@ -1714,10 +1957,12 @@ class TestReasonWithTools:
         stage = ContextStage()
         client = AsyncMock()
         tool_call = self._make_tool_call("read_files", {"paths": ["a.py", "b.py"]})
-        client.generate_with_tools = AsyncMock(side_effect=[
-            self._make_agent_message(tool_calls=[tool_call]),
-            self._make_agent_message(content="Both files analyzed"),
-        ])
+        client.generate_with_tools = AsyncMock(
+            side_effect=[
+                self._make_agent_message(tool_calls=[tool_call]),
+                self._make_agent_message(content="Both files analyzed"),
+            ]
+        )
         client.tool_result_message = MagicMock(
             return_value={"role": "tool", "content": "### a.py\nx=1\n\n### b.py\ny=2"}
         )
@@ -1733,10 +1978,12 @@ class TestReasonWithTools:
         stage = ContextStage()
         client = AsyncMock()
         tool_call = self._make_tool_call("read_file", {"path": "extra.py"})
-        client.generate_with_tools = AsyncMock(side_effect=[
-            self._make_agent_message(tool_calls=[tool_call]),
-            self._make_agent_message(content="Found extra on disk"),
-        ])
+        client.generate_with_tools = AsyncMock(
+            side_effect=[
+                self._make_agent_message(tool_calls=[tool_call]),
+                self._make_agent_message(content="Found extra on disk"),
+            ]
+        )
         client.tool_result_message = MagicMock(
             return_value={"role": "tool", "content": "def extra(): pass"}
         )
@@ -1761,9 +2008,7 @@ class TestReasonWithTools:
             return_value=self._make_agent_message(tool_calls=[tool_call])
         )
         client.generate = AsyncMock(return_value="forced completion")
-        client.tool_result_message = MagicMock(
-            return_value={"role": "tool", "content": "x=1"}
-        )
+        client.tool_result_message = MagicMock(return_value={"role": "tool", "content": "x=1"})
         messages = [{"role": "user", "content": "test"}]
         prior = {"_file_contents": {"a.py": "x=1"}}
         result = await stage._reason_with_tools(client, messages, prior, max_rounds=2)
@@ -1789,4 +2034,3 @@ class TestReasonWithTools:
         last_msg = call_args.kwargs["messages"][-1]["content"]
         assert "TOOL ACCESS" in last_msg
         assert "read_files" in last_msg
-

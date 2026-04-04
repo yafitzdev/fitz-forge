@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### 🚀 Added
+
+- Per-artifact generation with deterministic scoring (`3b8ef270`)
+- Class interface injection + deterministic repair for artifacts (`3acf4940`)
+- Type-aware deterministic repair — AST-based init attr extraction prevents false positives (`7e079300`)
+- Best-of-3 synthesis reasoning with scope consensus (`1bf4470f`)
+- Imported type API injection + stronger artifact rules (`9ecee911`)
+- F9 reference method injection — stubs replaced with real implementations (`a1418df4`)
+- F12 artifact filename cleanup — strip method suffixes + reject invalid names (`fbee7208`)
+- F13C fallback — derive approach from key_tradeoffs when empty (`d9d345e0`)
+- 14 documented failure patterns (F1–F14) with benchmarks and fixes (`6e2fcdd6`)
+- Ruff + mypy configuration with CI linting step
+- CONTRIBUTING.md with architecture guidelines and PR process
+- PR template with code quality checklist
+- Progressive examples directory (quickstart, config, MCP integration)
+- `tools/ci_check.py` — local pre-push verification (format + lint + optional tier1 tests)
+- `tools/pre_release.py` — comprehensive pre-release validation (format, lint, imports, tests, build)
+- Test tier markers (tier1–4) for selective CI stages
+- `docs/ARCHITECTURE.md` — standalone architecture reference with layer diagram and data flow
+- `docs/features/` — 13 detailed feature docs covering every pipeline stage and infrastructure component
+
+### 🔄 Changed
+
+- Compact synthesis prompts with budget-aware reasoning truncation (`8804d1e3`)
+- Sectioned extraction — roadmap/risk stages consume design output (`58aa3591`)
+- Reasoning compression for artifact prompts replaces hard truncation (`bbc6cf9a`)
+- Renamed fitz-graveyard → fitz-forge (package, CLI, config, all references) (`91b026f9`)
+
+### 🐛 Fixed
+
+- Reorder artifact prompt — rules+grounding FIRST, reasoning last (`91856485`)
+- Remove artificial caps, add budget-aware reasoning truncation (`9c23a62b`)
+- Skip known init attrs in type-aware repair to prevent false positives (`b538c970`)
+- Read uncompressed disk source for interface + type-map extraction (`68cc4219`)
+- Remove hardcoded field patterns + guard ambiguous import repair (`4fa7f067`)
+- Extend F12 to strip `::` method suffix (`15d726e6`)
+
+### 📊 Stats
+
+- Benchmark avg: 45.3/60 (up from 43.4 at v0.5.0), best individual: 53/60
+- Score progression: 40.1 → 40.6 → 42.5 → 42.7 → 45.3
+- 970+ tests
+
+---
+
 ## [0.5.0] - 2026-03-29
 
 ### 🎉 Highlights

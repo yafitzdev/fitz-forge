@@ -44,6 +44,7 @@ from fitz_forge.planning.pipeline.stages.artifact_resolution import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_client(**overrides):
     """Build an AsyncMock LLM client with generate() and optional generate_with_tools()."""
     client = AsyncMock()
@@ -55,6 +56,7 @@ def _make_mock_client(**overrides):
 # ---------------------------------------------------------------------------
 # DecisionDecompositionStage
 # ---------------------------------------------------------------------------
+
 
 class TestDecisionDecompositionStageMetadata:
     """Stage metadata: name, progress_range."""
@@ -111,24 +113,26 @@ class TestDecisionDecompositionParseOutput:
 
     def test_valid_json(self):
         stage = DecisionDecompositionStage()
-        raw = json.dumps({
-            "decisions": [
-                {
-                    "id": "d1",
-                    "question": "What pattern to use?",
-                    "relevant_files": ["engine.py"],
-                    "depends_on": [],
-                    "category": "pattern",
-                },
-                {
-                    "id": "d2",
-                    "question": "How to integrate?",
-                    "relevant_files": ["api.py"],
-                    "depends_on": ["d1"],
-                    "category": "integration",
-                },
-            ]
-        })
+        raw = json.dumps(
+            {
+                "decisions": [
+                    {
+                        "id": "d1",
+                        "question": "What pattern to use?",
+                        "relevant_files": ["engine.py"],
+                        "depends_on": [],
+                        "category": "pattern",
+                    },
+                    {
+                        "id": "d2",
+                        "question": "How to integrate?",
+                        "relevant_files": ["api.py"],
+                        "depends_on": ["d1"],
+                        "category": "integration",
+                    },
+                ]
+            }
+        )
         result = stage.parse_output(raw)
         assert len(result["decisions"]) == 2
         assert result["decisions"][0]["id"] == "d1"
@@ -149,24 +153,28 @@ class TestDecisionDecompositionExecute:
         """LLM returns valid decision list."""
         stage = DecisionDecompositionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "decisions": [
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
                 {
-                    "id": "d1",
-                    "question": "Which ORM to use?",
-                    "relevant_files": ["models.py"],
-                    "depends_on": [],
-                    "category": "technical",
-                },
-                {
-                    "id": "d2",
-                    "question": "How to handle auth?",
-                    "relevant_files": ["auth.py"],
-                    "depends_on": ["d1"],
-                    "category": "pattern",
-                },
-            ]
-        }))
+                    "decisions": [
+                        {
+                            "id": "d1",
+                            "question": "Which ORM to use?",
+                            "relevant_files": ["models.py"],
+                            "depends_on": [],
+                            "category": "technical",
+                        },
+                        {
+                            "id": "d2",
+                            "question": "How to handle auth?",
+                            "relevant_files": ["auth.py"],
+                            "depends_on": ["d1"],
+                            "category": "pattern",
+                        },
+                    ]
+                }
+            )
+        )
 
         result = await stage.execute(mock_client, "Build a REST API", {})
 
@@ -180,15 +188,19 @@ class TestDecisionDecompositionExecute:
         """Dependencies referencing non-existent decisions are removed."""
         stage = DecisionDecompositionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "decisions": [
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
                 {
-                    "id": "d1",
-                    "question": "Q1?",
-                    "depends_on": ["d_nonexistent"],
-                },
-            ]
-        }))
+                    "decisions": [
+                        {
+                            "id": "d1",
+                            "question": "Q1?",
+                            "depends_on": ["d_nonexistent"],
+                        },
+                    ]
+                }
+            )
+        )
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -200,9 +212,7 @@ class TestDecisionDecompositionExecute:
         """Non-JSON output causes stage failure, not crash."""
         stage = DecisionDecompositionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            return_value="This is not JSON at all, just thinking..."
-        )
+        mock_client.generate = AsyncMock(return_value="This is not JSON at all, just thinking...")
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -214,9 +224,7 @@ class TestDecisionDecompositionExecute:
         """LLM client error produces a failed StageResult, not an exception."""
         stage = DecisionDecompositionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("Connection refused")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("Connection refused"))
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -235,9 +243,7 @@ class TestDecisionDecompositionExecute:
         stage.set_substep_callback(track)
 
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            return_value=json.dumps({"decisions": []})
-        )
+        mock_client.generate = AsyncMock(return_value=json.dumps({"decisions": []}))
 
         await stage.execute(mock_client, "Task", {})
         assert "decision_decomposition:decomposing" in reported
@@ -246,6 +252,7 @@ class TestDecisionDecompositionExecute:
 # ---------------------------------------------------------------------------
 # TopologicalSort (helper for DecisionResolutionStage)
 # ---------------------------------------------------------------------------
+
 
 class TestTopologicalSort:
     """Test topological ordering of decisions."""
@@ -308,6 +315,7 @@ class TestTopologicalSort:
 # DecisionResolutionStage
 # ---------------------------------------------------------------------------
 
+
 class TestDecisionResolutionStageMetadata:
     """Stage metadata."""
 
@@ -331,13 +339,15 @@ class TestDecisionResolutionParseOutput:
 
     def test_valid_resolution(self):
         stage = DecisionResolutionStage()
-        raw = json.dumps({
-            "decision_id": "d1",
-            "decision": "Use SQLAlchemy ORM",
-            "reasoning": "Best fit for the project",
-            "evidence": ["models.py: uses Base class"],
-            "constraints_for_downstream": ["Must use async session"],
-        })
+        raw = json.dumps(
+            {
+                "decision_id": "d1",
+                "decision": "Use SQLAlchemy ORM",
+                "reasoning": "Best fit for the project",
+                "evidence": ["models.py: uses Base class"],
+                "constraints_for_downstream": ["Must use async session"],
+            }
+        )
         result = stage.parse_output(raw)
         assert result["decision_id"] == "d1"
         assert result["decision"] == "Use SQLAlchemy ORM"
@@ -355,22 +365,28 @@ class TestDecisionResolutionExecute:
         mock_client = AsyncMock()
 
         # Two LLM calls: one per decision
-        mock_client.generate = AsyncMock(side_effect=[
-            json.dumps({
-                "decision_id": "d1",
-                "decision": "Use REST",
-                "reasoning": "Simple and standard",
-                "evidence": ["api.py: has REST routes"],
-                "constraints_for_downstream": ["Must use HTTP verbs"],
-            }),
-            json.dumps({
-                "decision_id": "d2",
-                "decision": "Use JWT auth",
-                "reasoning": "Stateless",
-                "evidence": [],
-                "constraints_for_downstream": [],
-            }),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                json.dumps(
+                    {
+                        "decision_id": "d1",
+                        "decision": "Use REST",
+                        "reasoning": "Simple and standard",
+                        "evidence": ["api.py: has REST routes"],
+                        "constraints_for_downstream": ["Must use HTTP verbs"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "decision_id": "d2",
+                        "decision": "Use JWT auth",
+                        "reasoning": "Stateless",
+                        "evidence": [],
+                        "constraints_for_downstream": [],
+                    }
+                ),
+            ]
+        )
 
         prior = {
             "decision_decomposition": {
@@ -430,22 +446,28 @@ class TestDecisionResolutionExecute:
         stage = DecisionResolutionStage()
         mock_client = AsyncMock()
 
-        mock_client.generate = AsyncMock(side_effect=[
-            json.dumps({
-                "decision_id": "d1",
-                "decision": "Use REST",
-                "reasoning": "Standard",
-                "evidence": [],
-                "constraints_for_downstream": ["API must be RESTful"],
-            }),
-            json.dumps({
-                "decision_id": "d2",
-                "decision": "JSON format",
-                "reasoning": "REST standard",
-                "evidence": [],
-                "constraints_for_downstream": [],
-            }),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                json.dumps(
+                    {
+                        "decision_id": "d1",
+                        "decision": "Use REST",
+                        "reasoning": "Standard",
+                        "evidence": [],
+                        "constraints_for_downstream": ["API must be RESTful"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "decision_id": "d2",
+                        "decision": "JSON format",
+                        "reasoning": "REST standard",
+                        "evidence": [],
+                        "constraints_for_downstream": [],
+                    }
+                ),
+            ]
+        )
 
         prior = {
             "decision_decomposition": {
@@ -470,13 +492,17 @@ class TestDecisionResolutionExecute:
         mock_client = AsyncMock()
 
         # Only one LLM call — d1 is already resolved
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "decision_id": "d2",
-            "decision": "Use JWT",
-            "reasoning": "Stateless",
-            "evidence": [],
-            "constraints_for_downstream": [],
-        }))
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "decision_id": "d2",
+                    "decision": "Use JWT",
+                    "reasoning": "Stateless",
+                    "evidence": [],
+                    "constraints_for_downstream": [],
+                }
+            )
+        )
 
         prior = {
             "decision_decomposition": {
@@ -505,13 +531,17 @@ class TestDecisionResolutionExecute:
         """File contents from prior_outputs are included in the decision prompt."""
         stage = DecisionResolutionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "decision_id": "d1",
-            "decision": "Extend Engine",
-            "reasoning": "Has the right interface",
-            "evidence": ["engine.py: class Engine"],
-            "constraints_for_downstream": [],
-        }))
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "decision_id": "d1",
+                    "decision": "Extend Engine",
+                    "reasoning": "Has the right interface",
+                    "evidence": ["engine.py: class Engine"],
+                    "constraints_for_downstream": [],
+                }
+            )
+        )
 
         prior = {
             "decision_decomposition": {
@@ -540,9 +570,7 @@ class TestDecisionResolutionExecute:
         """Client exception produces failed result."""
         stage = DecisionResolutionStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("OOM")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("OOM"))
 
         prior = {
             "decision_decomposition": {
@@ -561,6 +589,7 @@ class TestDecisionResolutionExecute:
 # ---------------------------------------------------------------------------
 # SynthesisStage
 # ---------------------------------------------------------------------------
+
 
 class TestSynthesisStageMetadata:
     """Stage metadata."""
@@ -620,101 +649,155 @@ class TestSynthesisExecute:
         # Roadmap: phases, scheduling (2)
         # Risk: risks (1)
         # Total: 3 synthesis (best-of-3) + 1 critique + 4 + 2 + 3 + 1 + 2 + 1 = 17
-        mock_client.generate = AsyncMock(side_effect=[
-            # 1a. Synthesis reasoning candidate 1
-            "Comprehensive synthesis of all decisions into a coherent plan...",
-            # 1b. Synthesis reasoning candidate 2
-            "Alternative synthesis reasoning for best-of-3 selection...",
-            # 1c. Synthesis reasoning candidate 3
-            "Third synthesis candidate for scope consensus...",
-            # 2. Self-critique
-            "Reviewed and refined synthesis...",
-            # Context groups
-            json.dumps({
-                "project_description": "REST API for task management",
-                "key_requirements": ["CRUD operations"],
-                "constraints": ["Python 3.12+"],
-                "existing_context": "",
-            }),
-            json.dumps({
-                "stakeholders": ["Developers"],
-                "scope_boundaries": {"in_scope": ["API"], "out_of_scope": ["UI"]},
-            }),
-            json.dumps({
-                "existing_files": ["models.py"],
-                "needed_artifacts": ["routes.py"],
-            }),
-            json.dumps({
-                "assumptions": [],
-            }),
-            # Architecture groups
-            json.dumps({
-                "approaches": [
-                    {"name": "Monolith", "description": "Single service",
-                     "pros": ["Simple"], "cons": ["Scaling"],
-                     "complexity": "low", "best_for": ["MVP"]},
-                ],
-                "recommended": "Monolith",
-                "reasoning": "Best for MVP",
-                "scope_statement": "Small REST API",
-            }),
-            json.dumps({
-                "key_tradeoffs": {"simplicity": "vs scale"},
-                "technology_considerations": ["FastAPI"],
-            }),
-            # Design groups (adrs, components, integrations)
-            json.dumps({
-                "adrs": [
-                    {"title": "ADR: Use SQLite", "context": "Simple DB",
-                     "decision": "SQLite", "rationale": "Embedded",
-                     "consequences": ["No clustering"],
-                     "alternatives_considered": ["PostgreSQL"]},
-                ],
-            }),
-            json.dumps({
-                "components": [
-                    {"name": "Router", "purpose": "HTTP routing",
-                     "responsibilities": ["route requests"],
-                     "interfaces": ["GET /tasks"], "dependencies": ["DB"]},
-                ],
-                "data_model": {"Task": ["id: int", "title: str"]},
-            }),
-            json.dumps({
-                "integration_points": ["SQLite database"],
-            }),
-            # Design: artifacts are now generated per-file (one call per needed artifact)
-            # This replaces the old monolithic extraction
-            json.dumps({
-                "filename": "routes.py",
-                "content": "from fastapi import APIRouter",
-                "purpose": "API routes",
-            }),
-            # Roadmap groups
-            json.dumps({
-                "phases": [
-                    {"number": 1, "name": "Setup", "objective": "Initialize project",
-                     "deliverables": ["pyproject.toml"], "dependencies": [],
-                     "estimated_complexity": "low", "key_risks": [],
-                     "verification_command": "pytest tests/", "estimated_effort": "~1h"},
-                ],
-            }),
-            json.dumps({
-                "critical_path": [1],
-                "parallel_opportunities": [],
-                "total_phases": 1,
-            }),
-            # Risk group
-            json.dumps({
-                "risks": [
-                    {"category": "technical", "description": "SQLite concurrency",
-                     "impact": "medium", "likelihood": "low",
-                     "mitigation": "Use WAL mode", "contingency": "Switch to Postgres",
-                     "affected_phases": [1], "verification": "test concurrent writes"},
-                ],
-                "overall_risk_level": "low",
-                "recommended_contingencies": ["Have Postgres fallback"],
-            }),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                # 1a. Synthesis reasoning candidate 1
+                "Comprehensive synthesis of all decisions into a coherent plan...",
+                # 1b. Synthesis reasoning candidate 2
+                "Alternative synthesis reasoning for best-of-3 selection...",
+                # 1c. Synthesis reasoning candidate 3
+                "Third synthesis candidate for scope consensus...",
+                # 2. Self-critique
+                "Reviewed and refined synthesis...",
+                # Context groups
+                json.dumps(
+                    {
+                        "project_description": "REST API for task management",
+                        "key_requirements": ["CRUD operations"],
+                        "constraints": ["Python 3.12+"],
+                        "existing_context": "",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "stakeholders": ["Developers"],
+                        "scope_boundaries": {"in_scope": ["API"], "out_of_scope": ["UI"]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "existing_files": ["models.py"],
+                        "needed_artifacts": ["routes.py"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "assumptions": [],
+                    }
+                ),
+                # Architecture groups
+                json.dumps(
+                    {
+                        "approaches": [
+                            {
+                                "name": "Monolith",
+                                "description": "Single service",
+                                "pros": ["Simple"],
+                                "cons": ["Scaling"],
+                                "complexity": "low",
+                                "best_for": ["MVP"],
+                            },
+                        ],
+                        "recommended": "Monolith",
+                        "reasoning": "Best for MVP",
+                        "scope_statement": "Small REST API",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "key_tradeoffs": {"simplicity": "vs scale"},
+                        "technology_considerations": ["FastAPI"],
+                    }
+                ),
+                # Design groups (adrs, components, integrations)
+                json.dumps(
+                    {
+                        "adrs": [
+                            {
+                                "title": "ADR: Use SQLite",
+                                "context": "Simple DB",
+                                "decision": "SQLite",
+                                "rationale": "Embedded",
+                                "consequences": ["No clustering"],
+                                "alternatives_considered": ["PostgreSQL"],
+                            },
+                        ],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "components": [
+                            {
+                                "name": "Router",
+                                "purpose": "HTTP routing",
+                                "responsibilities": ["route requests"],
+                                "interfaces": ["GET /tasks"],
+                                "dependencies": ["DB"],
+                            },
+                        ],
+                        "data_model": {"Task": ["id: int", "title: str"]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "integration_points": ["SQLite database"],
+                    }
+                ),
+                # Design: artifacts are now generated per-file (one call per needed artifact)
+                # This replaces the old monolithic extraction
+                json.dumps(
+                    {
+                        "filename": "routes.py",
+                        "content": "from fastapi import APIRouter",
+                        "purpose": "API routes",
+                    }
+                ),
+                # Roadmap groups
+                json.dumps(
+                    {
+                        "phases": [
+                            {
+                                "number": 1,
+                                "name": "Setup",
+                                "objective": "Initialize project",
+                                "deliverables": ["pyproject.toml"],
+                                "dependencies": [],
+                                "estimated_complexity": "low",
+                                "key_risks": [],
+                                "verification_command": "pytest tests/",
+                                "estimated_effort": "~1h",
+                            },
+                        ],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "critical_path": [1],
+                        "parallel_opportunities": [],
+                        "total_phases": 1,
+                    }
+                ),
+                # Risk group
+                json.dumps(
+                    {
+                        "risks": [
+                            {
+                                "category": "technical",
+                                "description": "SQLite concurrency",
+                                "impact": "medium",
+                                "likelihood": "low",
+                                "mitigation": "Use WAL mode",
+                                "contingency": "Switch to Postgres",
+                                "affected_phases": [1],
+                                "verification": "test concurrent writes",
+                            },
+                        ],
+                        "overall_risk_level": "low",
+                        "recommended_contingencies": ["Have Postgres fallback"],
+                    }
+                ),
+            ]
+        )
 
         result = await stage.execute(mock_client, "Build a task management API", {})
 
@@ -764,9 +847,7 @@ class TestSynthesisExecute:
         """Client exception on synthesis reasoning produces failed result."""
         stage = SynthesisStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("Model crashed")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("Model crashed"))
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -804,6 +885,7 @@ class TestSynthesisExecute:
 # ---------------------------------------------------------------------------
 # ArtifactResolution (function-based, not a stage class)
 # ---------------------------------------------------------------------------
+
 
 class TestFindRelevantResolutions:
     """Test resolution-to-file matching."""
@@ -905,11 +987,15 @@ class TestResolveArtifacts:
     async def test_happy_path(self):
         """Generates one artifact per needed file."""
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "filename": "routes.py",
-            "content": "from fastapi import APIRouter\nrouter = APIRouter()",
-            "purpose": "API routing",
-        }))
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "filename": "routes.py",
+                    "content": "from fastapi import APIRouter\nrouter = APIRouter()",
+                    "purpose": "API routing",
+                }
+            )
+        )
 
         prior = {
             "decision_resolution": {
@@ -948,8 +1034,13 @@ class TestResolveArtifacts:
         prior = {
             "decision_resolution": {
                 "resolutions": [
-                    {"decision_id": "d1", "decision": "x", "reasoning": "y",
-                     "evidence": [], "constraints_for_downstream": []},
+                    {
+                        "decision_id": "d1",
+                        "decision": "x",
+                        "reasoning": "y",
+                        "evidence": [],
+                        "constraints_for_downstream": [],
+                    },
                 ],
             },
             "context": {"needed_artifacts": []},
@@ -961,15 +1052,18 @@ class TestResolveArtifacts:
     async def test_llm_failure_returns_error_artifact(self):
         """LLM failure produces an artifact with error message, not crash."""
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("Model OOM")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("Model OOM"))
 
         prior = {
             "decision_resolution": {
                 "resolutions": [
-                    {"decision_id": "d1", "decision": "x", "reasoning": "y",
-                     "evidence": [], "constraints_for_downstream": []},
+                    {
+                        "decision_id": "d1",
+                        "decision": "x",
+                        "reasoning": "y",
+                        "evidence": [],
+                        "constraints_for_downstream": [],
+                    },
                 ],
             },
             "context": {
@@ -986,17 +1080,26 @@ class TestResolveArtifacts:
     async def test_caps_at_five_artifacts(self):
         """Never generates more than 5 artifacts."""
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(return_value=json.dumps({
-            "filename": "f.py",
-            "content": "# code",
-            "purpose": "test",
-        }))
+        mock_client.generate = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "filename": "f.py",
+                    "content": "# code",
+                    "purpose": "test",
+                }
+            )
+        )
 
         prior = {
             "decision_resolution": {
                 "resolutions": [
-                    {"decision_id": "d1", "decision": "x", "reasoning": "y",
-                     "evidence": [], "constraints_for_downstream": []},
+                    {
+                        "decision_id": "d1",
+                        "decision": "x",
+                        "reasoning": "y",
+                        "evidence": [],
+                        "constraints_for_downstream": [],
+                    },
                 ],
             },
             "context": {
@@ -1014,6 +1117,7 @@ class TestResolveArtifacts:
 # ContextStage — deeper coverage
 # ---------------------------------------------------------------------------
 
+
 class TestContextStageDeeper:
     """Additional ContextStage tests beyond test_stages.py."""
 
@@ -1023,28 +1127,36 @@ class TestContextStageDeeper:
 
     def test_parse_output_with_assumptions(self, stage):
         """parse_output handles assumptions field."""
-        raw = json.dumps({
-            "project_description": "A task tracker",
-            "key_requirements": ["CRUD"],
-            "constraints": [],
-            "existing_context": "",
-            "stakeholders": [],
-            "scope_boundaries": {},
-            "existing_files": [],
-            "needed_artifacts": [],
-            "assumptions": [
-                {"assumption": "REST not GraphQL", "impact": "Architecture changes", "confidence": "medium"},
-            ],
-        })
+        raw = json.dumps(
+            {
+                "project_description": "A task tracker",
+                "key_requirements": ["CRUD"],
+                "constraints": [],
+                "existing_context": "",
+                "stakeholders": [],
+                "scope_boundaries": {},
+                "existing_files": [],
+                "needed_artifacts": [],
+                "assumptions": [
+                    {
+                        "assumption": "REST not GraphQL",
+                        "impact": "Architecture changes",
+                        "confidence": "medium",
+                    },
+                ],
+            }
+        )
         result = stage.parse_output(raw)
         assert len(result["assumptions"]) == 1
         assert result["assumptions"][0]["assumption"] == "REST not GraphQL"
 
     def test_parse_output_minimal_input(self, stage):
         """parse_output fills defaults for missing fields."""
-        raw = json.dumps({
-            "project_description": "Minimal project",
-        })
+        raw = json.dumps(
+            {
+                "project_description": "Minimal project",
+            }
+        )
         result = stage.parse_output(raw)
         assert result["project_description"] == "Minimal project"
         assert result["key_requirements"] == []
@@ -1054,14 +1166,23 @@ class TestContextStageDeeper:
     async def test_execute_with_implementation_check(self, stage):
         """Implementation check is injected into prompt."""
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(side_effect=[
-            "Reasoning with impl check...",
-            "Critique...",
-            json.dumps({"project_description": "P", "key_requirements": [], "constraints": [], "existing_context": ""}),
-            json.dumps({"stakeholders": [], "scope_boundaries": {}}),
-            json.dumps({"existing_files": [], "needed_artifacts": []}),
-            json.dumps({"assumptions": []}),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                "Reasoning with impl check...",
+                "Critique...",
+                json.dumps(
+                    {
+                        "project_description": "P",
+                        "key_requirements": [],
+                        "constraints": [],
+                        "existing_context": "",
+                    }
+                ),
+                json.dumps({"stakeholders": [], "scope_boundaries": {}}),
+                json.dumps({"existing_files": [], "needed_artifacts": []}),
+                json.dumps({"assumptions": []}),
+            ]
+        )
 
         prior = {
             "_implementation_check": {
@@ -1076,7 +1197,9 @@ class TestContextStageDeeper:
 
         # The reasoning call should have the impl check in its prompt
         calls = mock_client.generate.call_args_list
-        first_call_messages = calls[0].kwargs.get("messages", calls[0].args[0] if calls[0].args else [])
+        first_call_messages = calls[0].kwargs.get(
+            "messages", calls[0].args[0] if calls[0].args else []
+        )
         # Implementation check content should be in the prompt
         prompt_content = str(first_call_messages)
         assert "already_implemented" in prompt_content or "Found in engine.py" in prompt_content
@@ -1085,9 +1208,7 @@ class TestContextStageDeeper:
     async def test_execute_complete_failure(self, stage):
         """Exception during execute produces failed StageResult."""
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("Connection lost")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("Connection lost"))
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -1098,6 +1219,7 @@ class TestContextStageDeeper:
 # ---------------------------------------------------------------------------
 # ArchitectureDesignStage — deeper coverage
 # ---------------------------------------------------------------------------
+
 
 class TestArchitectureDesignStageDeeper:
     """Additional ArchitectureDesignStage tests."""
@@ -1114,19 +1236,26 @@ class TestArchitectureDesignStageDeeper:
     def test_parse_output_missing_design_fields(self):
         """parse_output fills design defaults for missing fields."""
         stage = ArchitectureDesignStage()
-        raw = json.dumps({
-            "approaches": [
-                {"name": "Simple", "description": "Basic approach",
-                 "pros": ["Fast"], "cons": ["Limited"],
-                 "complexity": "low", "best_for": ["MVP"]},
-            ],
-            "recommended": "Simple",
-            "reasoning": "Good enough",
-            "key_tradeoffs": {},
-            "technology_considerations": [],
-            "scope_statement": "Small project",
-            # Missing all design fields
-        })
+        raw = json.dumps(
+            {
+                "approaches": [
+                    {
+                        "name": "Simple",
+                        "description": "Basic approach",
+                        "pros": ["Fast"],
+                        "cons": ["Limited"],
+                        "complexity": "low",
+                        "best_for": ["MVP"],
+                    },
+                ],
+                "recommended": "Simple",
+                "reasoning": "Good enough",
+                "key_tradeoffs": {},
+                "technology_considerations": [],
+                "scope_statement": "Small project",
+                # Missing all design fields
+            }
+        )
         result = stage.parse_output(raw)
         assert result["design"]["adrs"] == []
         assert result["design"]["components"] == []
@@ -1137,17 +1266,19 @@ class TestArchitectureDesignStageDeeper:
     def test_parse_output_missing_arch_fields(self):
         """parse_output fills architecture defaults for missing fields."""
         stage = ArchitectureDesignStage()
-        raw = json.dumps({
-            "approaches": [],
-            "recommended": "",
-            "reasoning": "",
-            # Missing key_tradeoffs, technology_considerations, scope_statement
-            "adrs": [],
-            "components": [],
-            "data_model": {},
-            "integration_points": [],
-            "artifacts": [],
-        })
+        raw = json.dumps(
+            {
+                "approaches": [],
+                "recommended": "",
+                "reasoning": "",
+                # Missing key_tradeoffs, technology_considerations, scope_statement
+                "adrs": [],
+                "components": [],
+                "data_model": {},
+                "integration_points": [],
+                "artifacts": [],
+            }
+        )
         result = stage.parse_output(raw)
         assert result["architecture"]["key_tradeoffs"] == {}
         assert result["architecture"]["technology_considerations"] == []
@@ -1176,32 +1307,60 @@ class TestArchitectureDesignStageDeeper:
         mock_client = AsyncMock()
 
         # Split mode: arch reasoning + design reasoning + critique + 6 field groups + ADR validator
-        mock_client.generate = AsyncMock(side_effect=[
-            # Architecture reasoning
-            "Architecture analysis: recommend monolith...",
-            # Design reasoning
-            "Design decisions: use SQLite, JWT auth...",
-            # Critique (on combined)
-            "Reviewed combined reasoning...",
-            # 6 field groups
-            json.dumps({
-                "approaches": [{"name": "Mono", "description": "Single",
-                                "pros": [], "cons": [], "complexity": "low", "best_for": []}],
-                "recommended": "Mono", "reasoning": "Simple", "scope_statement": "Small",
-            }),
-            json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
-            json.dumps({"adrs": []}),
-            json.dumps({"components": [], "data_model": {}}),
-            json.dumps({"integration_points": []}),
-            json.dumps({"artifacts": []}),
-            # ADR validator
-            json.dumps([
-                {"title": "ADR: Generated", "context": "c", "decision": "d",
-                 "rationale": "r", "consequences": [], "alternatives_considered": []},
-                {"title": "ADR: Generated 2", "context": "c2", "decision": "d2",
-                 "rationale": "r2", "consequences": [], "alternatives_considered": []},
-            ]),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                # Architecture reasoning
+                "Architecture analysis: recommend monolith...",
+                # Design reasoning
+                "Design decisions: use SQLite, JWT auth...",
+                # Critique (on combined)
+                "Reviewed combined reasoning...",
+                # 6 field groups
+                json.dumps(
+                    {
+                        "approaches": [
+                            {
+                                "name": "Mono",
+                                "description": "Single",
+                                "pros": [],
+                                "cons": [],
+                                "complexity": "low",
+                                "best_for": [],
+                            }
+                        ],
+                        "recommended": "Mono",
+                        "reasoning": "Simple",
+                        "scope_statement": "Small",
+                    }
+                ),
+                json.dumps({"key_tradeoffs": {}, "technology_considerations": []}),
+                json.dumps({"adrs": []}),
+                json.dumps({"components": [], "data_model": {}}),
+                json.dumps({"integration_points": []}),
+                json.dumps({"artifacts": []}),
+                # ADR validator
+                json.dumps(
+                    [
+                        {
+                            "title": "ADR: Generated",
+                            "context": "c",
+                            "decision": "d",
+                            "rationale": "r",
+                            "consequences": [],
+                            "alternatives_considered": [],
+                        },
+                        {
+                            "title": "ADR: Generated 2",
+                            "context": "c2",
+                            "decision": "d2",
+                            "rationale": "r2",
+                            "consequences": [],
+                            "alternatives_considered": [],
+                        },
+                    ]
+                ),
+            ]
+        )
 
         result = await stage.execute(mock_client, "Build API", {})
 
@@ -1217,9 +1376,7 @@ class TestArchitectureDesignStageDeeper:
         """Exception in execute produces failed StageResult."""
         stage = ArchitectureDesignStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("GPU OOM")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("GPU OOM"))
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -1230,6 +1387,7 @@ class TestArchitectureDesignStageDeeper:
 # ---------------------------------------------------------------------------
 # RoadmapRiskStage — deeper coverage
 # ---------------------------------------------------------------------------
+
 
 class TestRoadmapRiskStageDeeper:
     """Additional RoadmapRiskStage tests."""
@@ -1246,19 +1404,27 @@ class TestRoadmapRiskStageDeeper:
     def test_parse_output_num_field_normalization(self):
         """'num' field is normalized to 'number'."""
         stage = RoadmapRiskStage()
-        raw = json.dumps({
-            "phases": [
-                {"num": 1, "name": "Setup", "objective": "Init",
-                 "deliverables": [], "dependencies": [],
-                 "estimated_complexity": "low", "key_risks": []},
-            ],
-            "critical_path": [1],
-            "parallel_opportunities": [],
-            "total_phases": 1,
-            "risks": [],
-            "overall_risk_level": "low",
-            "recommended_contingencies": [],
-        })
+        raw = json.dumps(
+            {
+                "phases": [
+                    {
+                        "num": 1,
+                        "name": "Setup",
+                        "objective": "Init",
+                        "deliverables": [],
+                        "dependencies": [],
+                        "estimated_complexity": "low",
+                        "key_risks": [],
+                    },
+                ],
+                "critical_path": [1],
+                "parallel_opportunities": [],
+                "total_phases": 1,
+                "risks": [],
+                "overall_risk_level": "low",
+                "recommended_contingencies": [],
+            }
+        )
         result = stage.parse_output(raw)
         assert result["roadmap"]["phases"][0]["number"] == 1
 
@@ -1290,12 +1456,15 @@ class TestRoadmapRiskStageDeeper:
             },
             "design": {
                 "components": [
-                    {"name": "Router", "purpose": "Routing",
-                     "interfaces": ["GET /tasks"], "dependencies": []},
+                    {
+                        "name": "Router",
+                        "purpose": "Routing",
+                        "interfaces": ["GET /tasks"],
+                        "dependencies": [],
+                    },
                 ],
                 "adrs": [
-                    {"title": "Use JWT", "decision": "JWT tokens",
-                     "rationale": "Stateless"},
+                    {"title": "Use JWT", "decision": "JWT tokens", "rationale": "Stateless"},
                 ],
                 "integration_points": ["Database"],
                 "artifacts": [
@@ -1317,34 +1486,48 @@ class TestRoadmapRiskStageDeeper:
         stage = RoadmapRiskStage(split_reasoning=True)
         mock_client = AsyncMock()
 
-        mock_client.generate = AsyncMock(side_effect=[
-            # Roadmap reasoning
-            "Roadmap: Phase 1 setup, Phase 2 core...",
-            # Risk reasoning
-            "Risk analysis: technical risk medium...",
-            # Critique
-            "Reviewed combined reasoning...",
-            # 3 field groups
-            json.dumps({
-                "phases": [
-                    {"number": 1, "name": "Setup", "objective": "Init",
-                     "deliverables": ["project skeleton"], "dependencies": [],
-                     "estimated_complexity": "low", "key_risks": [],
-                     "verification_command": "pytest tests/test_setup.py -v",
-                     "estimated_effort": "~1h"},
-                ],
-            }),
-            json.dumps({
-                "critical_path": [1],
-                "parallel_opportunities": [],
-                "total_phases": 1,
-            }),
-            json.dumps({
-                "risks": [],
-                "overall_risk_level": "low",
-                "recommended_contingencies": [],
-            }),
-        ])
+        mock_client.generate = AsyncMock(
+            side_effect=[
+                # Roadmap reasoning
+                "Roadmap: Phase 1 setup, Phase 2 core...",
+                # Risk reasoning
+                "Risk analysis: technical risk medium...",
+                # Critique
+                "Reviewed combined reasoning...",
+                # 3 field groups
+                json.dumps(
+                    {
+                        "phases": [
+                            {
+                                "number": 1,
+                                "name": "Setup",
+                                "objective": "Init",
+                                "deliverables": ["project skeleton"],
+                                "dependencies": [],
+                                "estimated_complexity": "low",
+                                "key_risks": [],
+                                "verification_command": "pytest tests/test_setup.py -v",
+                                "estimated_effort": "~1h",
+                            },
+                        ],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "critical_path": [1],
+                        "parallel_opportunities": [],
+                        "total_phases": 1,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "risks": [],
+                        "overall_risk_level": "low",
+                        "recommended_contingencies": [],
+                    }
+                ),
+            ]
+        )
 
         result = await stage.execute(mock_client, "Build", {})
 
@@ -1359,9 +1542,7 @@ class TestRoadmapRiskStageDeeper:
         """Exception produces failed StageResult."""
         stage = RoadmapRiskStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("Timeout")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("Timeout"))
 
         result = await stage.execute(mock_client, "Task", {})
 
@@ -1372,6 +1553,7 @@ class TestRoadmapRiskStageDeeper:
 # ---------------------------------------------------------------------------
 # StageResult dataclass
 # ---------------------------------------------------------------------------
+
 
 class TestStageResult:
     """Test the StageResult dataclass."""
@@ -1403,6 +1585,7 @@ class TestStageResult:
 # ---------------------------------------------------------------------------
 # Base class helper methods
 # ---------------------------------------------------------------------------
+
 
 class TestBaseClassHelpers:
     """Test helper methods on PipelineStage base class."""
@@ -1497,6 +1680,7 @@ class TestBaseClassHelpers:
 # Self-critique behavior
 # ---------------------------------------------------------------------------
 
+
 class TestSelfCritique:
     """Test the _self_critique method on PipelineStage."""
 
@@ -1531,9 +1715,7 @@ class TestSelfCritique:
         stage = ContextStage()
         mock_client = AsyncMock()
         original = "Original reasoning text"
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("LLM down")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
 
         result = await stage._self_critique(mock_client, original, "Task")
         assert result == original
@@ -1546,7 +1728,9 @@ class TestSelfCritique:
         mock_client.generate = AsyncMock(return_value="A" * 3000)
 
         await stage._self_critique(
-            mock_client, "reasoning", "Task",
+            mock_client,
+            "reasoning",
+            "Task",
             krag_context="## Codebase\ndef important_function(): pass",
         )
 
@@ -1559,6 +1743,7 @@ class TestSelfCritique:
 # ---------------------------------------------------------------------------
 # Devil's advocate behavior
 # ---------------------------------------------------------------------------
+
 
 class TestDevilsAdvocate:
     """Test the _devil_advocate method on PipelineStage."""
@@ -1583,9 +1768,7 @@ class TestDevilsAdvocate:
         refined = "B" * 2500
         mock_client.generate = AsyncMock(return_value=refined)
 
-        result = await stage._devil_advocate(
-            mock_client, original, "Task", krag_context="## Code"
-        )
+        result = await stage._devil_advocate(mock_client, original, "Task", krag_context="## Code")
         assert result == refined
 
     @pytest.mark.asyncio
@@ -1594,19 +1777,16 @@ class TestDevilsAdvocate:
         stage = ContextStage()
         mock_client = AsyncMock()
         original = "Original reasoning"
-        mock_client.generate = AsyncMock(
-            side_effect=RuntimeError("GPU fault")
-        )
+        mock_client.generate = AsyncMock(side_effect=RuntimeError("GPU fault"))
 
-        result = await stage._devil_advocate(
-            mock_client, original, "Task", krag_context="## Code"
-        )
+        result = await stage._devil_advocate(mock_client, original, "Task", krag_context="## Code")
         assert result == original
 
 
 # ---------------------------------------------------------------------------
 # Extract field group behavior
 # ---------------------------------------------------------------------------
+
 
 class TestExtractFieldGroupDeeper:
     """Deeper tests for _extract_field_group beyond test_stages.py."""
@@ -1622,7 +1802,8 @@ class TestExtractFieldGroupDeeper:
         )
 
         result = await stage._extract_field_group(
-            mock_client, "reasoning",
+            mock_client,
+            "reasoning",
             ["project_description", "key_requirements"],
             '{"project_description": "str", "key_requirements": []}',
             "description",
@@ -1635,12 +1816,14 @@ class TestExtractFieldGroupDeeper:
         """JSON wrapped in code fences is extracted."""
         stage = ContextStage()
         mock_client = AsyncMock()
-        mock_client.generate = AsyncMock(
-            return_value='```json\n{"key": "value"}\n```'
-        )
+        mock_client.generate = AsyncMock(return_value='```json\n{"key": "value"}\n```')
 
         result = await stage._extract_field_group(
-            mock_client, "reasoning", ["key"], '{"key": "str"}', "test",
+            mock_client,
+            "reasoning",
+            ["key"],
+            '{"key": "str"}',
+            "test",
         )
         assert result == {"key": "value"}
 
@@ -1648,6 +1831,7 @@ class TestExtractFieldGroupDeeper:
 # ---------------------------------------------------------------------------
 # Dependency cycle removal (roadmap_risk helper)
 # ---------------------------------------------------------------------------
+
 
 class TestRemoveDependencyCyclesDeeper:
     """Additional tests for _remove_dependency_cycles."""
@@ -1667,8 +1851,8 @@ class TestRemoveDependencyCyclesDeeper:
         """3-way cycle: all back-edges removed."""
         phases = [
             {"number": 1, "dependencies": [3]},  # 3 > 1, invalid
-            {"number": 2, "dependencies": [1]},   # valid
-            {"number": 3, "dependencies": [2]},   # valid
+            {"number": 2, "dependencies": [1]},  # valid
+            {"number": 3, "dependencies": [2]},  # valid
         ]
         result = _remove_dependency_cycles(phases)
         assert result[0]["dependencies"] == []  # 3 removed

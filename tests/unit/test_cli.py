@@ -25,6 +25,7 @@ JOB_ID_2 = "789012abcdef"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_job(
     job_id=JOB_ID_1,
     description="build auth system",
@@ -57,6 +58,7 @@ def _make_job(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestHelp:
     def test_no_args_shows_help(self):
@@ -259,55 +261,73 @@ class TestCancel:
 # Enhanced progress display tests
 # ---------------------------------------------------------------------------
 
+
 class TestPhaseDescriptions:
     """Tests for _PHASE_DESCRIPTIONS and _get_phase_description."""
 
     def test_known_phase_direct_lookup(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("health_check") == "Checking LLM connectivity..."
 
     def test_reasoning_substep(self):
         from fitz_forge.cli import _get_phase_description
-        assert _get_phase_description("architecture_design:reasoning") == "Exploring architecture and design..."
+
+        assert (
+            _get_phase_description("architecture_design:reasoning")
+            == "Exploring architecture and design..."
+        )
 
     def test_critiquing_substep(self):
         from fitz_forge.cli import _get_phase_description
-        assert _get_phase_description("architecture_design:critiquing") == "Reviewing analysis for quality..."
+
+        assert (
+            _get_phase_description("architecture_design:critiquing")
+            == "Reviewing analysis for quality..."
+        )
 
     def test_agent_mapping_phase(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("agent:mapping") == "Mapping codebase..."
 
     def test_agent_selecting_phase(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("agent:selecting") == "Selecting relevant files..."
 
     def test_agent_summarizing_phase(self):
         from fitz_forge.cli import _get_phase_description
+
         desc = _get_phase_description("agent:summarizing:src/main.py")
         assert desc == "Summarizing main.py..."
 
     def test_agent_synthesizing_phase(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("agent:synthesizing") == "Synthesizing context..."
 
     def test_bare_stage_name_maps_to_reasoning(self):
         from fitz_forge.cli import _get_phase_description
+
         desc = _get_phase_description("context")
         assert desc == "Analyzing requirements and constraints..."
 
     def test_empty_phase_returns_empty(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("") == ""
         assert _get_phase_description(None) == ""
 
     def test_unknown_phase_returns_as_is(self):
         from fitz_forge.cli import _get_phase_description
+
         assert _get_phase_description("some_unknown_thing") == "some_unknown_thing"
 
     def test_all_stages_have_reasoning(self):
         """All 3 pipeline stages should have reasoning descriptions."""
         from fitz_forge.cli import _PHASE_DESCRIPTIONS
+
         for stage in ("context", "architecture_design", "roadmap_risk"):
             assert f"{stage}:reasoning" in _PHASE_DESCRIPTIONS, f"Missing {stage}:reasoning"
 
@@ -317,51 +337,74 @@ class TestMakeLiveDisplay:
 
     def test_basic_rendering(self):
         from fitz_forge.cli import _make_live_display
+
         panel = _make_live_display("Test project", 0.5, 30.0)
         # Should return a rich Panel
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_with_stage_durations(self):
         from fitz_forge.cli import _make_live_display
+
         panel = _make_live_display(
-            "Test project", 0.5, 45.0,
+            "Test project",
+            0.5,
+            45.0,
             stage_durations={0: 2.0, 1: 38.0, 2: 24.0},
         )
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_with_status_line(self):
         from fitz_forge.cli import _make_live_display
+
         panel = _make_live_display(
-            "Test project", 0.3, 20.0,
+            "Test project",
+            0.3,
+            20.0,
             current_phase="architecture_design:generating",
         )
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_with_log_lines(self):
         from fitz_forge.cli import _make_live_display
+
         panel = _make_live_display(
-            "Test project", 0.6, 60.0,
-            log_lines=["12:04:21 Requirements analysis complete", "12:04:45 Exploring approaches..."],
+            "Test project",
+            0.6,
+            60.0,
+            log_lines=[
+                "12:04:21 Requirements analysis complete",
+                "12:04:45 Exploring approaches...",
+            ],
         )
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_with_active_stage_timer(self):
         import time
         from fitz_forge.cli import _make_live_display
+
         panel = _make_live_display(
-            "Test project", 0.3, 15.0,
+            "Test project",
+            0.3,
+            15.0,
             stage_started={3: time.monotonic() - 10},
         )
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_long_description_truncated(self):
         from fitz_forge.cli import _make_live_display
+
         long_desc = "A" * 100
         panel = _make_live_display(long_desc, 0.0, 0.0)
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)

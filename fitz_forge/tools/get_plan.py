@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 VALID_FORMATS = {"full", "summary", "roadmap_only"}
 
 
-async def get_plan(
-    job_id: str, format: str, store: JobStore
-) -> dict:
+async def get_plan(job_id: str, format: str, store: JobStore) -> dict:
     """
     Retrieve a completed plan.
 
@@ -39,9 +37,7 @@ async def get_plan(
     """
     # Validate format
     if format not in VALID_FORMATS:
-        raise ToolError(
-            f"Invalid format '{format}'. Must be one of: {', '.join(VALID_FORMATS)}"
-        )
+        raise ToolError(f"Invalid format '{format}'. Must be one of: {', '.join(VALID_FORMATS)}")
 
     # Validate job ID
     try:
@@ -49,14 +45,12 @@ async def get_plan(
     except ToolError:
         raise
     except Exception as e:
-        raise ToolError(f"Invalid job ID: {e}")
+        raise ToolError(f"Invalid job ID: {e}") from e
 
     # Look up job
     record = await store.get(sanitized_id)
     if not record:
-        raise ToolError(
-            f"Job '{sanitized_id}' not found. Use list_plans to see available jobs."
-        )
+        raise ToolError(f"Job '{sanitized_id}' not found. Use list_plans to see available jobs.")
 
     # Check if job is complete
     if record.state.value != "complete":
@@ -75,7 +69,7 @@ async def get_plan(
         with open(record.file_path, encoding="utf-8") as f:
             raw_content = f.read()
     except OSError as e:
-        raise ToolError(f"Could not read plan file '{record.file_path}': {e}")
+        raise ToolError(f"Could not read plan file '{record.file_path}': {e}") from e
 
     if format == "full":
         content = raw_content

@@ -37,7 +37,7 @@ def make_codebase_tools(
         """Find source code containing a class definition."""
         # Search file_contents first — must have the actual class def, not just an import
         class_marker = f"class {class_name}"
-        for path, content in _source_pool.items():
+        for _, content in _source_pool.items():
             if class_marker in content:
                 return content
         # Disk fallback — match class name against filename in both directions
@@ -46,7 +46,11 @@ def make_codebase_tools(
             for py in Path(source_dir).rglob("*.py"):
                 # Skip venvs and hidden directories
                 parts_str = str(py)
-                if ".venv" in parts_str or "__pycache__" in parts_str or "site-packages" in parts_str:
+                if (
+                    ".venv" in parts_str
+                    or "__pycache__" in parts_str
+                    or "site-packages" in parts_str
+                ):
                     continue
                 stem = py.stem.lower()
                 # Match: class name contains stem or stem contains class name
@@ -166,8 +170,7 @@ def make_codebase_tools(
             cls_node = _find_class_node(src, class_name)
             if cls_node:
                 # Bases
-                bases = [ast.unparse(b) if hasattr(ast, 'unparse') else '?'
-                         for b in cls_node.bases]
+                bases = [ast.unparse(b) if hasattr(ast, "unparse") else "?" for b in cls_node.bases]
                 if bases:
                     parts.append(f"class {class_name}({', '.join(bases)})")
                 else:
@@ -181,17 +184,22 @@ def make_codebase_tools(
                             for node in ast.walk(method):
                                 if isinstance(node, ast.Assign):
                                     for target in node.targets:
-                                        if (isinstance(target, ast.Attribute)
-                                                and isinstance(target.value, ast.Name)
-                                                and target.value.id == "self"):
+                                        if (
+                                            isinstance(target, ast.Attribute)
+                                            and isinstance(target.value, ast.Name)
+                                            and target.value.id == "self"
+                                        ):
                                             rhs = ""
                                             if isinstance(node.value, ast.Call):
                                                 if isinstance(node.value.func, ast.Name):
                                                     rhs = node.value.func.id
                                                 elif isinstance(node.value.func, ast.Attribute):
                                                     rhs = node.value.func.attr
-                                            attrs.append(f"  self.{target.attr} = {rhs}(...)" if rhs
-                                                         else f"  self.{target.attr}")
+                                            attrs.append(
+                                                f"  self.{target.attr} = {rhs}(...)"
+                                                if rhs
+                                                else f"  self.{target.attr}"
+                                            )
                 if attrs:
                     parts.append("Attributes:")
                     parts.extend(attrs[:20])  # cap at 20

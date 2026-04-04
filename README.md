@@ -8,7 +8,9 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
+[![Tests](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml/badge.svg)](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 [The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-forge?](#why-fitz-forge) • [How It Works](#how-it-works) • [GitHub](https://github.com/yafitzdev/fitz-forge)
 
@@ -30,8 +32,8 @@ fitz plan "Add OAuth2 authentication with Google and GitHub providers"
 
 Solo project by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
 
-- ~8k lines of Python
-- 550+ tests
+- ~20k lines of Python
+- 970+ tests
 - Zero LangChain/LlamaIndex dependencies — built from scratch
 - Code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage)
 
@@ -303,6 +305,8 @@ output:
 
 <br>
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture reference and [docs/features/](docs/features/) for detailed breakdowns of every pipeline stage.
+
 ```
 CLI (typer)   --> tools/ --> SQLiteJobStore <-- BackgroundWorker --> PlanningPipeline
 MCP (fastmcp) --> tools/ --> SQLiteJobStore
@@ -341,8 +345,14 @@ fitz_forge/
 git clone https://github.com/yafitzdev/fitz-forge.git
 cd fitz-forge
 pip install -e ".[dev]"  # editable install for development
-pytest  # 550+ tests
+pytest  # 970+ tests
+
+# Lint
+ruff check fitz_forge/
+ruff format --check fitz_forge/ tests/
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide and [examples/](examples/) for usage examples.
 
 **Benchmark factory** for A/B testing pipeline changes:
 ```bash

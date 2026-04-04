@@ -36,6 +36,7 @@ from fitz_forge.planning.schemas.plan_output import PlanOutput
 
 # ---- helpers ----
 
+
 def _make_context(**overrides):
     defaults = {"project_description": "Test project"}
     defaults.update(overrides)
@@ -92,9 +93,7 @@ class TestAssumption:
         assert restored == a
 
     def test_extra_fields_ignored(self):
-        a = Assumption(
-            assumption="X", impact="Y", unknown_extra="ignored"
-        )
+        a = Assumption(assumption="X", impact="Y", unknown_extra="ignored")
         assert a.assumption == "X"
         assert not hasattr(a, "unknown_extra")
 
@@ -132,9 +131,7 @@ class TestContextOutput:
             },
             existing_files=["src/main.py"],
             needed_artifacts=["schema.sql"],
-            assumptions=[
-                Assumption(assumption="REST", impact="big", confidence="high")
-            ],
+            assumptions=[Assumption(assumption="REST", impact="big", confidence="high")],
         )
         assert c.project_description == "Build a REST API"
         assert len(c.key_requirements) == 2
@@ -279,9 +276,7 @@ class TestArchitectureOutput:
             )
 
     def test_extra_fields_ignored(self):
-        a = ArchitectureOutput(
-            recommended="X", reasoning="Y", hallucinated_field="gone"
-        )
+        a = ArchitectureOutput(recommended="X", reasoning="Y", hallucinated_field="gone")
         assert a.recommended == "X"
 
 
@@ -320,8 +315,12 @@ class TestADR:
 
     def test_round_trip(self):
         a = ADR(
-            title="T", context="C", decision="D", rationale="R",
-            consequences=["C1"], alternatives_considered=["A1"],
+            title="T",
+            context="C",
+            decision="D",
+            rationale="R",
+            consequences=["C1"],
+            alternatives_considered=["A1"],
         )
         restored = ADR.model_validate(a.model_dump())
         assert restored == a
@@ -389,8 +388,11 @@ class TestComponentDesign:
 
     def test_round_trip(self):
         c = ComponentDesign(
-            name="N", purpose="P",
-            responsibilities=["R"], interfaces=["I"], dependencies=["D"],
+            name="N",
+            purpose="P",
+            responsibilities=["R"],
+            interfaces=["I"],
+            dependencies=["D"],
         )
         restored = ComponentDesign.model_validate(c.model_dump())
         assert restored == c
@@ -425,9 +427,7 @@ class TestDesignOutput:
 
     def test_data_model_string_values_coerced(self):
         """field_validator coerces bare strings to single-element lists."""
-        d = DesignOutput(
-            data_model={"Entity": "str", "Other": ["a", "b"]}
-        )
+        d = DesignOutput(data_model={"Entity": "str", "Other": ["a", "b"]})
         assert d.data_model["Entity"] == ["str"]
         assert d.data_model["Other"] == ["a", "b"]
 
@@ -528,8 +528,11 @@ class TestPhase:
 
     def test_round_trip(self):
         p = Phase(
-            number=1, name="N", objective="O",
-            deliverables=["D"], verification_command="pytest",
+            number=1,
+            name="N",
+            objective="O",
+            deliverables=["D"],
+            verification_command="pytest",
         )
         restored = Phase.model_validate(p.model_dump())
         assert restored == p
@@ -712,12 +715,17 @@ class TestDecisionDecompositionOutput:
         d = DecisionDecompositionOutput(
             decisions=[
                 AtomicDecision(
-                    id="d1", question="What pattern?",
-                    relevant_files=["a.py"], depends_on=[], category="pattern",
+                    id="d1",
+                    question="What pattern?",
+                    relevant_files=["a.py"],
+                    depends_on=[],
+                    category="pattern",
                 ),
                 AtomicDecision(
-                    id="d2", question="What interface?",
-                    depends_on=["d1"], category="interface",
+                    id="d2",
+                    question="What interface?",
+                    depends_on=["d1"],
+                    category="interface",
                 ),
             ],
         )
@@ -725,9 +733,7 @@ class TestDecisionDecompositionOutput:
         assert d.decisions[1].depends_on == ["d1"]
 
     def test_round_trip(self):
-        d = DecisionDecompositionOutput(
-            decisions=[AtomicDecision(id="d1", question="Q")]
-        )
+        d = DecisionDecompositionOutput(decisions=[AtomicDecision(id="d1", question="Q")])
         restored = DecisionDecompositionOutput.model_validate(d.model_dump())
         assert restored.decisions[0].id == "d1"
 
@@ -761,11 +767,7 @@ class TestDecisionResolutionOutput:
 
     def test_round_trip(self):
         d = DecisionResolutionOutput(
-            resolutions=[
-                DecisionResolution(
-                    decision_id="d1", decision="D", reasoning="R"
-                )
-            ]
+            resolutions=[DecisionResolution(decision_id="d1", decision="D", reasoning="R")]
         )
         restored = DecisionResolutionOutput.model_validate(d.model_dump())
         assert restored.resolutions[0].decision_id == "d1"
@@ -839,9 +841,7 @@ class TestPlanOutput:
 
     def test_nested_extra_fields_ignored(self):
         """Extra fields on nested stage outputs are also ignored."""
-        c = ContextOutput(
-            project_description="P", hallucinated="ignored"
-        )
+        c = ContextOutput(project_description="P", hallucinated="ignored")
         p = _make_plan(context=c)
         assert p.context.project_description == "P"
 
@@ -876,11 +876,19 @@ class TestSchemaReExports:
         from fitz_forge.planning.schemas import __all__
 
         expected = {
-            "Assumption", "ContextOutput",
-            "ArchitectureOutput", "Approach",
-            "DesignOutput", "ADR", "Artifact", "ComponentDesign",
-            "RoadmapOutput", "Phase", "PhaseRef",
-            "RiskOutput", "Risk",
+            "Assumption",
+            "ContextOutput",
+            "ArchitectureOutput",
+            "Approach",
+            "DesignOutput",
+            "ADR",
+            "Artifact",
+            "ComponentDesign",
+            "RoadmapOutput",
+            "Phase",
+            "PhaseRef",
+            "RiskOutput",
+            "Risk",
             "PlanOutput",
         }
         assert expected.issubset(set(__all__))

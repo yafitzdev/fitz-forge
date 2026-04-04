@@ -186,9 +186,7 @@ async def init_db(db_path: str) -> None:
         current_version = await _get_schema_version(db)
 
         if current_version < SCHEMA_VERSION:
-            logger.info(
-                f"Schema migration needed: v{current_version} -> v{SCHEMA_VERSION}"
-            )
+            logger.info(f"Schema migration needed: v{current_version} -> v{SCHEMA_VERSION}")
 
             if current_version < 1:
                 # New database, set version directly

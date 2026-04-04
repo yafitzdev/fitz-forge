@@ -13,7 +13,6 @@ from fitz_forge.planning.agent.compressor import (
 
 
 class TestStripCommentsAndBlanks:
-
     def test_removes_comment_lines(self):
         src = "x = 1\n# this is a comment\ny = 2\n"
         result = _strip_comments_and_blanks(src)
@@ -38,7 +37,6 @@ class TestStripCommentsAndBlanks:
 
 
 class TestCompressPython:
-
     def test_strips_module_docstring(self):
         src = '"""Module docstring."""\n\nimport os\n'
         result = compress_python(src)
@@ -67,10 +65,10 @@ class TestCompressPython:
         assert "x: int = 0" in result
 
     def test_keeps_short_function_body(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             def add(a, b):
                 return a + b
-        ''')
+        """)
         result = compress_python(src)
         assert "return a + b" in result
 
@@ -90,21 +88,21 @@ class TestCompressPython:
         assert "from pathlib import Path" in result
 
     def test_keeps_class_attributes(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             class Config:
                 MAX_SIZE: int = 100
                 DEFAULT_NAME: str = "test"
-        ''')
+        """)
         result = compress_python(src)
         assert "MAX_SIZE: int = 100" in result
         assert 'DEFAULT_NAME: str = "test"' in result
 
     def test_keeps_decorators(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             @property
             def name(self) -> str:
                 return self._name
-        ''')
+        """)
         result = compress_python(src)
         assert "@property" in result
         assert "def name(self) -> str:" in result
@@ -119,7 +117,7 @@ class TestCompressPython:
         assert result == ""
 
     def test_keeps_dataclass_fields(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             from dataclasses import dataclass
 
             @dataclass
@@ -127,25 +125,24 @@ class TestCompressPython:
                 x: float
                 y: float
                 z: float = 0.0
-        ''')
+        """)
         result = compress_python(src)
         assert "x: float" in result
         assert "y: float" in result
         assert "z: float = 0.0" in result
 
     def test_keeps_constants(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             MAX_RETRIES = 3
             DEFAULT_TIMEOUT = 30
             _INTERNAL = "secret"
-        ''')
+        """)
         result = compress_python(src)
         assert "MAX_RETRIES = 3" in result
         assert "DEFAULT_TIMEOUT = 30" in result
 
 
 class TestCompressFile:
-
     def test_python_files_get_ast_compression(self):
         src = textwrap.dedent('''\
             """Module doc."""
@@ -165,7 +162,7 @@ class TestCompressFile:
         assert "key: value" in result
 
     def test_test_files_collapse_all_bodies(self):
-        src = textwrap.dedent('''\
+        src = textwrap.dedent("""\
             def test_simple():
                 x = 1
                 assert x == 1
@@ -173,7 +170,7 @@ class TestCompressFile:
             def test_another():
                 y = 2
                 assert y == 2
-        ''')
+        """)
         result = compress_file(src, "tests/unit/test_foo.py")
         assert "def test_simple():" in result
         assert "def test_another():" in result

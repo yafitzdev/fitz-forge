@@ -34,9 +34,7 @@ class CheckpointManager:
         self._db_path = db_path
         logger.info(f"Created CheckpointManager with db: {db_path}")
 
-    async def save_stage(
-        self, job_id: str, stage_name: str, stage_output: dict[str, Any]
-    ) -> None:
+    async def save_stage(self, job_id: str, stage_name: str, stage_output: dict[str, Any]) -> None:
         """
         Save a completed stage's output as a checkpoint.
 
@@ -53,9 +51,7 @@ class CheckpointManager:
 
             try:
                 # Load existing checkpoint state
-                cursor = await db.execute(
-                    "SELECT pipeline_state FROM jobs WHERE id = ?", (job_id,)
-                )
+                cursor = await db.execute("SELECT pipeline_state FROM jobs WHERE id = ?", (job_id,))
                 row = await cursor.fetchone()
 
                 if not row:
@@ -98,9 +94,7 @@ class CheckpointManager:
             ValueError: If job_id doesn't exist
         """
         async with aiosqlite.connect(self._db_path) as db:
-            cursor = await db.execute(
-                "SELECT pipeline_state FROM jobs WHERE id = ?", (job_id,)
-            )
+            cursor = await db.execute("SELECT pipeline_state FROM jobs WHERE id = ?", (job_id,))
             row = await cursor.fetchone()
 
             if not row:
@@ -111,9 +105,7 @@ class CheckpointManager:
                 return {}
 
             checkpoint = json.loads(row[0])
-            logger.info(
-                f"Loaded checkpoint for job {job_id}: {list(checkpoint.keys())}"
-            )
+            logger.info(f"Loaded checkpoint for job {job_id}: {list(checkpoint.keys())}")
 
             # Unwrap timestamped format and warn on stale checkpoints
             STALE_HOURS = 24
@@ -156,9 +148,7 @@ class CheckpointManager:
                 if not await cursor.fetchone():
                     raise ValueError(f"Job {job_id} not found")
 
-                await db.execute(
-                    "UPDATE jobs SET pipeline_state = NULL WHERE id = ?", (job_id,)
-                )
+                await db.execute("UPDATE jobs SET pipeline_state = NULL WHERE id = ?", (job_id,))
 
                 await db.commit()
                 logger.info(f"Cleared checkpoint for job {job_id}")

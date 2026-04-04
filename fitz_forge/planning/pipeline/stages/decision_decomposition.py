@@ -51,7 +51,9 @@ class DecisionDecompositionStage(PipelineStage):
         return (0.10, 0.20)
 
     def build_prompt(
-        self, job_description: str, prior_outputs: dict[str, Any],
+        self,
+        job_description: str,
+        prior_outputs: dict[str, Any],
         coverage_hint: str = "",
     ) -> list[dict]:
         call_graph_text = prior_outputs.get("_call_graph_text", "")
@@ -72,7 +74,8 @@ class DecisionDecompositionStage(PipelineStage):
 
     @staticmethod
     def _build_coverage_hint(
-        decisions: list[dict], prior_outputs: dict[str, Any],
+        decisions: list[dict],
+        prior_outputs: dict[str, Any],
     ) -> str:
         """Return a retry hint if interior call chain layers are uncovered.
 
@@ -88,16 +91,11 @@ class DecisionDecompositionStage(PipelineStage):
         if max_depth < 2:
             return ""
 
-        interior = [
-            n for n in call_graph.nodes
-            if 0 < n.depth < max_depth
-        ]
+        interior = [n for n in call_graph.nodes if 0 < n.depth < max_depth]
         if len(interior) < 2:
             return ""
 
-        decision_files: set[str] = {
-            f for d in decisions for f in d.get("relevant_files", [])
-        }
+        decision_files: set[str] = {f for d in decisions for f in d.get("relevant_files", [])}
 
         def is_covered(path: str) -> bool:
             base = os.path.basename(path)
@@ -128,7 +126,8 @@ class DecisionDecompositionStage(PipelineStage):
 
     @staticmethod
     def _score_decomposition(
-        parsed: dict[str, Any], prior_outputs: dict[str, Any],
+        parsed: dict[str, Any],
+        prior_outputs: dict[str, Any],
     ) -> tuple[float, dict[str, float]]:
         """Score a decomposition for best-of-2 selection.
 
@@ -171,7 +170,7 @@ class DecisionDecompositionStage(PipelineStage):
         specific = 0
         for d in decisions:
             q = d.get("question", "")
-            if re.search(r'[\w/]+\.py|[A-Z][a-z]+[A-Z]\w+|_\w+_', q):
+            if re.search(r"[\w/]+\.py|[A-Z][a-z]+[A-Z]\w+|_\w+_", q):
                 specific += 1
         breakdown["specificity"] = (specific / max(n, 1)) * 25.0
 
@@ -183,11 +182,7 @@ class DecisionDecompositionStage(PipelineStage):
         # Dependency coherence
         ids = {d.get("id", "") for d in decisions}
         total_deps = sum(len(d.get("depends_on", [])) for d in decisions)
-        valid_deps = sum(
-            1 for d in decisions
-            for dep in d.get("depends_on", [])
-            if dep in ids
-        )
+        valid_deps = sum(1 for d in decisions for dep in d.get("depends_on", []) if dep in ids)
         if total_deps > 0:
             breakdown["deps"] = (valid_deps / total_deps) * 15.0 + 5.0
         else:
@@ -213,35 +208,33 @@ class DecisionDecompositionStage(PipelineStage):
                 try:
                     t0 = time.monotonic()
                     raw = await client.generate(
-                        messages=messages, temperature=0.3, max_tokens=16384,
+                        messages=messages,
+                        temperature=0.3,
+                        max_tokens=16384,
                     )
                     t1 = time.monotonic()
                     logger.info(
-                        f"Stage '{self.name}': candidate {i+1} took "
+                        f"Stage '{self.name}': candidate {i + 1} took "
                         f"{t1 - t0:.1f}s ({len(raw)} chars)"
                     )
                     parsed = self.parse_output(raw)
                     score, breakdown = self._score_decomposition(
-                        parsed, prior_outputs,
+                        parsed,
+                        prior_outputs,
                     )
                     candidates.append((score, parsed, raw, breakdown))
                     logger.info(
-                        f"Stage '{self.name}': candidate {i+1} "
+                        f"Stage '{self.name}': candidate {i + 1} "
                         f"score={score:.1f} "
                         f"({len(parsed.get('decisions', []))} decisions) "
                         f"{breakdown}"
                     )
                 except Exception as e:
                     last_error = e
-                    logger.warning(
-                        f"Stage '{self.name}': candidate {i+1} "
-                        f"failed: {e}"
-                    )
+                    logger.warning(f"Stage '{self.name}': candidate {i + 1} failed: {e}")
 
             if not candidates:
-                raise last_error or RuntimeError(
-                    "Both decomposition candidates failed"
-                )
+                raise last_error or RuntimeError("Both decomposition candidates failed")
 
             # Pick highest scoring candidate
             candidates.sort(key=lambda c: c[0], reverse=True)
@@ -264,7 +257,9 @@ class DecisionDecompositionStage(PipelineStage):
                 is_dup = False
                 for kept in deduped:
                     sim = SequenceMatcher(
-                        None, question, kept.get("question", "").lower(),
+                        None,
+                        question,
+                        kept.get("question", "").lower(),
                     ).ratio()
                     if sim >= 0.85:
                         is_dup = True
@@ -274,45 +269,38 @@ class DecisionDecompositionStage(PipelineStage):
                     keep_ids.add(d.get("id", ""))
             if len(deduped) < len(decisions):
                 logger.info(
-                    f"Stage '{self.name}': deduped {len(decisions)} → "
-                    f"{len(deduped)} decisions"
+                    f"Stage '{self.name}': deduped {len(decisions)} → {len(deduped)} decisions"
                 )
                 # Prune dangling depends_on refs
                 for d in deduped:
-                    d["depends_on"] = [
-                        dep for dep in d.get("depends_on", [])
-                        if dep in keep_ids
-                    ]
+                    d["depends_on"] = [dep for dep in d.get("depends_on", []) if dep in keep_ids]
                 decisions = deduped
                 parsed["decisions"] = decisions
 
-            logger.info(
-                f"Stage '{self.name}': produced {len(decisions)} decisions"
-            )
+            logger.info(f"Stage '{self.name}': produced {len(decisions)} decisions")
 
             # Coverage gate: retry once if interior call chain layers are skipped.
             coverage_hint = self._build_coverage_hint(decisions, prior_outputs)
             if coverage_hint:
-                logger.info(
-                    f"Stage '{self.name}': coverage gap detected, retrying"
-                )
+                logger.info(f"Stage '{self.name}': coverage gap detected, retrying")
                 retry_messages = self.build_prompt(
-                    job_description, prior_outputs, coverage_hint=coverage_hint,
+                    job_description,
+                    prior_outputs,
+                    coverage_hint=coverage_hint,
                 )
                 t0 = time.monotonic()
                 retry_raw = await client.generate(
-                    messages=retry_messages, temperature=0, max_tokens=16384,
+                    messages=retry_messages,
+                    temperature=0,
+                    max_tokens=16384,
                 )
                 t1 = time.monotonic()
-                logger.info(
-                    f"Stage '{self.name}': coverage retry took {t1 - t0:.1f}s"
-                )
+                logger.info(f"Stage '{self.name}': coverage retry took {t1 - t0:.1f}s")
                 try:
                     retry_parsed = self.parse_output(retry_raw)
                     retry_decisions = retry_parsed.get("decisions", [])
                     logger.info(
-                        f"Stage '{self.name}': retry produced "
-                        f"{len(retry_decisions)} decisions"
+                        f"Stage '{self.name}': retry produced {len(retry_decisions)} decisions"
                     )
                     parsed = retry_parsed
                     decisions = retry_decisions
@@ -326,18 +314,10 @@ class DecisionDecompositionStage(PipelineStage):
             # Validate dependency references
             ids = {d["id"] for d in decisions}
             for d in decisions:
-                bad_deps = [
-                    dep for dep in d.get("depends_on", [])
-                    if dep not in ids
-                ]
+                bad_deps = [dep for dep in d.get("depends_on", []) if dep not in ids]
                 if bad_deps:
-                    logger.warning(
-                        f"Decision {d['id']}: removing invalid deps {bad_deps}"
-                    )
-                    d["depends_on"] = [
-                        dep for dep in d["depends_on"]
-                        if dep in ids
-                    ]
+                    logger.warning(f"Decision {d['id']}: removing invalid deps {bad_deps}")
+                    d["depends_on"] = [dep for dep in d["depends_on"] if dep in ids]
 
             return StageResult(
                 stage_name=self.name,

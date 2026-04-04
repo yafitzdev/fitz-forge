@@ -47,7 +47,9 @@ class TestConfidenceScorerHeuristics:
     def test_specificity_with_vague_keywords(self):
         """Content with vague keywords should score low."""
         scorer = ConfidenceScorer(ollama_client=None)
-        vague_content = "Maybe do something, probably needs work, could be unclear, TBD placeholder."
+        vague_content = (
+            "Maybe do something, probably needs work, could be unclear, TBD placeholder."
+        )
         score = scorer._specificity_score(vague_content)
         assert score == 0.3
 
@@ -230,7 +232,8 @@ class TestConfidenceScorerLLM:
         scorer = ConfidenceScorer(ollama_client=mock_llm)
 
         await scorer.score_section(
-            "architecture", "Use REST API with Flask.",
+            "architecture",
+            "Use REST API with Flask.",
             codebase_context="## Files\n- src/api.py: existing REST endpoints",
         )
 

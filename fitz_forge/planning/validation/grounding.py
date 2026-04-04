@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Structural index parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class IndexedMethod:
     name: str
@@ -49,18 +50,18 @@ class IndexedFunction:
 # Regex for parsing index class entries:
 #   ClassName(Base1, Base2) [@dec1, @dec2] [method1 -> Type, method2]
 _CLASS_RE = re.compile(
-    r"([A-Za-z_]\w*)"           # class name
-    r"(?:\(([^)]*)\))?"         # optional bases
-    r"(?:\s*\[([^\]]*)\])?"     # optional first bracket (decorators or methods)
-    r"(?:\s*\[([^\]]*)\])?"     # optional second bracket (methods if first was decorators)
+    r"([A-Za-z_]\w*)"  # class name
+    r"(?:\(([^)]*)\))?"  # optional bases
+    r"(?:\s*\[([^\]]*)\])?"  # optional first bracket (decorators or methods)
+    r"(?:\s*\[([^\]]*)\])?"  # optional second bracket (methods if first was decorators)
 )
 
 # Regex for parsing index function entries:
 #   func_name(param1, param2) -> ReturnType [@decorator]
 _FUNC_RE = re.compile(
-    r"([A-Za-z_]\w*)"           # function name
-    r"\(([^)]*)\)"              # params
-    r"(?:\s*->\s*([^[,]+))?"    # optional return type
+    r"([A-Za-z_]\w*)"  # function name
+    r"\(([^)]*)\)"  # params
+    r"(?:\s*->\s*([^[,]+))?"  # optional return type
 )
 
 
@@ -68,7 +69,9 @@ class StructuralIndexLookup:
     """Parsed structural index for programmatic symbol queries."""
 
     def __init__(self, index_text: str):
-        self.classes: dict[str, list[IndexedClass]] = {}  # name -> list (may exist in multiple files)
+        self.classes: dict[
+            str, list[IndexedClass]
+        ] = {}  # name -> list (may exist in multiple files)
         self.functions: dict[str, list[IndexedFunction]] = {}
         self._all_method_names: set[str] = set()
         self._all_class_names: set[str] = set()
@@ -159,10 +162,7 @@ class StructuralIndexLookup:
         return self.functions.get(name, [])
 
     def class_has_method(self, class_name: str, method_name: str) -> bool:
-        for cls in self.classes.get(class_name, []):
-            if method_name in cls.methods:
-                return True
-        return False
+        return any(method_name in cls.methods for cls in self.classes.get(class_name, []))
 
     def method_exists_anywhere(self, method_name: str) -> bool:
         return method_name in self._all_method_names
@@ -191,6 +191,7 @@ class StructuralIndexLookup:
 # Violation dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Violation:
     artifact: str
@@ -206,30 +207,115 @@ class Violation:
 # ---------------------------------------------------------------------------
 
 # Names to skip — builtins, common stdlib, test patterns
-_SKIP_NAMES = frozenset({
-    "None", "True", "False", "self", "cls", "super",
-    "str", "int", "float", "bool", "list", "dict", "set", "tuple", "bytes",
-    "type", "object", "Exception", "ValueError", "TypeError", "KeyError",
-    "RuntimeError", "AttributeError", "NotImplementedError", "StopIteration",
-    "OSError", "IOError", "FileNotFoundError", "ImportError", "IndexError",
-    "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted",
-    "isinstance", "issubclass", "hasattr", "getattr", "setattr",
-    "any", "all", "min", "max", "sum", "abs", "round", "hash", "id", "repr",
-    "open", "iter", "next",
-    "Optional", "Union", "Any", "List", "Dict", "Set", "Tuple",
-    "Iterator", "Generator", "AsyncGenerator", "Callable", "Type",
-    "Sequence", "Mapping", "Iterable",
-    "Path", "logging", "json", "re", "os", "sys", "time",
-    "dataclass", "field", "dataclasses",
-    "BaseModel", "Field", "ConfigDict",
-    "APIRouter", "Request", "StreamingResponse", "Depends",
-    "HTTPException", "BackgroundTasks", "Response", "JSONResponse",
-    "Body", "Header", "Cookie", "Form", "File", "UploadFile",
-    "status",
-    "router", "app",
-    # Common Pydantic/typing extras
-    "model_validator", "field_validator", "computed_field",
-})
+_SKIP_NAMES = frozenset(
+    {
+        "None",
+        "True",
+        "False",
+        "self",
+        "cls",
+        "super",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "bytes",
+        "type",
+        "object",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "RuntimeError",
+        "AttributeError",
+        "NotImplementedError",
+        "StopIteration",
+        "OSError",
+        "IOError",
+        "FileNotFoundError",
+        "ImportError",
+        "IndexError",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sorted",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "any",
+        "all",
+        "min",
+        "max",
+        "sum",
+        "abs",
+        "round",
+        "hash",
+        "id",
+        "repr",
+        "open",
+        "iter",
+        "next",
+        "Optional",
+        "Union",
+        "Any",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Iterator",
+        "Generator",
+        "AsyncGenerator",
+        "Callable",
+        "Type",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "Path",
+        "logging",
+        "json",
+        "re",
+        "os",
+        "sys",
+        "time",
+        "dataclass",
+        "field",
+        "dataclasses",
+        "BaseModel",
+        "Field",
+        "ConfigDict",
+        "APIRouter",
+        "Request",
+        "StreamingResponse",
+        "Depends",
+        "HTTPException",
+        "BackgroundTasks",
+        "Response",
+        "JSONResponse",
+        "Body",
+        "Header",
+        "Cookie",
+        "Form",
+        "File",
+        "UploadFile",
+        "status",
+        "router",
+        "app",
+        # Common Pydantic/typing extras
+        "model_validator",
+        "field_validator",
+        "computed_field",
+    }
+)
 
 # Common stdlib/third-party module prefixes to skip
 _SKIP_PREFIXES = ("typing.", "collections.", "abc.", "functools.", "asyncio.")
@@ -249,8 +335,11 @@ def check_artifact(
     try:
         tree = ast.parse(content)
     except SyntaxError:
-        return [Violation(filename, 0, "", "parse_error",
-                         "Artifact is not valid Python — cannot validate")]
+        return [
+            Violation(
+                filename, 0, "", "parse_error", "Artifact is not valid Python — cannot validate"
+            )
+        ]
 
     violations: list[Violation] = []
 
@@ -274,8 +363,7 @@ def check_artifact(
 
     # Walk AST and check references
     for node in ast.walk(tree):
-        _check_node(node, filename, lookup, artifact_classes,
-                     target_classes, violations)
+        _check_node(node, filename, lookup, artifact_classes, target_classes, violations)
 
     return violations
 
@@ -291,10 +379,12 @@ def _check_node(
     line = getattr(node, "lineno", 0)
 
     # Check: self.method() calls
-    if (isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "self"):
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+    ):
         method_name = node.func.attr
         if method_name.startswith("_") and method_name.startswith("__"):
             return  # skip dunder
@@ -309,17 +399,20 @@ def _check_node(
         # Method not found — check if it exists anywhere
         if not lookup.method_exists_anywhere(method_name):
             suggestions = lookup.suggest_method(method_name)
-            violations.append(Violation(
-                filename, line, f"self.{method_name}()",
-                "missing_method",
-                f"Method '{method_name}' not found on any class in the target file "
-                f"or anywhere in the codebase index",
-                f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
-            ))
+            violations.append(
+                Violation(
+                    filename,
+                    line,
+                    f"self.{method_name}()",
+                    "missing_method",
+                    f"Method '{method_name}' not found on any class in the target file "
+                    f"or anywhere in the codebase index",
+                    f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
+                )
+            )
 
     # Check: standalone function calls (not method calls)
-    elif (isinstance(node, ast.Call)
-          and isinstance(node.func, ast.Name)):
+    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         func_name = node.func.id
         if func_name in _SKIP_NAMES:
             return
@@ -329,12 +422,16 @@ def _check_node(
                 # Check if it's defined in the artifact itself
                 if func_name not in artifact_classes:
                     suggestions = lookup.suggest_class(func_name)
-                    violations.append(Violation(
-                        filename, line, func_name,
-                        "missing_class",
-                        f"Class '{func_name}' not found in codebase index",
-                        f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
-                    ))
+                    violations.append(
+                        Violation(
+                            filename,
+                            line,
+                            func_name,
+                            "missing_class",
+                            f"Class '{func_name}' not found in codebase index",
+                            f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
+                        )
+                    )
         else:
             # Looks like a function call — check existence and arity
             if not lookup.function_exists(func_name):
@@ -343,12 +440,16 @@ def _check_node(
                 if not any(func_name.startswith(p) for p in ("_", "pytest")):
                     suggestions = lookup.suggest_function(func_name)
                     if suggestions:
-                        violations.append(Violation(
-                            filename, line, f"{func_name}()",
-                            "missing_function",
-                            f"Function '{func_name}' not found in codebase index",
-                            f"Did you mean: {', '.join(suggestions)}",
-                        ))
+                        violations.append(
+                            Violation(
+                                filename,
+                                line,
+                                f"{func_name}()",
+                                "missing_function",
+                                f"Function '{func_name}' not found in codebase index",
+                                f"Did you mean: {', '.join(suggestions)}",
+                            )
+                        )
             else:
                 # Check arity
                 expected_params = lookup.function_params(func_name)
@@ -357,18 +458,24 @@ def _check_node(
                     expected = len(expected_params)
                     # Allow some slack for *args/**kwargs and defaults
                     if actual_args > 0 and expected > 0 and abs(actual_args - expected) > 2:
-                        violations.append(Violation(
-                            filename, line, f"{func_name}()",
-                            "wrong_arity",
-                            f"Called with {actual_args} args but index shows "
-                            f"{expected} params: ({', '.join(expected_params)})",
-                        ))
+                        violations.append(
+                            Violation(
+                                filename,
+                                line,
+                                f"{func_name}()",
+                                "wrong_arity",
+                                f"Called with {actual_args} args but index shows "
+                                f"{expected} params: ({', '.join(expected_params)})",
+                            )
+                        )
 
     # Check: attribute access on known types (obj.field)
-    elif (isinstance(node, ast.Attribute)
-          and isinstance(node.value, ast.Name)
-          and node.value.id not in _SKIP_NAMES
-          and node.value.id != "self"):
+    elif (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id not in _SKIP_NAMES
+        and node.value.id != "self"
+    ):
         # Skip module-level attribute access (json.loads, etc)
         if node.value.id[0].islower() and node.value.id not in ("request", "response", "ctx"):
             return
@@ -431,14 +538,13 @@ def _check_parallel_signatures(
                     original_name = method_name[: -len(suffix)]
                     break
                 if method_name.startswith(suffix):
-                    original_name = method_name[len(suffix):]
+                    original_name = method_name[len(suffix) :]
                     break
 
             if not original_name:
                 continue
 
             # Find the original method in the structural index
-            original_params = None
             for cls_list in lookup.classes.values():
                 for cls in cls_list:
                     if original_name in cls.methods:
@@ -455,19 +561,21 @@ def _check_parallel_signatures(
             if original_funcs:
                 orig_params = original_funcs[0].params
                 if len(new_params) < len(orig_params) - 2:  # allow 2 fewer (defaults)
-                    violations.append(Violation(
-                        artifact=filename,
-                        line=node.lineno,
-                        symbol=method_name,
-                        kind="param_mismatch",
-                        detail=(
-                            f"Parallel method {method_name}() has {len(new_params)} params "
-                            f"but original {original_name}() has {len(orig_params)}: "
-                            f"({', '.join(orig_params)}). "
-                            f"Parallel methods should accept the same parameters."
-                        ),
-                        suggestion=f"Add missing params from {original_name}()",
-                    ))
+                    violations.append(
+                        Violation(
+                            artifact=filename,
+                            line=node.lineno,
+                            symbol=method_name,
+                            kind="param_mismatch",
+                            detail=(
+                                f"Parallel method {method_name}() has {len(new_params)} params "
+                                f"but original {original_name}() has {len(orig_params)}: "
+                                f"({', '.join(orig_params)}). "
+                                f"Parallel methods should accept the same parameters."
+                            ),
+                            suggestion=f"Add missing params from {original_name}()",
+                        )
+                    )
 
     return violations
 
@@ -582,6 +690,7 @@ def build_llm_grounding_prompt(
 # Violation repair: targeted LLM fix using exact AST violation messages
 # ---------------------------------------------------------------------------
 
+
 async def repair_violations(
     violations: list[Violation],
     artifacts: list[dict[str, Any]],
@@ -596,7 +705,6 @@ async def repair_violations(
     Returns the artifact list with corrections applied (str.replace).
     Artifacts with no violations are returned unchanged.
     """
-    import json as _json
     from fitz_forge.planning.pipeline.stages.base import extract_json
 
     # Group violations by artifact filename
@@ -639,7 +747,10 @@ async def repair_violations(
         )
 
         messages = [
-            {"role": "system", "content": "You are a code repair assistant. Fix only the specified errors."},
+            {
+                "role": "system",
+                "content": "You are a code repair assistant. Fix only the specified errors.",
+            },
             {"role": "user", "content": prompt},
         ]
 
@@ -685,9 +796,11 @@ async def repair_violations(
 # Combined validator
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GroundingReport:
     """Combined output from both validation paths."""
+
     ast_violations: list[Violation]
     llm_gaps: dict[str, Any] | None = None  # parsed LLM response
     total_violations: int = 0
@@ -727,8 +840,7 @@ async def validate_grounding(
     # Path 1: AST
     ast_violations = check_all_artifacts(artifacts, structural_index)
     logger.info(
-        f"Grounding AST check: {len(ast_violations)} violations "
-        f"across {len(artifacts)} artifacts"
+        f"Grounding AST check: {len(ast_violations)} violations across {len(artifacts)} artifacts"
     )
     for v in ast_violations:
         logger.info(f"  {v.artifact}:{v.line} {v.kind}: {v.symbol} — {v.detail}")
@@ -738,16 +850,22 @@ async def validate_grounding(
     if client is not None:
         try:
             prompt = build_llm_grounding_prompt(
-                ast_violations, artifacts, structural_index, resolutions,
+                ast_violations,
+                artifacts,
+                structural_index,
+                resolutions,
             )
             messages = [
-                {"role": "system", "content": "You are a code reviewer validating plan artifacts against a real codebase."},
+                {
+                    "role": "system",
+                    "content": "You are a code reviewer validating plan artifacts against a real codebase.",
+                },
                 {"role": "user", "content": prompt},
             ]
             raw = await client.generate(messages=messages, max_tokens=4096)
             # Try to parse as JSON
-            import json
             from fitz_forge.planning.pipeline.stages.base import extract_json
+
             try:
                 llm_gaps = extract_json(raw)
             except ValueError:

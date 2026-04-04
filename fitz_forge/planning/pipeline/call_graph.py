@@ -9,7 +9,7 @@ Pure Python -- no LLM calls.
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CallGraphNode:
     """A node in the call graph representing a file and its relevant symbols."""
+
     file_path: str
     symbols: list[str]
     one_line_summary: str
@@ -27,6 +28,7 @@ class CallGraphNode:
 @dataclass
 class CallGraph:
     """Ordered call graph from task description to implementation."""
+
     nodes: list[CallGraphNode]
     edges: list[tuple[str, str]]
     entry_points: list[str]
@@ -36,12 +38,10 @@ class CallGraph:
         """Extract subgraph containing only the specified files."""
         path_set = set(file_paths)
         nodes = [n for n in self.nodes if n.file_path in path_set]
-        edges = [
-            (s, t) for s, t in self.edges
-            if s in path_set and t in path_set
-        ]
+        edges = [(s, t) for s, t in self.edges if s in path_set and t in path_set]
         return CallGraph(
-            nodes=nodes, edges=edges,
+            nodes=nodes,
+            edges=edges,
             entry_points=[e for e in self.entry_points if e in path_set],
             max_depth=self.max_depth,
         )
@@ -68,8 +68,10 @@ class CallGraph:
             tgt_node = node_map.get(tgt)
             annotation = ""
             if (
-                src_node and tgt_node
-                and src_node.class_detail and tgt_node.class_detail
+                src_node
+                and tgt_node
+                and src_node.class_detail
+                and tgt_node.class_detail
                 and len(src_node.class_detail) + len(tgt_node.class_detail) < 400
             ):
                 annotation = f"  # {src_node.class_detail} uses {tgt_node.class_detail}"
@@ -79,11 +81,7 @@ class CallGraph:
         lines.append("FILES IN GRAPH:")
         for node in displayed:
             detail = node.class_detail or ", ".join(node.symbols[:5])
-            lines.append(
-                f"  [{node.depth}] {node.file_path}: "
-                f"{node.one_line_summary} "
-                f"({detail})"
-            )
+            lines.append(f"  [{node.depth}] {node.file_path}: {node.one_line_summary} ({detail})")
         if len(self.nodes) > max_nodes:
             lines.append(f"  ... and {len(self.nodes) - max_nodes} more files at deeper levels")
         return "\n".join(lines)
@@ -186,7 +184,7 @@ def extract_call_graph(
                 continue
             score = 0
             entry_text = file_entries_parsed.get(neighbor, "")
-            path_parts = re.split(r'[_/.\-]', neighbor.lower())
+            path_parts = re.split(r"[_/.\-]", neighbor.lower())
             for kw in keywords:
                 if kw in path_parts:
                     score += 2
@@ -219,8 +217,11 @@ def extract_call_graph(
         if file_path not in _disk_index_cache:
             try:
                 from fitz_forge.planning.agent.indexer import build_structural_index
+
                 idx = build_structural_index(
-                    source_dir, [file_path], max_file_bytes=200_000,
+                    source_dir,
+                    [file_path],
+                    max_file_bytes=200_000,
                 )
                 parsed = _parse_structural_index(idx, lowercase=False)
                 _disk_index_cache[file_path] = parsed.get(file_path, "")
@@ -236,13 +237,15 @@ def extract_call_graph(
         symbols = _extract_symbols(raw_entry or entry)
         doc_line = _extract_doc_line(raw_entry or entry)
         class_detail = _get_class_detail(file_path)
-        nodes.append(CallGraphNode(
-            file_path=file_path,
-            symbols=symbols,
-            one_line_summary=doc_line,
-            depth=depth,
-            class_detail=class_detail,
-        ))
+        nodes.append(
+            CallGraphNode(
+                file_path=file_path,
+                symbols=symbols,
+                one_line_summary=doc_line,
+                depth=depth,
+                class_detail=class_detail,
+            )
+        )
 
     edges = []
     visited_set = set(visited.keys())
@@ -259,8 +262,10 @@ def extract_call_graph(
     )
 
     return CallGraph(
-        nodes=nodes, edges=edges,
-        entry_points=entry_points, max_depth=max_depth,
+        nodes=nodes,
+        edges=edges,
+        entry_points=entry_points,
+        max_depth=max_depth,
     )
 
 
@@ -270,37 +275,139 @@ def _extract_task_keywords(description: str) -> list[str]:
     quoted = re.findall(r'["\']([^"\']+)["\']', description)
     quoted_words = []
     for q in quoted:
-        q = re.sub(r'\.\w+$', '', q)
-        quoted_words.extend(re.split(r'[_./\-]', q))
+        q = re.sub(r"\.\w+$", "", q)
+        quoted_words.extend(re.split(r"[_./\-]", q))
 
     # Tokenize main text
-    tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', description)
+    tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", description)
 
     all_words = set()
     for token in tokens + quoted_words:
         # Split CamelCase
-        parts = re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)', token)
+        parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)", token)
         if parts:
             all_words.update(p.lower() for p in parts)
         all_words.add(token.lower())
 
     stop_words = {
-        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-        'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-        'can', 'need', 'dare', 'ought', 'used', 'to', 'of', 'in',
-        'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
-        'through', 'during', 'before', 'after', 'above', 'below',
-        'between', 'out', 'off', 'over', 'under', 'again', 'further',
-        'then', 'once', 'and', 'but', 'or', 'nor', 'not', 'so',
-        'than', 'too', 'very', 'just', 'about', 'this', 'that',
-        'these', 'those', 'each', 'every', 'all', 'both', 'few',
-        'more', 'most', 'other', 'some', 'such', 'no', 'only',
-        'same', 'also', 'how', 'what', 'which', 'who', 'when',
-        'where', 'why', 'up', 'down', 'it', 'its', 'me', 'my',
-        'i', 'we', 'our', 'you', 'your', 'they', 'them', 'their',
-        'him', 'her', 'he', 'she', 'add', 'get', 'set', 'see',
-        'want', 'like', 'make', 'use', 'new',
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "used",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "out",
+        "off",
+        "over",
+        "under",
+        "again",
+        "further",
+        "then",
+        "once",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "than",
+        "too",
+        "very",
+        "just",
+        "about",
+        "this",
+        "that",
+        "these",
+        "those",
+        "each",
+        "every",
+        "all",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "only",
+        "same",
+        "also",
+        "how",
+        "what",
+        "which",
+        "who",
+        "when",
+        "where",
+        "why",
+        "up",
+        "down",
+        "it",
+        "its",
+        "me",
+        "my",
+        "i",
+        "we",
+        "our",
+        "you",
+        "your",
+        "they",
+        "them",
+        "their",
+        "him",
+        "her",
+        "he",
+        "she",
+        "add",
+        "get",
+        "set",
+        "see",
+        "want",
+        "like",
+        "make",
+        "use",
+        "new",
     }
 
     keywords = [w for w in all_words if w not in stop_words and len(w) >= 3]
@@ -308,7 +415,8 @@ def _extract_task_keywords(description: str) -> list[str]:
 
 
 def _parse_structural_index(
-    structural_index: str, lowercase: bool = True,
+    structural_index: str,
+    lowercase: bool = True,
 ) -> dict[str, str]:
     """Parse structural index into per-file text entries.
 
@@ -341,7 +449,7 @@ def _match_keywords_to_files(
     for file_path, entry_text in file_entries.items():
         score = 0
         path_lower = file_path.lower()
-        path_parts = re.split(r'[_/.\-]', path_lower)
+        path_parts = re.split(r"[_/.\-]", path_lower)
         for kw in keywords:
             if kw in path_parts:
                 score += 2
@@ -358,17 +466,17 @@ def _extract_symbols(index_entry: str) -> list[str]:
     symbols = []
     for line in index_entry.splitlines():
         if line.startswith("classes:"):
-            raw = line[len("classes:"):].strip()
+            raw = line[len("classes:") :].strip()
             for cls_str in raw.split(";"):
                 cls_str = cls_str.strip()
-                name_match = re.match(r'(\w+)', cls_str)
+                name_match = re.match(r"(\w+)", cls_str)
                 if name_match:
                     symbols.append(name_match.group(1))
         elif line.startswith("functions:"):
-            raw = line[len("functions:"):].strip()
+            raw = line[len("functions:") :].strip()
             for func_str in raw.split(","):
                 func_str = func_str.strip()
-                name_match = re.match(r'(\w+)', func_str)
+                name_match = re.match(r"(\w+)", func_str)
                 if name_match:
                     symbols.append(name_match.group(1))
     return symbols
@@ -385,7 +493,7 @@ def _extract_class_detail(index_entry: str) -> str:
     parts = []
     for line in index_entry.splitlines():
         if line.startswith("classes:"):
-            raw = line[len("classes:"):].strip()
+            raw = line[len("classes:") :].strip()
             for cls_str in raw.split(";"):
                 cls_str = cls_str.strip()
                 if cls_str:
@@ -393,7 +501,7 @@ def _extract_class_detail(index_entry: str) -> str:
     if not parts:
         for line in index_entry.splitlines():
             if line.startswith("functions:"):
-                raw = line[len("functions:"):].strip()
+                raw = line[len("functions:") :].strip()
                 if raw:
                     # Strip private functions too
                     funcs = [f.strip() for f in raw.split(",")]
@@ -416,7 +524,7 @@ def _strip_private_methods(cls_str: str) -> str:
         return cls_str
 
     prefix = cls_str[:bracket_start]
-    methods_str = cls_str[bracket_start + 1:bracket_end]
+    methods_str = cls_str[bracket_start + 1 : bracket_end]
 
     # Split on commas, keeping "method -> Type" together
     methods = [m.strip() for m in methods_str.split(",")]

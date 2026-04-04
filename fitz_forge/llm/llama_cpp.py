@@ -13,12 +13,10 @@ import ctypes
 import inspect
 import json
 import logging
-import os
 import platform
 import re
 import statistics
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -52,7 +50,11 @@ def _strip_thinking(text: str) -> str:
     text = _THINK_RE.sub("", text)
     # Handle unclosed <think> (generation ended mid-thought)
     if "<think>" in text:
-        text = text.split("</think>")[-1].lstrip() if "</think>" in text else text.split("<think>")[0].rstrip()
+        text = (
+            text.split("</think>")[-1].lstrip()
+            if "</think>" in text
+            else text.split("<think>")[0].rstrip()
+        )
     return text
 
 
@@ -112,6 +114,7 @@ class TokSecBaseline:
     def __init__(self, path: Path | None = None):
         if path is None:
             import platformdirs
+
             path = Path(platformdirs.user_config_path("fitz-forge")) / "tok_baselines.json"
         self._path = path
         self._data: dict = self._load()
@@ -130,7 +133,9 @@ class TokSecBaseline:
     def _key(model_path: str, context_size: int) -> str:
         return f"{model_path}::ctx{context_size}"
 
-    def record(self, model_path: str, context_size: int, prefill_tok_s: float, prefill_s: float) -> None:
+    def record(
+        self, model_path: str, context_size: int, prefill_tok_s: float, prefill_s: float
+    ) -> None:
         """Record a prefill tok/s sample. Ignores very fast calls (too noisy)."""
         if prefill_tok_s < 1.0 or prefill_s < self._MIN_PREFILL_S:
             return
@@ -138,11 +143,13 @@ class TokSecBaseline:
         entry = self._data.setdefault(key, {"samples": []})
         entry["samples"].append(round(prefill_tok_s, 1))
         if len(entry["samples"]) > self._MAX_SAMPLES:
-            entry["samples"] = entry["samples"][-self._MAX_SAMPLES:]
+            entry["samples"] = entry["samples"][-self._MAX_SAMPLES :]
         entry["median"] = round(statistics.median(entry["samples"]), 1)
         self._save()
 
-    def is_degraded(self, model_path: str, context_size: int, prefill_tok_s: float, prefill_s: float) -> bool:
+    def is_degraded(
+        self, model_path: str, context_size: int, prefill_tok_s: float, prefill_s: float
+    ) -> bool:
         """Check if current prefill tok/s indicates GPU performance degradation."""
         if prefill_tok_s < 1.0 or prefill_s < self._MIN_PREFILL_S:
             return False
@@ -269,11 +276,16 @@ class LlamaCppClient:
 
         cmd = [
             self._server_path,
-            "--host", "127.0.0.1",
-            "--port", str(self._port),
-            "-m", model_path,
-            "-c", str(ctx),
-            "-ngl", str(model_cfg.gpu_layers),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self._port),
+            "-m",
+            model_path,
+            "-c",
+            str(ctx),
+            "-ngl",
+            str(model_cfg.gpu_layers),
         ]
         if model_cfg.flash_attention:
             cmd.extend(["--flash-attn", "on"])
@@ -282,9 +294,7 @@ class LlamaCppClient:
         if model_cfg.cache_type_v:
             cmd.extend(["--cache-type-v", model_cfg.cache_type_v])
 
-        logger.info(
-            f"Starting llama-server ({tier}): {' '.join(cmd)}"
-        )
+        logger.info(f"Starting llama-server ({tier}): {' '.join(cmd)}")
 
         # Kill any orphaned llama-server processes before spawning
         self._kill_orphaned_servers()
@@ -312,9 +322,7 @@ class LlamaCppClient:
         self._active_context_size = ctx
         self.model = model_cfg.path
 
-        logger.info(
-            f"llama-server ready ({tier}): {model_cfg.path} (ctx={ctx})"
-        )
+        logger.info(f"llama-server ready ({tier}): {model_cfg.path} (ctx={ctx})")
 
     @staticmethod
     def _kill_orphaned_servers() -> None:
@@ -324,7 +332,8 @@ class LlamaCppClient:
         try:
             result = subprocess.run(
                 ["taskkill", "/IM", "llama-server.exe", "/F"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 logger.info("Killed orphaned llama-server process(es)")
@@ -351,7 +360,9 @@ class LlamaCppClient:
         logger.info("llama-server stopped")
 
     async def ensure_model(
-        self, model_name: str, context_size: int | None = None,
+        self,
+        model_name: str,
+        context_size: int | None = None,
     ) -> None:
         """Switch to the tier for the given model name.
 
@@ -362,7 +373,9 @@ class LlamaCppClient:
         await self._ensure_tier(model_name, context_size=context_size)
 
     async def _ensure_tier(
-        self, model_name: str | None, context_size: int | None = None,
+        self,
+        model_name: str | None,
+        context_size: int | None = None,
     ) -> None:
         """Restart server only if the actual model path or context size differs.
 
@@ -378,8 +391,7 @@ class LlamaCppClient:
         # Resolve tier from model name
         if model_name == self._smart_model.path:
             needed = "smart"
-        elif (model_name == self._mid_model.path
-              and self._mid_model.path != self._fast_model.path):
+        elif model_name == self._mid_model.path and self._mid_model.path != self._fast_model.path:
             needed = "mid"
         else:
             needed = "fast"
@@ -402,9 +414,7 @@ class LlamaCppClient:
 
         if same_model and not ctx_changed:
             if self._active_tier != needed:
-                logger.debug(
-                    f"Tier {self._active_tier}→{needed} (same model, skipping restart)"
-                )
+                logger.debug(f"Tier {self._active_tier}→{needed} (same model, skipping restart)")
                 self._active_tier = needed
             return
 
@@ -519,12 +529,9 @@ class LlamaCppClient:
                 if self._process and self._process.poll() is not None:
                     stderr = ""
                     if self._process.stderr:
-                        stderr = self._process.stderr.read().decode(
-                            errors="replace"
-                        )
+                        stderr = self._process.stderr.read().decode(errors="replace")
                     raise RuntimeError(
-                        f"llama-server exited with code "
-                        f"{self._process.returncode}: {stderr[:500]}"
+                        f"llama-server exited with code {self._process.returncode}: {stderr[:500]}"
                     )
                 try:
                     resp = await http.get(url)
@@ -534,10 +541,7 @@ class LlamaCppClient:
                     pass
                 await asyncio.sleep(1.0)
 
-        raise TimeoutError(
-            f"llama-server did not become ready within "
-            f"{self._startup_timeout}s"
-        )
+        raise TimeoutError(f"llama-server did not become ready within {self._startup_timeout}s")
 
     async def _ensure_alive(self) -> None:
         """Restart the server if it has crashed, raise if not started."""
@@ -548,10 +552,7 @@ class LlamaCppClient:
             if self._process.stderr:
                 stderr = self._process.stderr.read().decode(errors="replace")
             code = self._process.returncode
-            logger.warning(
-                f"llama-server crashed (code {code}), restarting: "
-                f"{stderr[:500]}"
-            )
+            logger.warning(f"llama-server crashed (code {code}), restarting: {stderr[:500]}")
             self._process = None
             self._client = None
             tier = self._active_tier or "fast"
@@ -605,9 +606,7 @@ class LlamaCppClient:
         try:
             await self._ensure_alive()
             async with httpx.AsyncClient(timeout=5.0) as http:
-                resp = await http.get(
-                    f"http://127.0.0.1:{self._port}/health"
-                )
+                resp = await http.get(f"http://127.0.0.1:{self._port}/health")
             return resp.status_code == 200
         except Exception as e:
             logger.error(f"llama-cpp health check failed: {e}")
@@ -640,10 +639,7 @@ class LlamaCppClient:
         await self._ensure_alive()
 
         effective_model = model or self.model
-        logger.info(
-            f"LlamaCpp.generate: model={effective_model}, "
-            f"messages={len(messages)}"
-        )
+        logger.info(f"LlamaCpp.generate: model={effective_model}, messages={len(messages)}")
 
         t0 = time.monotonic()
         t_first_token = None
@@ -679,15 +675,17 @@ class LlamaCppClient:
         est_input_tokens = sum(len(m.get("content", "")) for m in messages) / 4
         gen_tok_s = est_output_tokens / gen_s if gen_s > 0.05 else 0.0
         prefill_tok_s = est_input_tokens / prefill_s if prefill_s > 0.05 else 0.0
-        self._call_metrics.append({
-            "elapsed_s": elapsed,
-            "prefill_s": prefill_s,
-            "gen_s": gen_s,
-            "output_chars": len(result),
-            "tok_s": gen_tok_s,
-            "prefill_tok_s": prefill_tok_s,
-            "model": effective_model,
-        })
+        self._call_metrics.append(
+            {
+                "elapsed_s": elapsed,
+                "prefill_s": prefill_s,
+                "gen_s": gen_s,
+                "output_chars": len(result),
+                "tok_s": gen_tok_s,
+                "prefill_tok_s": prefill_tok_s,
+                "model": effective_model,
+            }
+        )
         logger.info(
             f"LlamaCpp.generate: {len(result)} chars in {elapsed:.1f}s "
             f"(prefill {prefill_s:.1f}s ~{prefill_tok_s:.0f} tok/s, "
@@ -698,13 +696,14 @@ class LlamaCppClient:
         ctx = self._active_context_size or 0
         if ctx > 0:
             degraded = not self._degradation_warned and self._baseline.is_degraded(
-                effective_model, ctx, prefill_tok_s, prefill_s,
+                effective_model,
+                ctx,
+                prefill_tok_s,
+                prefill_s,
             )
             if degraded:
                 self._degradation_warned = True
-                logger.warning(
-                    "GPU degradation detected — auto-resetting GPU driver"
-                )
+                logger.warning("GPU degradation detected — auto-resetting GPU driver")
                 await self._auto_reset_gpu()
                 # Don't record the degraded sample — it would poison the baseline
             else:
@@ -713,7 +712,8 @@ class LlamaCppClient:
         return result
 
     async def generate_with_fallback(
-        self, messages: list[dict],
+        self,
+        messages: list[dict],
     ) -> tuple[str, str]:
         """Generate using the smart model (no OOM fallback needed).
 
@@ -803,14 +803,16 @@ class LlamaCppClient:
                         arguments=args,
                     )
                 )
-                assistant_tool_calls.append({
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                })
+                assistant_tool_calls.append(
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                )
 
         assistant_dict: dict = {"role": "assistant", "content": msg.content}
         if assistant_tool_calls:
@@ -823,7 +825,9 @@ class LlamaCppClient:
         )
 
     async def generate_with_monitoring(
-        self, messages: list[dict], monitor: "MemoryMonitor",
+        self,
+        messages: list[dict],
+        monitor: "MemoryMonitor",
     ) -> tuple[str, str]:
         """Generate with memory monitoring running in parallel.
 
@@ -835,9 +839,7 @@ class LlamaCppClient:
             (response_text, model_used)
         """
         monitor_task = asyncio.create_task(monitor.start_monitoring())
-        generation_task = asyncio.create_task(
-            self.generate_with_fallback(messages)
-        )
+        generation_task = asyncio.create_task(self.generate_with_fallback(messages))
 
         done, pending = await asyncio.wait(
             {monitor_task, generation_task},
@@ -854,8 +856,7 @@ class LlamaCppClient:
             threshold_exceeded = monitor_task.result()
             if threshold_exceeded:
                 raise MemoryError(
-                    f"Memory threshold exceeded "
-                    f"({monitor.threshold_percent}%) during generation"
+                    f"Memory threshold exceeded ({monitor.threshold_percent}%) during generation"
                 )
             result = await generation_task
             return result
