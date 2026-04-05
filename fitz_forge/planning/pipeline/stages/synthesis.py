@@ -668,6 +668,54 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
     return sigs
 
 
+def _filter_fabricated_signatures(
+    signatures: list[str],
+    prior_outputs: dict[str, Any],
+) -> list[str]:
+    """Filter out cross-artifact signatures containing fabricated methods.
+
+    Prevents F3 signature propagation from amplifying fabrication:
+    if one artifact invents a nonexistent method, its signature would tell
+    subsequent artifacts to "match these exactly" — creating a cascade.
+
+    Only filters methods that don't exist on ANY known class. New methods
+    that the artifact legitimately creates will pass through if they share
+    a name with an existing method on some class.
+    """
+    import re as _re
+
+    agent_ctx = prior_outputs.get("_agent_context", {})
+    full_index = agent_ctx.get("full_structural_index", "")
+    if not full_index:
+        full_index = prior_outputs.get("_gathered_context", "")
+    if not full_index:
+        return signatures
+
+    from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
+    lookup = StructuralIndexLookup(full_index)
+    known_methods: set[str] = set()
+    for cls_name in lookup.classes:
+        cls = lookup.find_class(cls_name)
+        if cls and cls.methods:
+            known_methods.update(m for m in cls.methods if not m.startswith("__"))
+
+    filtered = []
+    for sig in signatures:
+        m = _re.search(r"def\s+(\w+)\s*\(", sig)
+        if m:
+            method = m.group(1)
+            if method not in known_methods:
+                logger.info(
+                    f"Stage 'synthesis': filtering fabricated signature: "
+                    f"{sig[:80]}"
+                )
+                continue
+        filtered.append(sig)
+
+    return filtered
+
+
 def _compress_reasoning_for_artifact(reasoning: str) -> str:
     """Compress synthesis reasoning for per-artifact prompts.
 
@@ -1527,14 +1575,14 @@ class SynthesisStage(PipelineStage):
         reasoning: str,
         prior_outputs: dict[str, Any],
     ) -> str:
-        """Remove fabricated method calls from reasoning before artifact gen.
+        """Remove fabricated method calls from reasoning/decisions.
 
-        Scans the reasoning for patterns like `service.xxx_stream()`
-        or `service.xxx()` where the method doesn't exist on the resolved
-        type. Replaces the fabricated call with a generic placeholder
-        so the artifact generator doesn't treat it as an instruction.
+        Scans text for qualified calls like `object.method(` where `method`
+        doesn't exist on any known class in the structural index. Replaces
+        the call with a generic placeholder so the artifact generator
+        doesn't treat it as an instruction to call a nonexistent method.
 
-        Uses the same imported type API resolution as the artifact prompt.
+        Codebase-agnostic: no hardcoded method names or patterns.
         """
         import re as _re
 
@@ -1548,55 +1596,60 @@ class SynthesisStage(PipelineStage):
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
         lookup = StructuralIndexLookup(full_index)
 
-        # Build set of all known public methods across all classes
-        known_methods: dict[str, set[str]] = {}  # class_name -> {methods}
+        # Build flat set of all known public methods across all classes
+        all_known_methods: set[str] = set()
         for cls_name in lookup.classes:
             cls = lookup.find_class(cls_name)
             if cls and cls.methods:
-                known_methods[cls_name] = {
+                all_known_methods.update(
                     m for m in cls.methods if not m.startswith("__")
-                }
+                )
 
-        # Find fabricated method references in reasoning.
-        # The reasoning uses various formats:
-        #   service.answer_stream(...)
-        #   `answer_stream()`
-        #   method `answer_stream`
-        #   a new answer_stream() method
-        # We match any word_stream pattern and check if it exists.
         n_filtered = 0
         lines = reasoning.split("\n")
         filtered_lines = []
 
         for line in lines:
-            # Match any xxx_stream pattern (with or without object prefix)
+            # Match qualified method calls: object.method(
+            # This catches service.query_stream(), engine.answer(),
+            # self._router.retrieve_chunks(), etc.
             matches = list(_re.finditer(
-                r'`?(\w+_stream)\s*\(`?',
+                r'(\w+)\.(\w+)\s*\(',
                 line,
             ))
             if matches:
+                _SKIP_OBJECTS = {
+                    "self", "cls", "super",
+                    "os", "re", "sys", "json", "math", "time",
+                    "path", "ast", "io", "logging", "logger",
+                    "typing", "functools", "itertools",
+                    "collections", "datetime", "hashlib",
+                    "textwrap", "pathlib", "shutil",
+                    "e", "i",  # e.g., i.e.
+                }
                 for m in reversed(matches):
-                    method = m.group(1)
-                    # Skip if it exists on ANY known class
-                    exists = any(
-                        method in meths
-                        for meths in known_methods.values()
+                    obj, method = m.group(1), m.group(2)
+                    if obj in _SKIP_OBJECTS:
+                        continue
+                    if method.startswith("__"):
+                        continue
+                    # Skip if method exists on ANY known class
+                    if method in all_known_methods:
+                        continue
+                    # Method doesn't exist — replace with placeholder
+                    line = (
+                        line[:m.start()]
+                        + "/* compose from existing methods */"
+                        + line[m.end():]
                     )
-                    if not exists:
-                        # Replace fabricated method with placeholder
-                        line = (
-                            line[:m.start()]
-                            + "/* new streaming method (compose from existing) */"
-                            + line[m.end():]
-                        )
-                        n_filtered += 1
+                    n_filtered += 1
 
             filtered_lines.append(line)
 
         if n_filtered > 0:
             logger.info(
                 f"Stage 'synthesis': filtered {n_filtered} fabricated "
-                f"method refs from reasoning before artifact gen"
+                f"method refs from text before artifact gen"
             )
 
         return "\n".join(filtered_lines)
@@ -2043,6 +2096,11 @@ class SynthesisStage(PipelineStage):
                     artifact.get("content", ""),
                     filename,
                 )
+                # Filter out signatures with fabricated methods to
+                # prevent F3 propagation amplifying F10 fabrication
+                sigs = _filter_fabricated_signatures(
+                    sigs, prior_outputs,
+                )
                 prior_signatures.extend(sigs)
 
         elapsed = time.monotonic() - t0
@@ -2474,6 +2532,14 @@ class SynthesisStage(PipelineStage):
                 relevant_decisions,
                 reasoning,
                 prior_outputs,
+            )
+
+        # Filter fabricated method refs from decisions — same filter as
+        # reasoning. Decisions often say "implement service.query_stream()"
+        # which the artifact generator treats as an instruction.
+        if prior_outputs:
+            relevant_decisions = self._filter_fabricated_from_reasoning(
+                relevant_decisions, prior_outputs or {},
             )
 
         # Compress reasoning: keep architecture + design, drop roadmap/risk

@@ -98,7 +98,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| F10 | Service API fabrication | was 40% pipeline | ~8 pts (floor plan driver) | Refinement pass (context trim) | ✅ | 300+48+35 pipeline | 40% pipeline | **0%** (0/5 refined) | ✅ |
+| F10 | Service API fabrication | 50% of plans (run 70) | ~8 pts (floor plan driver) | Decision filter + generic detection | ✅ | 300+48+35+10 pipeline | 54% plans (run 68) | **50% plans, 18% artifacts** (run 70) | 🟡 |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Upstream fix (F9 ref injection) | ✅ | 50 | 0% (0/50) | **0%** (F9 prevents) | ✅ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
@@ -114,7 +114,7 @@ Every LLM call in the pipeline that can or has produced failures:
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (post-refinement):** F10 fixed via refinement pass — explore-then-focus design reduces context 48-65%, eliminates fabrication (40%→0% in pipeline testing). Decision merger (F20) reduces decisions 13→8. Reasoning split into design + roadmap_risk. All prompts genericized (F15-F18). F19 deferred (load-bearing).
+**Current state (run 70):** F10 partially fixed — decision filter + generic fabrication detection reduced artifact-level F10 from ~54% to 18%, but plan-level still 50%. query.py is the persistent hotspot (calls `service.xxx()`). Decision merger (F20) reduces decisions 13→8. Reasoning split into design + roadmap_risk. All prompts genericized (F15-F18). F19 deferred (load-bearing).
 
 **Key lessons:**
 1. More LLM calls + pick the best = proactive fix for model quality limits (best-of-3, +2.8 pts)
@@ -133,7 +133,7 @@ Every LLM call in the pipeline that can or has produced failures:
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
-8. ~~**F10** — Service API fabrication.~~ ✅ DONE. Refinement pass (40%→0%). Explore-then-focus context trimming.
+8. **F10** — Service API fabrication. 🟡 PARTIALLY. Decision filter + generic detection (54%→50% plans, 18% artifacts). query.py persistent hotspot.
 9. ~~**F11** — Wrong object for correct method.~~ ✅ RESOLVED. 0% in isolation — F9 reference injection prevents.
 10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
 11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
@@ -153,3 +153,5 @@ Every LLM call in the pipeline that can or has produced failures:
 | 66 | 2026-04-03 | + F13C approach fallback | 10 | 42.5/60 | New high: 53/60. Zero empty architecture sections (F13C working). Floor 33. |
 | **67** | **2026-04-04** | **+ best-of-3 scope consensus** | **10** | **45.3/60** | **+5.2 over baseline. Floor 37, two 53s. Top 5 avg 49.2. Scope consensus filtering out over-engineered candidates.** |
 | **68** | **2026-04-04** | **+ F10 compose rule + F15-F18 genericize** | **48** | **not scored** | 100% structural success. 46% clean (0 fab). 54% have F10 fab in route/SDK artifacts. Fab originates in synthesis reasoning, not artifact gen. Compose rule works at artifact level (0/50 isolated) but reasoning overrides it. Harness methodology flaw discovered: frozen-state testing misses upstream variance. 1 plan with 0 roadmap phases. |
+| 69 | 2026-04-04 | + reasoning split + decision merger + refinement pass | 10 | not scored | 40% clean, 60% F10. Refinement pass fires (31K→6-12K) but F10 persists. |
+| **70** | **2026-04-05** | **+ decision filter + generic fabrication detection** | **10** | **not scored** | **50% plans with F10, 18% artifacts. query.py is persistent hotspot. Decision filter catches fabricated method refs in decisions. Signature filter prevents cross-artifact propagation. Generic: no hardcoded patterns.** |

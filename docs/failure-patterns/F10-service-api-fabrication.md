@@ -43,7 +43,7 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: PARTIALLY FIXED (isolated 0%, full pipeline 54%)
+## Status: PARTIALLY FIXED (54% → 50% plan-level, 18% artifact-level)
 
 ### Isolated fix (artifact generation only): 48%→0%
 Four-layer fix:
@@ -67,17 +67,37 @@ In the full pipeline, each plan gets a fresh reasoning. When the **synthesis rea
 - Clean plans: 22/48 (46%)
 
 ### Root Cause (updated)
-The fabrication originates during long-form synthesis reasoning generation. With ~50K prompt and ~11K output, attention drifts and the model loses grounding on which methods actually exist. Prompt-level fixes (reorder, cheatsheet, evidence removal) all failed or made it worse.
+Three amplification layers feed fabrication into artifacts:
 
-### Fix: Refinement Pass (40% → 0%)
-Design by user. The model writes a first-pass plan with full context (31K codebase). We then extract which files the plan actually references, trim the context to only those files (31K → 11-16K, 48-65% reduction), and re-run synthesis with the focused context. The model's attention is now concentrated on the files that matter.
+1. **Decisions**: Decision resolution mentions hypothetical methods ("add service.query_stream()"). These are injected UNFILTERED into the artifact prompt via `relevant_decisions`.
+2. **Reasoning**: Synthesis reasoning echoes decision instructions, proposing fabricated method calls.
+3. **Cross-artifact signatures**: F3 signature propagation extracts fabricated method signatures from one artifact and injects them as "match these exactly" into subsequent artifacts.
 
-- First pass: exploratory, full context, may fabricate
-- Refinement pass: focused, trimmed context, grounded
-- Cost: 1 extra synthesis reasoning call (~20-30s)
-- Result: 0/5 fabrication in pipeline testing (baseline 40%)
+The reasoning filter (`_filter_fabricated_from_reasoning`) was applied to reasoning but NOT to decisions — leaving decisions as a wide-open backdoor. The filter also only matched `_stream` patterns, making it codebase-specific.
+
+### Fix attempt 1: Refinement Pass (40% → 0% isolated, 60% full pipeline)
+Design by user. The model writes a first-pass plan with full context (31K codebase). We then extract which files the plan actually references, trim the context to only those files (31K → 11-16K, 48-65% reduction), and re-run synthesis with the focused context.
+
+- Result: 0/5 fabrication in isolated pipeline testing, but 60% in run 69 (10 plans)
+
+### Fix attempt 2: Decision filter + generic fabrication detection (run 70)
+Three changes:
+1. Apply `_filter_fabricated_from_reasoning` to `relevant_decisions` before artifact prompt injection
+2. Make the filter codebase-agnostic: match ANY `object.method(` call where method doesn't exist on any known class (no hardcoded `_stream` patterns)
+3. Filter cross-artifact signatures: reject signatures containing methods not found in structural index
+
+**Run 70 results (10 plans):**
+- Plan-level: 5/10 (50%) — down from 54% (run 68)
+- Artifact-level: 6/33 (18%) — significant improvement
+- Almost all fabrication is in query.py (route file calling FitzService)
+- engine.py, fitz.py, schemas.py mostly clean
+
+### Pattern: query.py is the persistent fabrication hotspot
+query.py must call `service.xxx()` to implement streaming. The model consistently invents `service.query_stream()`, `service.chat_stream()`, or `service.answer_stream()` instead of composing from `service.query()`. This is the core unsolved problem.
 
 ### Key lessons
 1. **Harness methodology**: Frozen-state testing misses upstream variance. The harness must vary ALL upstream stages.
 2. **Attention budget**: Prompt-level instructions can't survive 11K tokens of generation. Reducing context is more effective than adding rules.
 3. **Explore-then-focus**: Let the model think broadly first, then refine with focused input. Works WITH the model's natural behavior.
+4. **Filter ALL inputs**: Filtering reasoning but not decisions leaves a backdoor. All text injected into artifact prompts must be filtered.
+5. **Codebase-agnostic filters**: Hardcoding `_stream` patterns is fragile. Generic `object.method(` validation against the structural index works for any codebase.
