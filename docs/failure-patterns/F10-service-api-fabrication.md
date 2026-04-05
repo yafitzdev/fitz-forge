@@ -43,7 +43,7 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: PARTIALLY FIXED (54% → 50% plan-level, 18% artifact-level)
+## Status: PARTIALLY FIXED (54% → 24% in isolated harness)
 
 ### Isolated fix (artifact generation only): 48%→0%
 Four-layer fix:
@@ -92,8 +92,27 @@ Three changes:
 - Almost all fabrication is in query.py (route file calling FitzService)
 - engine.py, fitz.py, schemas.py mostly clean
 
-### Pattern: query.py is the persistent fabrication hotspot
-query.py must call `service.xxx()` to implement streaming. The model consistently invents `service.query_stream()`, `service.chat_stream()`, or `service.answer_stream()` instead of composing from `service.query()`. This is the core unsolved problem.
+### Fix attempt 3: Deterministic corrector (54% → 24%)
+
+After artifact generation, AST-detect `object.method()` calls where `method` doesn't exist on the resolved type, then string-replace with the closest real method. Zero LLM cost.
+
+Key implementation details:
+- Detection uses both structural index AND disk-resolved imported type APIs (FitzService wasn't in the structural index — only 30 files selected)
+- Skip list for framework objects (router, app) and common variables (token, chunk, request)
+- Test classes excluded from methods lookup (prevented `engine.answer_stream → engine.test_decorator_registration`)
+- Closest method found via `difflib.get_close_matches` (query_stream → query)
+
+LLM correction prompts were tried first and ALL failed:
+1. **Append correction to original prompt**: model ignores it (lost-in-the-middle, 23K chars)
+2. **Prepend hard constraint**: model ignores it (decisions override)
+3. **Focused correction with broken code**: model copies fabrication from shown code
+4. **Stripped prompt (no decisions/reasoning)**: model still fabricates from purpose alone
+
+The model KNOWS it's fabricating (writes comments like "this violates rules but satisfies task intent") but can't compose streaming from synchronous methods ~50% of the time. Deterministic repair is the only approach that works.
+
+### Root cause: import graph gap (also fixed)
+
+The import graph couldn't follow relative imports (`from .fitz_service import FitzService`), so the call graph had no edges between routes → service → engine. The decomposition couldn't trace the dependency chain and sometimes skipped the service layer. Fixed by resolving relative imports in `_extract_full_imports`.
 
 ### Key lessons
 1. **Harness methodology**: Frozen-state testing misses upstream variance. The harness must vary ALL upstream stages.
@@ -101,3 +120,5 @@ query.py must call `service.xxx()` to implement streaming. The model consistentl
 3. **Explore-then-focus**: Let the model think broadly first, then refine with focused input. Works WITH the model's natural behavior.
 4. **Filter ALL inputs**: Filtering reasoning but not decisions leaves a backdoor. All text injected into artifact prompts must be filtered.
 5. **Codebase-agnostic filters**: Hardcoding `_stream` patterns is fragile. Generic `object.method(` validation against the structural index works for any codebase.
+6. **LLM correction can't overcome LLM fabrication**: When decisions instruct the model to build something impossible with available APIs, no prompt variation can fix it. Deterministic repair is the only reliable approach.
+7. **Import graph completeness matters**: Relative imports must be resolved for the call graph to show the full dependency chain. Without it, the decomposition flies blind.
