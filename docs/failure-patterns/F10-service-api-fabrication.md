@@ -43,7 +43,7 @@ This isn't fabrication-from-ignorance like F9. The model KNOWS FitzService doesn
 
 The 40% of clean artifacts show the model CAN write correct bridging code (calling `service.query()` and wrapping it). But the 3B model doesn't do this consistently.
 
-## Status: PARTIALLY FIXED (54% → 24% in isolated harness)
+## Status: PARTIALLY FIXED (54% → 22% plan-level pipeline, 11% isolated harness)
 
 ### Isolated fix (artifact generation only): 48%→0%
 Four-layer fix:
@@ -92,15 +92,20 @@ Three changes:
 - Almost all fabrication is in query.py (route file calling FitzService)
 - engine.py, fitz.py, schemas.py mostly clean
 
-### Fix attempt 3: Deterministic corrector (54% → 24%)
+### Fix attempt 3: Deterministic corrector (54% → 11% harness, 22% pipeline)
 
-After artifact generation, AST-detect `object.method()` calls where `method` doesn't exist on the resolved type, then string-replace with the closest real method. Zero LLM cost.
+After artifact generation, detect `object.method()` calls where `method` doesn't exist on the resolved type, then string-replace with the closest real method via `difflib.get_close_matches`. Zero LLM cost.
 
-Key implementation details:
-- Detection uses both structural index AND disk-resolved imported type APIs (FitzService wasn't in the structural index — only 30 files selected)
-- Skip list for framework objects (router, app) and common variables (token, chunk, request)
-- Test classes excluded from methods lookup (prevented `engine.answer_stream → engine.test_decorator_registration`)
-- Closest method found via `difflib.get_close_matches` (query_stream → query)
+Detection layers (each iteration caught a different gap):
+1. **AST detection** of `Name.method()` calls against structural index + imported type APIs
+2. **Regex fallback** when AST parsing fails (unparseable code fragments with bad indentation)
+3. **Chained attribute access**: `self._service.query_stream()` — Attribute chain, not just Name nodes
+4. **Underscore stripping** in heuristic: `_service` → `service` → matches `FitzService`
+5. **Artifact methods bypass fix**: `def query_stream()` (endpoint) shouldn't prevent detecting `service.query_stream()` (fabrication) — only skip artifact methods for `self.xxx()` calls
+
+Results:
+- Frozen harness (100 runs, 10 prompts x 10): 54% → 11%
+- Full pipeline (run 72, 9 plans): 54% → 22% plans, 6% artifacts
 
 LLM correction prompts were tried first and ALL failed:
 1. **Append correction to original prompt**: model ignores it (lost-in-the-middle, 23K chars)
