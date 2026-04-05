@@ -35,6 +35,139 @@ from fitz_forge.planning.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Cached class resolver — scans all .py files on disk ONCE, builds a
+# {ClassName: ClassInfo} map. Used by all functions that need to look up
+# class methods/fields when the structural index (30 files) doesn't have them.
+# Replaces 5+ scattered disk fallbacks that each had a broken filename filter.
+# ---------------------------------------------------------------------------
+
+import ast as _ast_module
+from dataclasses import dataclass as _dataclass, field as _field
+from pathlib import Path as _Path
+
+
+@_dataclass
+class _CachedClassInfo:
+    """Cached class metadata from AST parsing."""
+
+    file_path: str
+    methods: list[str] = _field(default_factory=list)  # public method names
+    method_sigs: list[str] = _field(default_factory=list)  # "name(params) -> ret"
+    fields: list[str] = _field(default_factory=list)  # annotated field names
+
+
+class _ClassCache:
+    """Lazy-built cache of all classes in a source directory.
+
+    First call to `get()` triggers a full scan of all .py files.
+    Subsequent calls are O(1) dict lookups. The scan takes ~1-2s
+    for ~800 files — negligible vs 300s+ LLM calls.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[str, _CachedClassInfo] | None = None
+        self._source_dir: str = ""
+
+    def get(
+        self,
+        class_name: str,
+        source_dir: str,
+    ) -> _CachedClassInfo | None:
+        """Look up a class by name. Builds cache on first call."""
+        if self._cache is None or source_dir != self._source_dir:
+            self._build(source_dir)
+        return self._cache.get(class_name) if self._cache else None
+
+    def get_all(self, source_dir: str) -> dict[str, _CachedClassInfo]:
+        """Return the full cache. Builds on first call."""
+        if self._cache is None or source_dir != self._source_dir:
+            self._build(source_dir)
+        return self._cache or {}
+
+    def _build(self, source_dir: str) -> None:
+        self._source_dir = source_dir
+        self._cache = {}
+        root = _Path(source_dir)
+        if not root.is_dir():
+            return
+
+        for py_file in root.rglob("*.py"):
+            rel = str(py_file.relative_to(root)).replace("\\", "/")
+            if ".venv" in rel or "__pycache__" in rel:
+                continue
+            try:
+                text = py_file.read_bytes()[:200_000].decode(
+                    "utf-8", errors="replace",
+                )
+                tree = _ast_module.parse(text)
+            except (SyntaxError, OSError):
+                continue
+
+            for node in _ast_module.iter_child_nodes(tree):
+                if not isinstance(node, _ast_module.ClassDef):
+                    continue
+                info = _CachedClassInfo(file_path=rel)
+
+                for child in _ast_module.iter_child_nodes(node):
+                    # Methods
+                    if isinstance(
+                        child,
+                        (_ast_module.FunctionDef, _ast_module.AsyncFunctionDef),
+                    ):
+                        name = child.name
+                        if not name.startswith("_") or name == "__init__":
+                            if not name.startswith("_"):
+                                info.methods.append(name)
+                            # Build signature
+                            params = []
+                            for a in child.args.args:
+                                if a.arg == "self":
+                                    continue
+                                ann = ""
+                                if a.annotation:
+                                    try:
+                                        ann = f": {_ast_module.unparse(a.annotation)}"
+                                    except Exception:
+                                        pass
+                                params.append(f"{a.arg}{ann}")
+                            ret = ""
+                            if child.returns:
+                                try:
+                                    ret = f" -> {_ast_module.unparse(child.returns)}"
+                                except Exception:
+                                    pass
+                            prefix = (
+                                "async "
+                                if isinstance(child, _ast_module.AsyncFunctionDef)
+                                else ""
+                            )
+                            sig = f"{prefix}{name}({', '.join(params)}){ret}"
+                            if not name.startswith("_"):
+                                info.method_sigs.append(sig)
+
+                    # Fields (annotated assignments — Pydantic/dataclass)
+                    if isinstance(child, _ast_module.AnnAssign):
+                        if isinstance(child.target, _ast_module.Name):
+                            fname = child.target.id
+                            if not fname.startswith("_"):
+                                info.fields.append(fname)
+
+                if info.methods or info.fields:
+                    # First definition wins (avoid test class shadowing)
+                    if node.name not in self._cache:
+                        self._cache[node.name] = info
+
+        logger.info(
+            f"Class cache: indexed {len(self._cache)} classes "
+            f"from {source_dir}"
+        )
+
+
+# Module-level singleton — shared across all function calls in one run.
+_class_cache = _ClassCache()
+
+
 # Field groups for per-field extraction (same schemas as classic pipeline).
 
 _CONTEXT_FIELD_GROUPS = [
@@ -417,57 +550,17 @@ def _resolve_imported_type_apis(
                         sig_parts.append(sig)
                     lines.append(f"{type_name} methods: {', '.join(sig_parts)}")
 
-    # Fallback: parse source files on disk for types not found in index
+    # Fallback: class cache for types not found in structural index
     if source_dir:
-        from pathlib import Path as _Path
-
         found_in_index = {l.split(" methods:")[0] for l in lines}
         missing = imported_types - found_in_index
 
         for type_name in missing:
-            # Search disk for class definition
-            for py in _Path(source_dir).rglob("*.py"):
-                if ".venv" in str(py) or "__pycache__" in str(py):
-                    continue
-                stem = py.stem.lower()
-                tn_lower = type_name.lower()
-                if len(stem) < 3 or (
-                    tn_lower not in stem
-                    and stem not in tn_lower
-                    and "service" not in stem
-                    and "model" not in stem
-                ):
-                    continue
-                try:
-                    src = py.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                if f"class {type_name}" not in src:
-                    continue
-                try:
-                    file_tree = _ast.parse(src)
-                except SyntaxError:
-                    continue
-                for cnode in _ast.walk(file_tree):
-                    if isinstance(cnode, _ast.ClassDef) and cnode.name == type_name:
-                        meths = []
-                        for child in _ast.iter_child_nodes(cnode):
-                            if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if child.name.startswith("_"):
-                                    continue
-                                params = [a.arg for a in child.args.args if a.arg != "self"]
-                                sig = f"{child.name}({', '.join(params)})"
-                                if child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
-                        break
-                if type_name in {l.split(" methods:")[0] for l in lines}:
-                    break
+            cached = _class_cache.get(type_name, source_dir)
+            if cached and cached.method_sigs:
+                lines.append(
+                    f"{type_name} methods: {', '.join(cached.method_sigs[:10])}"
+                )
 
     if lines:
         header = "## IMPORTED TYPE APIs (use ONLY these methods)"
@@ -797,53 +890,32 @@ def _extract_class_fields(
     """Extract Pydantic/dataclass field names from a class definition.
 
     Returns list of field names like ['question', 'source', 'top_k'].
-    Works by finding the class in source and extracting annotated assignments.
     """
     import ast as _ast
-    from pathlib import Path as _Path
 
-    # Find source containing this class
+    # Strategy 1: check file_contents pool
     class_marker = f"class {class_name}"
-    src = None
     for path, content in (file_contents or {}).items():
         if class_marker in content:
-            src = content
-            break
-
-    if not src and source_dir:
-        cn_lower = class_name.lower()
-        for py in _Path(source_dir).rglob("*.py"):
-            if ".venv" in str(py) or "__pycache__" in str(py):
+            try:
+                tree = _ast.parse(content)
+            except SyntaxError:
                 continue
-            stem = py.stem.lower()
-            if len(stem) >= 4 and (
-                cn_lower in stem or stem in cn_lower or "schema" in stem or "model" in stem
-            ):
-                try:
-                    content = py.read_text(encoding="utf-8", errors="replace")
-                    if class_marker in content:
-                        src = content
-                        break
-                except OSError:
-                    continue
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.ClassDef) and node.name == class_name:
+                    return [
+                        child.target.id
+                        for child in _ast.iter_child_nodes(node)
+                        if isinstance(child, _ast.AnnAssign)
+                        and isinstance(child.target, _ast.Name)
+                        and not child.target.id.startswith("_")
+                    ]
 
-    if not src:
-        return []
-
-    try:
-        tree = _ast.parse(src)
-    except SyntaxError:
-        return []
-
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.ClassDef) and node.name == class_name:
-            fields = []
-            for child in _ast.iter_child_nodes(node):
-                if isinstance(child, _ast.AnnAssign) and isinstance(child.target, _ast.Name):
-                    name = child.target.id
-                    if not name.startswith("_"):
-                        fields.append(name)
-            return fields
+    # Strategy 2: class cache
+    if source_dir:
+        cached = _class_cache.get(class_name, source_dir)
+        if cached and cached.fields:
+            return cached.fields
 
     return []
 
@@ -982,46 +1054,15 @@ def _build_attr_methods(
                         remaining.pop(type_name, None)
                         break
 
-    # Strategy 2: parse source files for remaining types
+    # Strategy 2: class cache (scans all .py files once, cached)
     if remaining:
-        file_contents = agent_ctx.get("file_contents", {})
         source_dir = prior_outputs.get("_source_dir", "")
-        all_sources = list((file_contents or {}).values())
-
         if source_dir:
-            from pathlib import Path as _Path
-
-            for _py in _Path(source_dir).rglob("*.py"):
-                if not remaining:
-                    break
-                _stem = _py.stem.lower()
-                if not any(t.lower() in _stem or _stem in t.lower() for t in remaining):
-                    continue
-                if ".venv" in str(_py) or "__pycache__" in str(_py):
-                    continue
-                try:
-                    all_sources.append(
-                        _py.read_text(encoding="utf-8", errors="replace"),
-                    )
-                except OSError:
-                    continue
-
-        for _src in all_sources:
-            if not remaining:
-                break
-            try:
-                _tree = _ast.parse(_src)
-            except SyntaxError:
-                continue
-            for _node in _ast.walk(_tree):
-                if isinstance(_node, _ast.ClassDef) and _node.name in remaining:
-                    for _child in _ast.iter_child_nodes(_node):
-                        if isinstance(
-                            _child, (_ast.FunctionDef, _ast.AsyncFunctionDef)
-                        ) and not _child.name.startswith("_"):
-                            attr_name = remaining.pop(_node.name)
-                            result[attr_name] = _child.name
-                            break
+            for type_name, attr_name in list(remaining.items()):
+                cached = _class_cache.get(type_name, source_dir)
+                if cached and cached.methods:
+                    result[attr_name] = cached.methods[0]
+                    remaining.pop(type_name, None)
 
     return result
 
@@ -1660,53 +1701,15 @@ def _build_attribute_template(
                             if methods:
                                 component_methods[type_name] = methods
 
-            # Strategy 2: parse source files for classes not found in index
-            # Search file_contents first, then fall back to disk via source_dir
+            # Strategy 2: class cache for types not found in index
             missing_types = set(attrs.values()) - set(component_methods.keys())
             source_dir = prior_outputs.get("_source_dir", "")
-            all_sources = list((agent_ctx.get("file_contents") or {}).values())
-
-            # Also read from disk for files not in the agent's pool
             if missing_types and source_dir:
-                from pathlib import Path as _Path
-
-                for _py in _Path(source_dir).rglob("*.py"):
-                    if not missing_types:
-                        break
-                    # Quick check: does the filename hint at a missing type?
-                    _stem = _py.stem.lower()
-                    if not any(t.lower() in _stem or _stem in t.lower() for t in missing_types):
-                        continue
-                    try:
-                        all_sources.append(_py.read_text(encoding="utf-8", errors="replace"))
-                    except OSError:
-                        continue
-
-            for _src in all_sources:
-                if not missing_types:
-                    break
-                try:
-                    _tree = _ast.parse(_src)
-                except SyntaxError:
-                    continue
-                for _node in _ast.walk(_tree):
-                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
-                        meths = []
-                        for _child in _ast.iter_child_nodes(_node):
-                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if _child.name.startswith("__"):
-                                    continue
-                                params = [a.arg for a in _child.args.args if a.arg != "self"]
-                                sig = f"{_child.name}({', '.join(params)})"
-                                if _child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(_child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            component_methods[_node.name] = meths
-                            missing_types.discard(_node.name)
+                for type_name in list(missing_types):
+                    cached = _class_cache.get(type_name, source_dir)
+                    if cached and cached.method_sigs:
+                        component_methods[type_name] = cached.method_sigs
+                        missing_types.discard(type_name)
 
             lines.append(f"### {cls_node.name} ({ref_path})")
             lines.append("  Attributes:")
@@ -2589,56 +2592,16 @@ class SynthesisStage(PipelineStage):
                     if meths:
                         component_methods[type_name] = meths
 
-        # Fallback: parse source files for types not found in index
+        # Fallback: class cache for types not found in structural index
         missing_types = set(attrs.values()) - set(component_methods.keys())
         if missing_types:
-            file_contents = agent_ctx.get("file_contents", {})
             source_dir = prior_outputs.get("_source_dir", "")
-            all_sources = list((file_contents or {}).values())
-
             if source_dir:
-                from pathlib import Path as _Path
-
-                for _py in _Path(source_dir).rglob("*.py"):
-                    if not missing_types:
-                        break
-                    _stem = _py.stem.lower()
-                    if not any(t.lower() in _stem or _stem in t.lower() for t in missing_types):
-                        continue
-                    if ".venv" in str(_py) or "__pycache__" in str(_py):
-                        continue
-                    try:
-                        all_sources.append(
-                            _py.read_text(encoding="utf-8", errors="replace"),
-                        )
-                    except OSError:
-                        continue
-
-            for _src in all_sources:
-                if not missing_types:
-                    break
-                try:
-                    _tree = _ast.parse(_src)
-                except SyntaxError:
-                    continue
-                for _node in _ast.walk(_tree):
-                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
-                        meths = []
-                        for _child in _ast.iter_child_nodes(_node):
-                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if _child.name.startswith("__"):
-                                    continue
-                                params = [a.arg for a in _child.args.args if a.arg != "self"]
-                                sig = f"{_child.name}({', '.join(params)})"
-                                if _child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(_child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            component_methods[_node.name] = meths
-                            missing_types.discard(_node.name)
+                for type_name in list(missing_types):
+                    cached = _class_cache.get(type_name, source_dir)
+                    if cached and cached.method_sigs:
+                        component_methods[type_name] = cached.method_sigs
+                        missing_types.discard(type_name)
 
         # Build compact cheat sheet
         _MAX_INTERFACE_LINES = 50
