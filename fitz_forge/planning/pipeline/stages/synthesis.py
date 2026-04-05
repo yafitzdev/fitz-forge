@@ -1280,6 +1280,217 @@ def _repair_fabricated_refs(
     return repaired, total_fixes
 
 
+def _detect_fabricated_calls(
+    content: str,
+    prior_outputs: dict[str, Any],
+    source: str = "",
+) -> list[dict]:
+    """Detect object.method() calls where method doesn't exist on the object's type.
+
+    Unlike _repair_fabricated_refs (which handles self._xxx patterns),
+    this catches calls on local variables and imported objects:
+        service.query_stream()  — FitzService has no query_stream
+        engine.answer_stream()  — FitzKragEngine has no answer_stream
+
+    Uses both the structural index AND disk-resolved imported type APIs
+    to build the known methods map (since key classes like FitzService
+    may not be in the agent's selected files).
+
+    Returns a list of violations: [{"object": str, "method": str, "type": str, "real_methods": list[str]}]
+    """
+    import ast as _ast
+    import textwrap as _tw
+
+    agent_ctx = prior_outputs.get("_agent_context", {})
+    full_index = agent_ctx.get("full_structural_index", "")
+    if not full_index:
+        full_index = prior_outputs.get("_gathered_context", "")
+
+    # Build known methods from structural index (skip test classes)
+    class_methods: dict[str, list[str]] = {}
+    if full_index:
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
+        lookup = StructuralIndexLookup(full_index)
+        for cls_name in lookup.classes:
+            if cls_name.startswith("Test") or cls_name.startswith("Mock"):
+                continue
+            cls = lookup.find_class(cls_name)
+            if cls and cls.methods:
+                class_methods[cls_name] = [
+                    m for m in cls.methods if not m.startswith("__")
+                ]
+
+    # ALSO resolve imported type APIs from disk — key classes like
+    # FitzService may not be in the structural index.
+    target_source = source or ""
+    if not target_source:
+        return []
+    _imported_apis = _resolve_imported_type_apis(target_source, prior_outputs)
+    if _imported_apis:
+        import re as _re
+        # Parse "FitzService methods: query(...), point(...), ..."
+        for line in _imported_apis.split("\n"):
+            m = _re.match(r"(\w+)\s+methods:\s*(.+)", line)
+            if m:
+                cls_name = m.group(1)
+                methods_raw = m.group(2)
+                methods = []
+                for part in methods_raw.split(","):
+                    pm = _re.search(r"(\w+)", part.strip())
+                    if pm:
+                        methods.append(pm.group(1))
+                if methods and cls_name not in class_methods:
+                    class_methods[cls_name] = methods
+
+    if not class_methods:
+        return []
+
+    # Parse the generated content
+    tree = None
+    for attempt in [
+        content,
+        _tw.dedent(content),
+        "class _:\n    " + content.replace("\n", "\n    "),
+    ]:
+        try:
+            tree = _ast.parse(attempt)
+            break
+        except SyntaxError:
+            continue
+    if tree is None:
+        return []
+
+    # Collect artifact-defined methods (new methods are valid)
+    artifact_methods: set[str] = set()
+    for n in _ast.walk(tree):
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            artifact_methods.add(n.name)
+
+    # Build variable -> type mapping from annotations and assignments
+    var_types: dict[str, str] = {}
+    for node in _ast.walk(tree):
+        # var: Type = expr
+        if isinstance(node, _ast.AnnAssign) and isinstance(node.target, _ast.Name):
+            if isinstance(node.annotation, _ast.Name):
+                var_types[node.target.id] = node.annotation.id
+        # var = func() where func returns a known type
+        if isinstance(node, _ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, _ast.Name) and isinstance(node.value, _ast.Call):
+                if isinstance(node.value.func, _ast.Name):
+                    func_name = node.value.func.id
+                    for cls_name in class_methods:
+                        if cls_name.lower().replace("_", "") in func_name.lower().replace("_", ""):
+                            var_types[target.id] = cls_name
+                            break
+
+    # Find object.method() calls where method doesn't exist
+    violations = []
+    seen = set()
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Call):
+            continue
+        if not isinstance(node.func, _ast.Attribute):
+            continue
+        if not isinstance(node.func.value, _ast.Name):
+            continue
+
+        obj_name = node.func.value.id
+        method_name = node.func.attr
+
+        # Skip self, common framework objects, stdlib, and
+        # common variable names that match unrelated classes
+        _SKIP_OBJECTS = {
+            "self", "cls", "super", "app", "router",
+            "os", "re", "sys", "json", "math", "time",
+            "path", "ast", "io", "logging", "logger",
+            "typing", "functools", "itertools",
+            "collections", "datetime", "hashlib",
+            "textwrap", "pathlib", "shutil",
+            "pytest", "mock", "patch",
+            # Common variable names with builtin methods
+            "token", "chunk", "text", "data", "result",
+            "response", "request", "content", "message",
+            "line", "item", "value", "key", "name",
+            "string", "output", "input", "buffer",
+            "stream", "file", "doc", "node",
+            "q", "e", "f", "s", "t", "x", "r",
+            "thread", "task", "future", "loop",
+        }
+        if obj_name in _SKIP_OBJECTS or method_name.startswith("__"):
+            continue
+
+        key = f"{obj_name}.{method_name}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Try to resolve obj_name to a type
+        type_name = var_types.get(obj_name)
+        if not type_name:
+            # Heuristic: if obj_name is a substring of a known class name
+            for cls_name in class_methods:
+                if obj_name.lower() in cls_name.lower():
+                    type_name = cls_name
+                    break
+
+        if not type_name or type_name not in class_methods:
+            continue
+
+        real_methods = class_methods[type_name]
+        if method_name in real_methods:
+            continue
+        if method_name in artifact_methods:
+            continue
+
+        violations.append({
+            "object": obj_name,
+            "method": method_name,
+            "type": type_name,
+            "real_methods": real_methods[:10],
+        })
+
+    return violations
+
+
+def _repair_fabricated_calls(
+    content: str,
+    violations: list[dict],
+) -> str:
+    """Deterministic repair: replace fabricated object.method() with closest real method.
+
+    For each violation (e.g. service.query_stream), find the real method with
+    the most similar name (e.g. service.query) and do a string replacement.
+    Zero LLM cost, guaranteed to remove the fabrication.
+    """
+    import difflib
+
+    repaired = content
+    for v in violations:
+        obj = v["object"]
+        fab_method = v["method"]
+        real_methods = v["real_methods"]
+
+        if not real_methods:
+            continue
+
+        # Find closest real method by name similarity
+        best = difflib.get_close_matches(fab_method, real_methods, n=1, cutoff=0.0)
+        replacement = best[0] if best else real_methods[0]
+
+        # Replace object.fabricated_method( with object.real_method(
+        old = f"{obj}.{fab_method}("
+        new = f"{obj}.{replacement}("
+        if old in repaired:
+            repaired = repaired.replace(old, new)
+            logger.info(
+                f"  repair: {old[:-1]} -> {new[:-1]}"
+            )
+
+    return repaired
+
+
 def _build_attribute_template(
     referenced_files: set[str],
     prior_outputs: dict[str, Any],
@@ -2698,6 +2909,38 @@ class SynthesisStage(PipelineStage):
                     logger.info(
                         f"Stage 'synthesis': repaired {n_fixes} fabricated refs in {filename}"
                     )
+
+            # F10 corrector: detect fabricated object.method() calls and
+            # regenerate with a SHORT, FOCUSED correction prompt. The full
+            # original prompt is ~20K chars — appending a correction to it
+            # loses to lost-in-the-middle. Instead, send a small prompt
+            # with just the broken code, the error, and the real API.
+            violations = _detect_fabricated_calls(
+                content, prior_outputs or {},
+                source=disk_source or source,
+            )
+            if violations and prior_outputs:
+                correction_lines = []
+                for v in violations:
+                    methods_str = ", ".join(v["real_methods"][:8])
+                    correction_lines.append(
+                        f"- {v['object']}.{v['method']}() does NOT exist. "
+                        f"{v['type']} only has: [{methods_str}]"
+                    )
+                correction = "\n".join(correction_lines)
+                logger.info(
+                    f"Stage 'synthesis': {filename} has {len(violations)} "
+                    f"fabricated call(s), regenerating with correction"
+                )
+
+                # Deterministic repair: replace fabricated method calls with
+                # the closest real method. LLM correction prompts fail
+                # because decisions override any constraint.
+                content = _repair_fabricated_calls(content, violations)
+                logger.info(
+                    f"Stage 'synthesis': {filename} repaired "
+                    f"{len(violations)} fabricated call(s)"
+                )
 
             logger.info(
                 f"Stage 'synthesis': artifact for {filename} ({len(content)} chars, {elapsed:.1f}s)"
