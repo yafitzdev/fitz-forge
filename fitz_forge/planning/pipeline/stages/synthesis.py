@@ -1317,7 +1317,38 @@ def _repair_fabricated_refs(
         if import_fixes:
             repaired = "\n".join(new_lines)
 
-    total_fixes = len(fixes) + len(removals) + field_fixes + import_fixes
+    # List-arg-to-batch repair: if the model calls method([list]) but
+    # method_batch([list]) exists on any class, it meant the batch
+    # variant. Common pattern: self._embedder.embed([x]) should be
+    # self._embedder.embed_batch([x]) since embed() takes a single string.
+    # Uses class cache (not structural index) since embedding providers
+    # may not be in the 30 selected files.
+    batch_fixes = 0
+    source_dir = prior_outputs.get("_source_dir", "")
+    if source_dir and tree:
+        all_classes = _class_cache.get_all(source_dir)
+        all_methods = {m for info in all_classes.values() for m in info.methods}
+        for node in _ast.walk(tree):
+            if (
+                isinstance(node, _ast.Call)
+                and isinstance(node.func, _ast.Attribute)
+                and isinstance(node.func.value, _ast.Attribute)
+                and isinstance(node.func.value.value, _ast.Name)
+                and node.func.value.value.id == "self"
+                and node.args
+                and isinstance(node.args[0], _ast.List)
+            ):
+                method = node.func.attr
+                batch_method = f"{method}_batch"
+                if method in all_methods and batch_method in all_methods:
+                    old_call = f".{method}(["
+                    new_call = f".{batch_method}(["
+                    if old_call in repaired:
+                        repaired = repaired.replace(old_call, new_call)
+                        batch_fixes += 1
+                        logger.info(f"  repair: .{method}([...]) -> .{batch_method}([...])")
+
+    total_fixes = len(fixes) + len(removals) + field_fixes + import_fixes + batch_fixes
     return repaired, total_fixes
 
 
