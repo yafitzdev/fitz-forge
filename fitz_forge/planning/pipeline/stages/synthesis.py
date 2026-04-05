@@ -1441,7 +1441,10 @@ def _detect_fabricated_calls(
         real_methods = class_methods[type_name]
         if method_name in real_methods:
             continue
-        if method_name in artifact_methods:
+        # Only skip artifact methods for self.xxx() calls — NOT for
+        # external objects. def query_stream() in the artifact is the
+        # endpoint; service.query_stream() is a fabricated method call.
+        if method_name in artifact_methods and obj_name == "self":
             continue
 
         violations.append({
