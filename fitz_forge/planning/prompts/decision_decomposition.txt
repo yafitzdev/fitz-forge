@@ -25,6 +25,10 @@ For each decision, specify:
 4. Then SCOPE decisions: "What is out of scope for v1?" can reference earlier decisions.
 5. Finally TECHNICAL decisions: implementation details depend on all above.
 
+## Chain completeness rule
+
+When the task adds new behavior at an entry point (API route, CLI command, SDK method), trace the FULL call chain from the entry point to the implementation layer using the call graph edges. Generate a decision for EACH file in the chain. Skipping a middle layer (e.g., a service wrapper between a route and an engine) creates an impossible implementation gap — the entry point can't call methods that don't exist on its direct dependency.
+
 ## Good decisions look like:
 - "What existing method in `module.py` should be extended/wrapped for the new capability?"
 - "What is the return type contract for the new interface on `core.py`?"
