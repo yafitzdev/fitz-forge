@@ -1359,7 +1359,32 @@ def _detect_fabricated_calls(
         except SyntaxError:
             continue
     if tree is None:
-        return []
+        # AST parse failed — fall back to regex detection.
+        # Less precise but catches fabrications in unparseable fragments.
+        import re as _re
+        violations = []
+        seen = set()
+        for m in _re.finditer(r"(\w+)\.(\w+)\s*\(", content):
+            obj_name, method_name = m.group(1), m.group(2)
+            key = f"{obj_name}.{method_name}"
+            if key in seen or obj_name in {
+                "self", "cls", "super", "app", "router",
+                "os", "re", "sys", "json", "math", "time",
+                "path", "ast", "io", "logging", "logger",
+            }:
+                continue
+            seen.add(key)
+            for cls_name, methods in class_methods.items():
+                if obj_name.lower() in cls_name.lower():
+                    if method_name not in methods:
+                        violations.append({
+                            "object": obj_name,
+                            "method": method_name,
+                            "type": cls_name,
+                            "real_methods": methods[:10],
+                        })
+                    break
+        return violations
 
     # Collect artifact-defined methods (new methods are valid)
     artifact_methods: set[str] = set()
@@ -1385,7 +1410,9 @@ def _detect_fabricated_calls(
                             var_types[target.id] = cls_name
                             break
 
-    # Find object.method() calls where method doesn't exist
+    # Find object.method() calls where method doesn't exist.
+    # Handles both direct (service.query_stream) and chained
+    # (self._service.query_stream) patterns.
     violations = []
     seen = set()
     for node in _ast.walk(tree):
@@ -1393,11 +1420,23 @@ def _detect_fabricated_calls(
             continue
         if not isinstance(node.func, _ast.Attribute):
             continue
-        if not isinstance(node.func.value, _ast.Name):
-            continue
 
-        obj_name = node.func.value.id
         method_name = node.func.attr
+        obj_name = ""
+
+        # Direct: service.method()
+        if isinstance(node.func.value, _ast.Name):
+            obj_name = node.func.value.id
+        # Chained: self._service.method()
+        elif (
+            isinstance(node.func.value, _ast.Attribute)
+            and isinstance(node.func.value.value, _ast.Name)
+            and node.func.value.value.id == "self"
+        ):
+            obj_name = node.func.value.attr  # e.g. "_service"
+
+        if not obj_name:
+            continue
 
         # Skip self, common framework objects, stdlib, and
         # common variable names that match unrelated classes
@@ -1429,9 +1468,11 @@ def _detect_fabricated_calls(
         # Try to resolve obj_name to a type
         type_name = var_types.get(obj_name)
         if not type_name:
-            # Heuristic: if obj_name is a substring of a known class name
+            # Heuristic: if obj_name (stripped of underscores) is a
+            # substring of a known class name. Handles _service -> FitzService.
+            stripped = obj_name.lower().lstrip("_")
             for cls_name in class_methods:
-                if obj_name.lower() in cls_name.lower():
+                if stripped in cls_name.lower():
                     type_name = cls_name
                     break
 
