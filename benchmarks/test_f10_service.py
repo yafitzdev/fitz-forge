@@ -59,11 +59,25 @@ F10_PATTERNS = [
 ]
 
 
+def _strip_comments(content: str) -> str:
+    """Remove comment lines and inline comments from Python code."""
+    lines = []
+    for line in content.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if " #" in line:
+            line = line[: line.index(" #")]
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def count_f10_fabrications(content: str) -> list[tuple[str, str]]:
-    """Check artifact content for F10 fabrication patterns."""
+    """Check artifact content for F10 fabrication patterns (code only, not comments)."""
+    code_only = _strip_comments(content)
     found = []
     for pattern, desc in F10_PATTERNS:
-        if re.search(pattern, content):
+        if re.search(pattern, code_only):
             found.append((pattern, desc))
     return found
 

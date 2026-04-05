@@ -65,6 +65,7 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | 65a-j | 04-03 | + F10 prompt reorder (rules+grounding first) | 12-15 | — | 8.1 | 7.9 | 6.6 | 6.7 | 6.8 | 7.6 | **42.7 avg** | 10 plans. New high 52. Floor 33. |
 | 66a-j | 04-03 | + F13C approach fallback | 12-14 | — | 7.8 | 8.0 | 6.4 | 7.0 | 6.5 | 7.0 | **42.5 avg** | 10 plans. New high 53. Zero empty architectures. |
 | **67a-j** | **04-04** | **+ best-of-3 scope consensus** | **12-15** | **—** | **8.3** | **8.5** | **7.1** | **7.0** | **7.2** | **7.6** | **45.3 avg** | **10 plans. +5.2 over baseline. Floor 37. Two 53s. Top 5 avg 49.2.** |
+| 72a-j | 04-05 | + F10 deterministic corrector + import graph fix + decision filter | 13-15 | — | 7.7 | 7.5 | 5.5 | 6.1 | 5.5 | 8.0 | **40.3 avg** | 10 plans. F10 54%→22% plan-level (0% executable code). Score flat vs baseline (40.1). _detection_orchestrator() callable in 50% of plans (same as run 67). **F10 was NOT the score bottleneck — self._xxx fabrication patterns dominate.** |
 
 ---
 
@@ -128,6 +129,12 @@ Scored by AST-based deterministic scorer (0-100). Zero variance. Measures: fabri
 | 04-03 | Removed hardcoded _INVALID_FIELD_PATTERNS (codebase-specific bandaid) | Could produce wrong corrections. |
 | 04-03 | F5: Import path repair with ambiguity guard (skip if N>1 classes) | Deterministic, zero LLM cost. |
 | 04-04 | **Best-of-3 scope consensus** | **THE biggest single improvement. +2.8 pts (42.5->45.3). Floor 33->37.** |
+| 04-05 | F10 deterministic corrector (AST + regex detect, difflib repair) | F10 54%→11% harness, 22% pipeline (0% executable code). Zero LLM cost. |
+| 04-05 | Import graph relative import fix | `from .foo import X` now resolves. Call graph has edges between routes→service→engine. |
+| 04-05 | Decision filter (generic fabrication detection) | Filters fabricated `object.method()` from decisions before artifact prompt. |
+| 04-05 | Cross-artifact signature filter | Rejects fabricated method signatures from F3 propagation. |
+| 04-05 | Call graph BFS cap 80→200 | Interior nodes (FitzService) no longer cut by cap. |
+| 04-05 | Decomp chain completeness prompt | Instructs decomposition to trace full call chain from entry to implementation. |
 
 ---
 
@@ -152,10 +159,12 @@ Scored by AST-based deterministic scorer (0-100). Zero variance. Measures: fabri
 - **Blaming the model** — instead of saying "3B model can't do this," give it more chances and pick the best output
 
 **Root causes of remaining score loss:**
-- Service API fabrication: model invents service.answer_stream() despite seeing real API (26% rate)
-- Synthesizer private method fabrication: _synthesizer._build_messages() (doesn't exist)
-- Wrong file paths: services.py vs services/fitz_service.py
-- Scope miscalibration: model sometimes proposes breaking changes or over-engineers
+- **`_detection_orchestrator()` called as callable** — 50% of engine.py artifacts in ALL runs (67, 70, 72). It's a DetectionOrchestrator object, not a function. The existing `_repair_fabricated_refs` should catch this via attr-as-function repair but doesn't.
+- **`_embedder.embed([])` wrong args** — 40% of engine.py artifacts. Wrong method signature.
+- Service API fabrication (F10): reduced to 0% executable code via deterministic corrector, but was never the score bottleneck.
+- Scope miscalibration: model sometimes proposes breaking changes or over-engineers.
+
+**Critical finding (2026-04-05):** F10 fabrication (service.query_stream) was NOT the score bottleneck. Run 67 (45.3) had 40% F10 and scored highest. Run 72 (40.3) has 0% F10 executable code but scores same as baseline. The `self._xxx` fabrication patterns (_detection_orchestrator, _embedder) are the actual score driver — they affect consistency (5.5) and implementability (5.5), the two weakest dimensions.
 
 ---
 
@@ -245,3 +254,36 @@ All 14 patterns documented in `docs/failure-patterns/` with individual docs, har
 - F19 structural fix: use type annotations from target file instead of keyword matching
 - Dynamic decision count (remove 8-18 hardcoded range from scorer)
 - `docs/pipeline-architecture.md` — full pipeline technical reference
+
+### Session 2026-04-05/06: F10 Deterministic Corrector + Score Analysis
+
+**F10 corrector shipped — fabrication effectively eliminated:**
+- 5-why root cause: decisions inject fabricated method names → import graph can't follow relative imports → call graph missing routes→service→engine chain → decomposition skips service layer → artifacts get impossible instructions
+- LLM correction failed (3 approaches: append to 23K prompt, prepend constraint, stripped prompt — model always fabricates from decisions)
+- Deterministic corrector: AST+regex detect `object.method()` not in type's API, replace with closest real method via difflib
+- 5 detection layers iterated: AST calls, regex fallback (unparseable), chained attrs (self._service.method), underscore strip (_service→FitzService), artifact_methods bypass fix (def query_stream endpoint vs service.query_stream call)
+- Frozen harness: 54%→11% (100 runs). Full pipeline: 54%→22% plan-level, 0% executable code (remaining are comments)
+
+**Critical finding: F10 was NOT the Sonnet score bottleneck.**
+- Run 67 (45.3 avg) had 40% F10 AND 50% `_detection_orchestrator()` callable
+- Run 72 (40.3 avg) has 0% F10 executable AND 50% `_detection_orchestrator()` callable
+- Same `self._xxx` fabrication rate in both runs, different F10 rate, but score moved in the WRONG direction
+- 5-point drop is Sonnet variance (stdev ~5 per plan on 10-plan avg)
+- The actual score drivers are consistency (5.5/10) and implementability (5.5/10), dominated by `_detection_orchestrator()` called as callable (50% of engine.py artifacts) and `_embedder.embed([])` wrong args (40%)
+- These are `self._xxx` patterns that `_repair_fabricated_refs` should catch but doesn't
+
+**Other changes shipped:**
+- Import graph: relative imports resolved (`from .foo import X`)
+- Call graph: BFS cap 80→200, interior nodes preserved
+- Decomposition: chain completeness prompt rule
+- Generic decision filter (codebase-agnostic `object.method()` detection)
+- Cross-artifact signature filter
+- F10 harness: comment stripping (was false-positive counting comments)
+- F10 corrector harness: capture→replay methodology (10 prompts × 10 runs)
+
+**Next steps:**
+- Fix `_detection_orchestrator()` callable — this is F7 attr-as-function, `_build_attr_methods` should handle it but doesn't. WHY?
+- Fix `_embedder.embed([])` — wrong method name, should be caught by fuzzy repair
+- Verify `_repair_fabricated_refs` is actually running on engine.py artifacts and check why it misses these patterns
+- Confirm coverage_hint fires for decomposition chain gaps (TODO in docs/roadmap/)
+- Run on a different task to check if patterns are task-specific
