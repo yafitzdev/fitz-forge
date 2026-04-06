@@ -457,6 +457,8 @@ MIT
 - [PyPI](https://pypi.org/project/fitz-forge/)
 - [Changelog](CHANGELOG.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Feature Docs](docs/features/) — 13 detailed docs covering every pipeline stage
+- [Feature Docs](docs/features/) — 17 detailed docs covering every pipeline stage and infrastructure component
+- [Configuration Reference](docs/CONFIG.md) — every config field explained
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — GPU issues, Windows quirks, pipeline debugging
 - [Contributing](CONTRIBUTING.md)
 - [Examples](examples/)

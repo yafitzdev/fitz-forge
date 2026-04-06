@@ -4,6 +4,9 @@
 2. **No stdout** - MCP uses stdio. All logging → stderr via `logging`. Never `print()`.
 3. **Always use .venv** - `.venv/Scripts/pip` (Windows) or `.venv/bin/pip` (Unix)
 4. **No legacy code** - No backwards compat, no shims. Delete completely when removing.
+5. **Codebase agnostic** - No fitz_ai-specific assumptions in tools/. All codebase-specific logic must be in the MCP or CLI layers.
+6. **No threshold tuning** - If we run into a problem, fix the underlying issue instead of tuning thresholds. For example, if the LLM fails to extract a field, fix the prompt or extraction method instead of adding a "confidence threshold" that lets it return an empty value.
+
 
 ## What This Is
 

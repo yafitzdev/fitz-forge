@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tools/pre_release.py` — comprehensive pre-release validation (format, lint, imports, tests, build)
 - Test tier markers (tier1–4) for selective CI stages
 - `docs/ARCHITECTURE.md` — standalone architecture reference with layer diagram and data flow
-- `docs/features/` — 13 detailed feature docs covering every pipeline stage and infrastructure component
+- `docs/features/` — 17 detailed feature docs covering both pipelines and infrastructure
+- `docs/CONFIG.md` — complete configuration reference with every field explained
+- `docs/TROUBLESHOOTING.md` — GPU issues, Windows quirks, pipeline debugging
+- 4 decomposed pipeline docs: call graph extraction, decision decomposition, decision resolution, synthesis
 
 ### 🔄 Changed
 

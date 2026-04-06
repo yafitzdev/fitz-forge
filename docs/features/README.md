@@ -2,9 +2,9 @@
 
 Detailed documentation for every component of fitz-forge's planning pipeline.
 
-## Pipeline Stages
+## Classic Pipeline Stages (PlanningPipeline)
 
-Each stage in the planning pipeline has its own doc explaining what it does, why it's designed that way, and how it works internally. Numbered in execution order.
+The original 3-stage pipeline. Numbered in execution order.
 
 | # | Doc | Stage | Description |
 |---|-----|-------|-------------|
@@ -16,9 +16,20 @@ Each stage in the planning pipeline has its own doc explaining what it does, why
 | 05 | [Coherence Check](pipeline/05_coherence-check.md) | Post-stage | Cross-stage consistency verification |
 | 06 | [Confidence Scoring](pipeline/06_confidence-scoring.md) | Post-stage | Per-section quality assessment |
 
+## Decomposed Pipeline Stages (DecomposedPipeline)
+
+The v0.5+ decision-based pipeline. Shares pre-stages (00, 01) and post-stages (05, 06) with the classic pipeline, but replaces the three planning stages with decision decomposition → resolution → synthesis.
+
+| # | Doc | Stage | Description |
+|---|-----|-------|-------------|
+| 07 | [Call Graph Extraction](pipeline/07_call-graph-extraction.md) | Pre-stage | Deterministic AST caller→callee chain (no LLM) |
+| 08 | [Decision Decomposition](pipeline/08_decision-decomposition.md) | Stage 1 | Break task into atomic decisions with dependencies |
+| 09 | [Decision Resolution](pipeline/09_decision-resolution.md) | Stage 2 | Resolve each decision with focused codebase evidence |
+| 10 | [Synthesis](pipeline/10_synthesis.md) | Stage 3 | Narrate committed decisions into the final plan |
+
 ## Infrastructure
 
-Cross-cutting concerns that support the pipeline.
+Cross-cutting concerns that support both pipelines.
 
 | Doc | Feature | Description |
 |-----|---------|-------------|
@@ -28,3 +39,11 @@ Cross-cutting concerns that support the pipeline.
 | [LLM Providers](infrastructure/llm-providers.md) | Abstraction | Ollama, LM Studio, llama.cpp backends |
 | [Verification Agents](infrastructure/verification-agents.md) | Quality | 5 post-reasoning agents that catch architectural flaws |
 | [Grounding Validation](infrastructure/grounding-validation.md) | Quality | AST + LLM validation of generated artifacts |
+
+## Reference
+
+| Doc | Description |
+|-----|-------------|
+| [Architecture](../ARCHITECTURE.md) | System overview, layer diagram, data flow |
+| [Configuration](../CONFIG.md) | Every config field explained |
+| [Troubleshooting](../TROUBLESHOOTING.md) | Common issues and solutions |
