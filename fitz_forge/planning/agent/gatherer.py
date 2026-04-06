@@ -23,10 +23,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fitz_sage.code import CodeRetriever
+from fitz_sage.code.indexer import build_structural_index
 
 from fitz_forge.planning.agent.compressor import compress_file
 from fitz_forge.planning.agent.indexer import (
-    build_structural_index,
+    build_structural_index as build_validation_index,
     extract_interface_signatures,
     extract_library_signatures,
 )
@@ -361,10 +362,10 @@ class AgentContextGatherer:
                 max_file_bytes=self._config.max_file_bytes,
             )
 
-            # Build untruncated validation index (includes Pydantic fields
-            # for typed attribute validation — F25). No size budget.
-            validation_index = build_structural_index(
-                Path(self._source_dir),
+            # Build untruncated validation index using fitz_forge's indexer
+            # (includes Pydantic fields for typed attribute validation — F25).
+            validation_index = build_validation_index(
+                str(Path(self._source_dir)),
                 file_paths,
                 max_file_bytes=self._config.max_file_bytes,
                 max_chars=0,  # 0 = no truncation
