@@ -91,6 +91,7 @@ def build_structural_index(
     file_list: list[str],
     max_file_bytes: int = 50_000,
     connection_counts: dict[str, int] | None = None,
+    max_chars: int = _MAX_INDEX_CHARS,
 ) -> str:
     """
     Build a compact structural index of all files in the codebase.
@@ -131,7 +132,7 @@ def build_structural_index(
             entries.append((rel_path, "(no structural info)"))
 
     # Format and apply size budget
-    return _format_index(entries, connection_counts)
+    return _format_index(entries, connection_counts, max_chars=max_chars)
 
 
 def _extract_structure(suffix: str, content: str, rel_path: str) -> str:
@@ -618,6 +619,7 @@ def _extract_generic_code(content: str) -> str:
 def _format_index(
     entries: list[tuple[str, str]],
     connection_counts: dict[str, int] | None = None,
+    max_chars: int = _MAX_INDEX_CHARS,
 ) -> str:
     """Format entries into the final index text, truncating if over budget.
 
@@ -633,7 +635,7 @@ def _format_index(
 
     full = "\n\n".join(parts)
 
-    if len(full) <= _MAX_INDEX_CHARS:
+    if max_chars <= 0 or len(full) <= max_chars:
         return full
 
     # Over budget — strip detail from least-connected files first.
@@ -651,39 +653,32 @@ def _format_index(
         rel_path, info = mutable[idx]
         lines = [ln for ln in info.splitlines() if not ln.startswith("imports:")]
         mutable[idx] = (rel_path, "\n".join(lines))
-        if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
+        if _estimate_size(mutable) <= max_chars:
             break
 
     # Pass 2: strip functions lines from least-connected files first
-    if _estimate_size(mutable) > _MAX_INDEX_CHARS:
+    if _estimate_size(mutable) > max_chars:
         for idx in by_priority:
             rel_path, info = mutable[idx]
             lines = [ln for ln in info.splitlines() if not ln.startswith("functions:")]
             mutable[idx] = (rel_path, "\n".join(lines))
-            if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
+            if _estimate_size(mutable) <= max_chars:
                 break
 
     # Pass 3: strip doc lines from least-connected files
-    if _estimate_size(mutable) > _MAX_INDEX_CHARS:
+    if _estimate_size(mutable) > max_chars:
         for idx in by_priority:
             rel_path, info = mutable[idx]
             lines = [ln for ln in info.splitlines() if not ln.startswith("doc:")]
             mutable[idx] = (rel_path, "\n".join(lines))
-            if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
+            if _estimate_size(mutable) <= max_chars:
                 break
 
-    # Pass 4: last resort — keep only classes line (type interface is most
-    # valuable per char; dropping it breaks typed attribute validation)
-    if _estimate_size(mutable) > _MAX_INDEX_CHARS:
+    # Pass 4: last resort — reduce to path-only for least-connected files
+    if _estimate_size(mutable) > max_chars:
         for idx in by_priority:
-            rel_path, info = mutable[idx]
-            classes_line = ""
-            for ln in info.splitlines():
-                if ln.startswith("classes:"):
-                    classes_line = ln
-                    break
-            mutable[idx] = (rel_path, classes_line)
-            if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
+            mutable[idx] = (mutable[idx][0], "")
+            if _estimate_size(mutable) <= max_chars:
                 break
 
     result_parts = []

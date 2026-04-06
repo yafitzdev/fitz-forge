@@ -2737,15 +2737,18 @@ class SynthesisStage(PipelineStage):
             check_artifact,
         )
 
-        # Build lookup once for validation
+        # Build lookup for validation — prefer the untruncated validation
+        # index (has Pydantic fields for F25), fall back to full_structural_index
         lookup = None
         if prior_outputs:
             agent_ctx = prior_outputs.get("_agent_context", {})
-            full_index = agent_ctx.get("full_structural_index", "")
-            if not full_index:
-                full_index = prior_outputs.get("_gathered_context", "")
-            if full_index:
-                lookup = StructuralIndexLookup(full_index)
+            val_index = agent_ctx.get("validation_index", "")
+            if not val_index:
+                val_index = agent_ctx.get("full_structural_index", "")
+            if not val_index:
+                val_index = prior_outputs.get("_gathered_context", "")
+            if val_index:
+                lookup = StructuralIndexLookup(val_index)
 
         for attempt in range(1 + max_retries):
             artifact = await self._generate_single_artifact(

@@ -361,12 +361,22 @@ class AgentContextGatherer:
                 max_file_bytes=self._config.max_file_bytes,
             )
 
+            # Build untruncated validation index (includes Pydantic fields
+            # for typed attribute validation — F25). No size budget.
+            validation_index = build_structural_index(
+                Path(self._source_dir),
+                file_paths,
+                max_file_bytes=self._config.max_file_bytes,
+                max_chars=0,  # 0 = no truncation
+            )
+
             return {
                 "synthesized": structural_overview,
                 "raw_summaries": raw_summaries,
                 "file_contents": file_contents,
                 "file_index_entries": file_index_entries,
                 "full_structural_index": full_index,
+                "validation_index": validation_index,
                 "agent_files": {
                     "total_screened": len(file_paths),
                     "all_files": file_paths,
