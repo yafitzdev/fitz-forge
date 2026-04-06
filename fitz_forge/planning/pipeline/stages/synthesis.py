@@ -532,6 +532,126 @@ def _extract_param_type_fields(
     return "\n".join(lines)
 
 
+def _decompose_multi_handler_artifacts(
+    artifact_specs: list[tuple[str, str]],
+    resolutions: list[dict],
+    source_dir: str,
+    file_contents: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Split file-level artifacts into per-function artifacts.
+
+    When a source file has multiple route handlers (e.g., /query and /chat)
+    and the decisions reference multiple new endpoints for that file, split
+    into one artifact per new endpoint so each gets the correct reference
+    function.
+
+    Deterministic: uses AST to find route decorators, regex to find new
+    endpoint paths in decisions.
+    """
+    import ast as _ast
+    import re as _re
+
+    result: list[tuple[str, str]] = []
+
+    for filename, purpose in artifact_specs:
+        # Load source from disk
+        disk_source = ""
+        if source_dir:
+            from pathlib import Path as _P
+
+            p = _P(source_dir) / filename
+            if p.is_file():
+                try:
+                    disk_source = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+        if not disk_source:
+            disk_source = file_contents.get(filename, "")
+
+        if not disk_source:
+            result.append((filename, purpose))
+            continue
+
+        # Find route handlers: functions decorated with @router.post("/path")
+        try:
+            tree = _ast.parse(disk_source)
+        except SyntaxError:
+            result.append((filename, purpose))
+            continue
+
+        route_handlers: dict[str, str] = {}  # route_path -> function_name
+        for node in _ast.iter_child_nodes(tree):
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                # Match @router.post("/path") or @router.get("/path")
+                if not isinstance(dec, _ast.Call):
+                    continue
+                if not isinstance(dec.func, _ast.Attribute):
+                    continue
+                if dec.args and isinstance(dec.args[0], _ast.Constant):
+                    route_path = str(dec.args[0].value)
+                    route_handlers[route_path] = node.name
+
+        if len(route_handlers) < 2:
+            # Single or no route handlers — no decomposition needed
+            result.append((filename, purpose))
+            continue
+
+        # Find new endpoint paths mentioned in decisions for this file
+        relevant_text = ""
+        for r in resolutions:
+            res_text = (
+                r.get("decision", "")
+                + " "
+                + " ".join(r.get("constraints_for_downstream", []))
+            )
+            if filename in res_text or any(
+                fn in res_text for fn in route_handlers.values()
+            ):
+                relevant_text += " " + res_text
+
+        # Extract new streaming/variant endpoint paths from decisions
+        # Patterns like: /query/stream, /chat/stream, /query/ws
+        new_endpoints: list[tuple[str, str]] = list(dict.fromkeys(
+            _re.findall(
+                r"/(\w+)/(stream|ws|async|sse)\b", relevant_text.lower(),
+            )
+        ))
+
+        if len(new_endpoints) < 2:
+            # Only one new endpoint — no need to decompose
+            result.append((filename, purpose))
+            continue
+
+        # Match each new endpoint to its base handler
+        decomposed = False
+        for base_path_segment, variant_suffix in new_endpoints:
+            # Find the base route: /chat -> chat(), /query -> query()
+            base_route = f"/{base_path_segment}"
+            base_func = route_handlers.get(base_route)
+            if not base_func:
+                continue
+
+            new_path = f"/{base_path_segment}/{variant_suffix}"
+            sub_purpose = (
+                f"add {new_path} endpoint "
+                f"(streaming variant of {base_func}())"
+            )
+            result.append((filename, sub_purpose))
+            decomposed = True
+            logger.info(
+                f"F25 decompose: {filename} -> {new_path} "
+                f"(ref: {base_func}())"
+            )
+
+        if not decomposed:
+            # Couldn't match — keep original
+            result.append((filename, purpose))
+
+    return result
+
+
 def _extract_reference_method(
     disk_source: str,
     purpose: str,
@@ -556,7 +676,8 @@ def _extract_reference_method(
     import re as _re
 
     variant_patterns = [
-        r"(?:stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)",
+        r"(?:streaming|stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)",
+        r"(?:variant|version)\s+of\s+(\w+)",
         r"(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)",
         r"(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)",
         r"(\w+)\(\)\s+(?:but|except|with)\s+stream",
@@ -1923,6 +2044,13 @@ class SynthesisStage(PipelineStage):
         source_dir = prior_outputs.get("_source_dir", "")
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
+
+        # F25 decomposition: split file-level artifacts into per-function
+        # artifacts when the source file has multiple route handlers and
+        # the decisions reference multiple new endpoints for that file.
+        artifact_specs = _decompose_multi_handler_artifacts(
+            artifact_specs, resolutions, source_dir, file_contents,
+        )
 
         # Build compact decision summary for injection
         decision_summary = self._format_resolutions(resolutions)
