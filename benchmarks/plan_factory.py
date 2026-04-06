@@ -135,7 +135,7 @@ def retrieval(
     runs: int = typer.Option(10, help="Number of retrieval runs"),
     source_dir: str = typer.Option(..., help="Codebase to index"),
     query: str = typer.Option(
-        "Add token usage tracking so I can see how many LLM tokens each query costs",
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="Job description / query",
     ),
 ):
@@ -351,7 +351,7 @@ def reasoning(
     source_dir: str = typer.Option(..., help="Codebase source dir (for file reads)"),
     context_file: str = typer.Option(..., help="JSON file with pre-gathered context"),
     query: str = typer.Option(
-        "Add token usage tracking so I can see how many LLM tokens each query costs",
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="Job description / query",
     ),
     split: bool = typer.Option(False, help="Split arch+design into two reasoning calls"),
@@ -540,7 +540,7 @@ def decomposed(
     source_dir: str = typer.Option(..., help="Codebase source dir"),
     context_file: str = typer.Option(..., help="JSON file with pre-gathered context"),
     query: str = typer.Option(
-        "Add token usage tracking so I can see how many LLM tokens each query costs",
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="Job description / query",
     ),
     score_plans: bool = typer.Option(
@@ -624,7 +624,7 @@ def prepare_scoring(
     source_dir: str = typer.Option(..., help="Target codebase directory"),
     context_file: str = typer.Option(..., help="ideal_context.json for structural index"),
     query: str = typer.Option(
-        "Add token usage tracking so I can see how many LLM tokens each query costs",
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="The task query these plans address",
     ),
 ):
