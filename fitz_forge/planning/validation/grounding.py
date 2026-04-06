@@ -361,9 +361,46 @@ def check_artifact(
             if cls.file == filename or filename.endswith(cls.file):
                 target_classes.append(cls)
 
-    # Walk AST and check references
+    # Build per-function var -> type maps from parameter annotations.
+    # Each function gets its own scope so `request: ChatRequest` in one
+    # function doesn't bleed into another with `request: QueryRequest`.
+    func_type_maps: dict[int, dict[str, str]] = {}  # func node id -> {var: type}
+    func_nodes: list[ast.AST] = []
     for node in ast.walk(tree):
-        _check_node(node, filename, lookup, artifact_classes, target_classes, violations)
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        type_map: dict[str, str] = {}
+        for arg in node.args.args:
+            if arg.annotation and isinstance(arg.annotation, ast.Name):
+                type_map[arg.arg] = arg.annotation.id
+            elif arg.annotation and isinstance(arg.annotation, ast.Attribute):
+                type_map[arg.arg] = arg.annotation.attr
+        if type_map:
+            func_type_maps[id(node)] = type_map
+            func_nodes.append(node)
+
+    # Walk each function body with its own type map
+    # Also walk top-level nodes (outside functions) with empty type map
+    top_level_nodes = set()
+    func_body_nodes: dict[int, set[int]] = {}  # func id -> set of child node ids
+    for func_node in func_nodes:
+        child_ids = set()
+        for child in ast.walk(func_node):
+            child_ids.add(id(child))
+        func_body_nodes[id(func_node)] = child_ids
+
+    for node in ast.walk(tree):
+        # Find which function this node belongs to
+        var_type_map: dict[str, str] | None = None
+        for func_node in func_nodes:
+            if id(node) in func_body_nodes[id(func_node)]:
+                var_type_map = func_type_maps.get(id(func_node))
+                break
+
+        _check_node(
+            node, filename, lookup, artifact_classes, target_classes,
+            violations, var_type_map,
+        )
 
     return violations
 
@@ -375,6 +412,7 @@ def _check_node(
     artifact_classes: dict[str, set[str]],
     target_classes: list[IndexedClass],
     violations: list[Violation],
+    var_type_map: dict[str, str] | None = None,
 ) -> None:
     line = getattr(node, "lineno", 0)
 
@@ -469,18 +507,43 @@ def _check_node(
                             )
                         )
 
-    # Check: attribute access on known types (obj.field)
+    # Check: attribute access on typed local variables (obj.field)
     elif (
         isinstance(node, ast.Attribute)
         and isinstance(node.value, ast.Name)
         and node.value.id not in _SKIP_NAMES
         and node.value.id != "self"
     ):
-        # Skip module-level attribute access (json.loads, etc)
-        if node.value.id[0].islower() and node.value.id not in ("request", "response", "ctx"):
+        var_name = node.value.id
+        attr_name = node.attr
+
+        # Skip module-level attribute access (json.loads, etc.)
+        # but keep going for typed variables from var_type_map
+        type_name = (var_type_map or {}).get(var_name)
+        if not type_name and var_name[0].islower():
             return
-        # For known variable names like 'request', we'd need type info
-        # This is deferred to the LLM path
+
+        if type_name:
+            cls = lookup.find_class(type_name)
+            if cls and cls.methods:
+                if attr_name not in cls.methods and not attr_name.startswith("__"):
+                    known = sorted(cls.methods.keys())
+                    suggestions = difflib.get_close_matches(
+                        attr_name, known, n=3, cutoff=0.5,
+                    )
+                    violations.append(
+                        Violation(
+                            filename,
+                            line,
+                            f"{var_name}.{attr_name}",
+                            "wrong_field",
+                            f"'{attr_name}' not found on {type_name} "
+                            f"(known: {', '.join(known[:10])})",
+                            f"Did you mean: {', '.join(suggestions)}"
+                            if suggestions
+                            else "",
+                        )
+                    )
 
 
 def check_all_artifacts(
@@ -689,6 +752,7 @@ def build_llm_grounding_prompt(
 # ---------------------------------------------------------------------------
 # Violation repair: targeted LLM fix using exact AST violation messages
 # ---------------------------------------------------------------------------
+
 
 
 async def repair_violations(

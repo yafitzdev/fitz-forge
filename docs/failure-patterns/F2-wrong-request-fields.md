@@ -1,4 +1,4 @@
-# F2: Wrong Request Field Names (FIXED)
+# F2: Wrong Request Field Names (PARTIALLY FIXED)
 
 ## Problem
 The model confuses field names across different Pydantic models. In API route artifacts, it writes `request.message` instead of `request.question`, `request.history` instead of `request.conversation_history`, and invents fields like `request.answer_mode` and `request.user_id`.
@@ -26,4 +26,18 @@ Two layers:
 - Baseline: 20/50 engine.py artifacts had `query.conversation_context` (40%)
 - After: 0/50 (0%)
 
-## Status: FIXED (by F7 prompt reorder)
+## Recurrence (run 73, 2026-04-06)
+
+The F7 fix eliminated F2 in engine.py artifacts but **not in route artifacts**. 3/5 plans in run 73 had schema cross-contamination in route code:
+- `request.question` instead of `request.message` (ChatRequest context)
+- `request.conversation_history` instead of `request.history`
+- `request.messages` instead of `request.history`
+- `request.source` (doesn't exist on ChatRequest)
+
+The model still conflates `QueryRequest` and `ChatRequest` fields when generating streaming route endpoints. The schema field injection only helps when the model pays attention to it — in long generation contexts (route artifacts with SSE boilerplate), it drifts back to wrong fields.
+
+### Potential additional fixes
+1. **Per-artifact schema scoping**: Inject ONLY the relevant request model fields for each artifact (e.g., only ChatRequest fields for /chat endpoints), not all schemas together.
+2. **Post-generation field validation**: AST-parse route code, extract `request.xxx` accesses, validate against declared request model. Deterministic, 0 LLM cost.
+
+## Status: 🟡 PARTIALLY FIXED (engine.py fixed, route artifacts still affected — 60% in run 73)

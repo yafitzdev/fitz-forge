@@ -90,7 +90,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | ID | Pattern | Occurrence | Impact | Fix Type | Harness | Isolated Runs | Before | After | Status |
 |----|---------|-----------|--------|----------|---------|---------------|--------|-------|--------|
 | F1 | Duplicate decisions | ~17% of raw LLM output | est. ~3 pts | Deterministic dedup | ✅ | 100 (2×50) | 17% (8/47) | **0%** (dedup in execute) | ✅ |
-| F2 | Wrong request fields | was 40% of engine.py artifacts | est. ~4 pts | Prompt reorder (F7) | ✅ | 100 (2×50 traces) | 40% (20/50) | **0%** (0/50) | ✅ |
+| F2 | Wrong request fields | 60% of route artifacts (run 73) | est. ~2 pts (alignment+implementability) | Prompt reorder (F7) + per-artifact schema scoping | ✅ | 100 (2×50 traces) | 40% (20/50) | **0% engine.py, 60% route** | 🟡 |
 | F3 | Cross-artifact mismatch | ~33% of plans | est. ~5 pts | Signature injection | ❌ | 0 | ? | — (needs full pipeline test) | ✅ |
 | F4 | Phantom phases | ~100% of plans | est. ~2 pts | Deterministic filter | ❌ | 0 | ~100% | **0%** (deterministic filter) | ✅ |
 | F5 | Wrong imports | ~33% of plans | est. ~2 pts | Index lookup | ❌ | 0 | ? | **0%** (deterministic repair) | ✅ |
@@ -109,12 +109,16 @@ Every LLM call in the pipeline that can or has produced failures:
 | F18 | Overfitted artifact rules | 100% of prompts | no impact | Remove example | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
 | F19 | Hardcoded schema keywords | 100% of code paths | load-bearing | N/A (reverted) | ✅ | 50 | 0% fab | **72% fab** (reverted) | ⏸️ |
 | F20 | Decision redundancy | 100% of plans | ~3.5K wasted chars (19% of decisions) | File-overlap merger | ✅ | 10 | 13.2 dec, 18.8K | **8 dec, 15.2K** (-19%) | ✅ |
+| F21 | Structural overview stub confusion | 60% of plans (3/5, run 73) | ~3 pts (alignment+implementability) | Format change or prompt note | ❌ | 0 | 60% | — | ❌ |
+| F23 | JSON-in-JSON decision fields | 20% of plans (1/5, run 73) | ~1 pt (consistency) | Deterministic JSON unwrap | ❌ | 0 | 20% | — | ❌ |
+| F24 | Semantic file misidentification | 40% of plans (2/5, run 73) | ~2 pts (alignment+file_identification) | Purpose annotations + path validation | ❌ | 0 | 40% | — | ❌ |
+| F25 | Unvalidated local attr access | 100% of route artifacts (run 73) | ~3 pts (alignment+implementability) | Typed attr validation in check_artifact | ❌ | 0 | 100% | — | ❌ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 72):** F10 reduced 54%→22% plan-level via deterministic corrector (AST + regex fallback, chained attrs, underscore strip). Import graph fixed (relative imports). LLM correction prompts all failed. Decision merger (F20) reduces decisions 13→8. All prompts genericized (F15-F18). F19 deferred (load-bearing).
+**Current state (run 73, 2026-04-06):** Codebase reverted to commit I (E + bug fixes) after bisect found decision filter caused -5.7pt regression. Import graph fix re-applied (neutral). Run 67 rescored cold = 40.9 (original 45.3 inflated). True baseline: ~41. New failure patterns F21-F24 identified from run 73 scoring — structural overview confusion (60%), schema field cross-contamination (60%), decision structure defects (60%), file misidentification (40%). These are the current score bottlenecks alongside existing F10 (22%) and F13 (30%).
 
 **Key lessons:**
 1. More LLM calls + pick the best = proactive fix for model quality limits (best-of-3, +2.8 pts)
@@ -129,7 +133,7 @@ Every LLM call in the pipeline that can or has produced failures:
 1. ~~**F4** — Phantom phases.~~ ✅ DONE. Deterministic filter.
 2. ~~**F1** — Duplicate decisions.~~ ✅ DONE. String similarity dedup (17%→0%).
 3. ~~**F6** — Empty extraction.~~ ✅ DONE. Retry safety net (baseline already 0% after JSON regex fix).
-4. ~~**F2** — Wrong request fields.~~ ✅ DONE. Fixed by F7 prompt reorder (40%→0% in traces).
+4. **F2** — Wrong request fields. 🟡 PARTIAL. Engine.py fixed by F7 prompt reorder, but route artifacts still affected (60% in run 73).
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.
@@ -137,6 +141,9 @@ Every LLM call in the pipeline that can or has produced failures:
 9. ~~**F11** — Wrong object for correct method.~~ ✅ RESOLVED. 0% in isolation — F9 reference injection prevents.
 10. ~~**F12** — Artifact filename corruption.~~ ✅ DONE. Deterministic strip of method suffixes.
 11. ~~**F13** — Upstream reasoning failures.~~ 🟡 PARTIALLY. Best-of-3 scope consensus raised floor 29→37.
+12. **F21** — Structural overview stub confusion. ❌ NEW. 60% of plans. Model misreads `...` as unimplemented stub.
+13. **F23** — JSON-in-JSON decision fields. ❌ NEW. 20% of plans. Deterministic unwrap fix.
+14. **F24** — Semantic file misidentification. ❌ NEW. 40% of plans. Wrong file for new code.
 
 ---
 
@@ -156,3 +163,4 @@ Every LLM call in the pipeline that can or has produced failures:
 | 69 | 2026-04-04 | + reasoning split + decision merger + refinement pass | 10 | not scored | 40% clean, 60% F10. Refinement pass fires (31K→6-12K) but F10 persists. |
 | 70 | 2026-04-05 | + decision filter + generic fabrication detection | 10 | not scored | 50% plans with F10, 18% artifacts. query.py is persistent hotspot. Decision filter catches fabricated method refs in decisions. Signature filter prevents cross-artifact propagation. Generic: no hardcoded patterns. |
 | **72** | **2026-04-05** | **+ deterministic corrector (AST+regex, chained attrs, underscore strip)** | **10** | **40.3/60** | **F10 22% plan-level (0% executable code). Score flat vs baseline (40.1) despite F10 fix. F10 was NOT the score bottleneck — `_detection_orchestrator()` callable (50%) and `_embedder.embed([])` (40%) in engine.py dominate consistency (5.5) and implementability (5.5).** |
+| **73** | **2026-04-06** | **commit I + import graph fix (relative imports, BFS 200, chain completeness)** | **5** | **40.6/60** | **Neutral vs baseline (~41). Run 67 rescored cold = 40.9 (45.3 was inflated). New patterns identified: F21 stub confusion (60%), F22 schema cross-contamination (60%), F23 decision defects (60%), F24 file misidentification (40%).** |

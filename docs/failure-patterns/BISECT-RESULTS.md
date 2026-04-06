@@ -94,12 +94,34 @@ These commits contain useful ideas but were bundled with the harmful filter/corr
 
 5. **Bug fixes are safe; architectural changes need scoring.** The truncation fix and retry-if-empty fix are pure bug corrections that improve structural completeness without changing what the LLM sees. These tested positive immediately. The decision filter and corrector changed what the LLM receives/produces — these needed full pipeline validation.
 
-## For the Next Session
+## Post-Bisect Work (2026-04-06)
 
-The codebase is at commit I — equivalent to run 67's code plus the reasoning split, refinement pass, decision merger, prompt genericization, and two bug fixes. Score: ~40.7 avg (within variance of the 42.0 baseline).
+### Run 67 rescore
+Run 67's original 45.3 avg was inflated by Sonnet scoring variance. Cold rescore with fresh Sonnet subagents gave **40.9 avg**. The true baseline for this codebase+model is **~41**.
 
-Priority work:
-1. **Re-apply import graph fix** (relative imports only, no filter/corrector) — low risk
-2. **Re-apply class cache** (without corrector) — verify attr-as-function repair still helps
-3. **Investigate why run 67 scored 45.3 but the bisect baseline (A) scored 42.0** — is best-of-3 variance masking a 42-45 true average?
-4. **Find new score improvements** — the F10 line of work is a dead end for scores. Look at consistency (5.5) and implementability (5.5) as the weakest dimensions.
+### Import graph fix re-applied (run 73)
+Cherry-picked from `835e9fdc` onto commit I:
+- `_extract_full_imports` resolves relative imports (`from .foo import X`)
+- BFS cap 80→200 in call graph extraction
+- Chain completeness rule added to decomposition prompt
+
+**Result: 40.6 avg (5 plans, range 35-44) — neutral.** Expected: pure infrastructure fix, doesn't change what LLM sees.
+
+| Plan | Files | Contract | Consistency | Alignment | Implement | Scope | Total |
+|------|-------|----------|-------------|-----------|-----------|-------|-------|
+| 73a | 6 | 8 | 5 | 5 | 6 | 8 | 38 |
+| 73b | 8 | 7 | 6 | 6 | 7 | 8 | 42 |
+| 73c | 7 | 6 | 5 | 5 | 5 | 7 | 35 |
+| 73d | 9 | 7 | 6 | 7 | 6 | 9 | 44 |
+| 73e | 7 | 9 | 7 | 7 | 6 | 8 | 44 |
+| **avg** | **7.4** | **7.6** | **5.8** | **5.6** | **6.0** | **8.0** | **40.6** |
+
+### Remaining reverted commits
+1. ~~**Import graph fix**~~ — Done. Neutral. Committed.
+2. **Cached class resolver** (`ec34e778`) — Not yet re-evaluated. Apply cache without corrector.
+3. **F10 corrector concept** — Dead end for scores. Consider logging-only approach.
+
+### Current priorities
+- **Weakest dimensions**: consistency (5.8) and alignment (5.6) are the biggest score levers
+- Consistency failures: duplicate decision IDs, wrong critical paths, type mismatches across artifacts, ADR contradictions
+- Alignment failures: wrong field names (request.question vs request.message), fabricated attributes (self._chat_provider), wrong service paths, misidentified file purposes (firstrun.py)

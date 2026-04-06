@@ -1435,6 +1435,12 @@ class SynthesisStage(PipelineStage):
     This stage does NOT do original reasoning -- it organizes pre-solved answers.
     """
 
+    # Set to a directory path to save artifact prompts + responses for replay.
+    # When set, each artifact generation writes:
+    #   {trace_dir}/{filename_safe}_prompt.txt
+    #   {trace_dir}/{filename_safe}_response.txt
+    trace_dir: str | None = None
+
     @property
     def name(self) -> str:
         return "synthesis"
@@ -1947,7 +1953,7 @@ class SynthesisStage(PipelineStage):
                     + "\n".join(prior_signatures)
                 )
 
-            artifact = await self._generate_single_artifact(
+            artifact = await self._generate_single_artifact_checked(
                 client,
                 filename,
                 purpose,
@@ -2531,6 +2537,20 @@ class SynthesisStage(PipelineStage):
             )
             elapsed = time.monotonic() - t0
 
+            # Trace: save prompt + response for replay
+            if self.trace_dir:
+                from pathlib import Path as _TracePath
+
+                trace = _TracePath(self.trace_dir)
+                trace.mkdir(parents=True, exist_ok=True)
+                safe = filename.replace("/", "_").replace("\\", "_")
+                (trace / f"{safe}_prompt.txt").write_text(
+                    prompt, encoding="utf-8",
+                )
+                (trace / f"{safe}_response.txt").write_text(
+                    raw, encoding="utf-8",
+                )
+
             data = extract_json(raw)
             content = data.get("content", "")
             if not content:
@@ -2566,6 +2586,68 @@ class SynthesisStage(PipelineStage):
         except Exception as e:
             logger.warning(f"Stage 'synthesis': artifact for {filename} failed: {e}")
             return None
+
+    async def _generate_single_artifact_checked(
+        self,
+        client: Any,
+        filename: str,
+        purpose: str,
+        source: str,
+        relevant_decisions: str,
+        reasoning: str,
+        prior_outputs: dict[str, Any] | None = None,
+        prior_artifact_sigs: str = "",
+        max_retries: int = 1,
+    ) -> dict | None:
+        """Generate a single artifact with F25 wrong-field retry.
+
+        Generates the artifact, checks for wrong_field violations via AST,
+        and retries up to max_retries times if violations are found.
+        """
+        from fitz_forge.planning.validation.grounding import (
+            StructuralIndexLookup,
+            check_artifact,
+        )
+
+        # Build lookup once for validation
+        lookup = None
+        if prior_outputs:
+            agent_ctx = prior_outputs.get("_agent_context", {})
+            full_index = agent_ctx.get("full_structural_index", "")
+            if not full_index:
+                full_index = prior_outputs.get("_gathered_context", "")
+            if full_index:
+                lookup = StructuralIndexLookup(full_index)
+
+        for attempt in range(1 + max_retries):
+            artifact = await self._generate_single_artifact(
+                client, filename, purpose, source, relevant_decisions,
+                reasoning, prior_outputs, prior_artifact_sigs,
+            )
+            if not artifact or not lookup:
+                return artifact
+
+            violations = check_artifact(artifact, lookup)
+            wrong_fields = [v for v in violations if v.kind == "wrong_field"]
+
+            if not wrong_fields:
+                return artifact
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"Stage 'synthesis': {filename} has {len(wrong_fields)} "
+                    f"wrong field access(es), retrying "
+                    f"({attempt + 1}/{max_retries}): "
+                    + ", ".join(f"{v.symbol}" for v in wrong_fields)
+                )
+            else:
+                logger.warning(
+                    f"Stage 'synthesis': {filename} still has "
+                    f"{len(wrong_fields)} wrong field(s) after "
+                    f"{max_retries} retry(ies), keeping best attempt"
+                )
+
+        return artifact
 
     async def _artifacts_template_fallback(
         self,

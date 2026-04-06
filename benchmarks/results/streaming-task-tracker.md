@@ -66,6 +66,7 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | 66a-j | 04-03 | + F13C approach fallback | 12-14 | — | 7.8 | 8.0 | 6.4 | 7.0 | 6.5 | 7.0 | **42.5 avg** | 10 plans. New high 53. Zero empty architectures. |
 | **67a-j** | **04-04** | **+ best-of-3 scope consensus** | **12-15** | **—** | **8.3** | **8.5** | **7.1** | **7.0** | **7.2** | **7.6** | **45.3 avg** | **10 plans. +5.2 over baseline. Floor 37. Two 53s. Top 5 avg 49.2.** |
 | 72a-j | 04-05 | + F10 deterministic corrector + import graph fix + decision filter | 13-15 | — | 7.7 | 7.5 | 5.5 | 6.1 | 5.5 | 8.0 | **40.3 avg** | 10 plans. F10 54%→22% plan-level (0% executable code). Score flat vs baseline (40.1). _detection_orchestrator() callable in 50% of plans (same as run 67). **F10 was NOT the score bottleneck — self._xxx fabrication patterns dominate.** |
+| **73a-e** | **04-06** | **commit I + import graph fix (relative imports, BFS 200, chain completeness prompt)** | **12-15** | **—** | **7.4** | **7.6** | **5.8** | **5.6** | **6.0** | **8.0** | **40.6 avg** | **5 plans. Range 35-44. Neutral vs baseline (~41). Import graph fix is correct infrastructure but doesn't move scores. Run 67 rescored cold = 40.9 (original 45.3 was inflated).** |
 
 ---
 

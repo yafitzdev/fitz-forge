@@ -923,7 +923,7 @@ class DecomposedPipeline:
             prior_outputs["_grounding_validation"] = grounding_report.to_dict()
             logger.info(f"Grounding validation: {grounding_report.total_violations} AST violations")
 
-            # Repair: if AST violations found, fix them before the plan is finalized
+            # LLM repair: fix violations (includes F25 wrong_field via suggestions)
             if grounding_report.ast_violations and artifacts:
                 from fitz_forge.planning.validation.grounding import repair_violations
 

@@ -483,6 +483,12 @@ async def _run_decomposed_once(
     pipeline = DecomposedPipeline(
         checkpoint_manager=_NullCheckpointManager(),
     )
+    # Enable artifact prompt tracing for replay
+    trace_dir = out_dir / f"traces_{run_id:02d}"
+    for stage in pipeline._stages:
+        if hasattr(stage, "trace_dir"):
+            stage.trace_dir = str(trace_dir)
+
     job_id = f"decomp_{run_id:03d}"
 
     agent = AgentContextGatherer(

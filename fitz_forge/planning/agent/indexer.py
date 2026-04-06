@@ -173,6 +173,7 @@ def _extract_python(content: str) -> str:
             for base in node.bases:
                 bases.append(_ast_name(base))
             methods = []
+            fields = []
             for n in ast.iter_child_nodes(node):
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     m_str = n.name
@@ -183,14 +184,20 @@ def _extract_python(content: str) -> str:
                             ret = _ast_name(n.returns)
                         m_str += f" -> {ret}"
                     methods.append(m_str)
+                elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+                    # Pydantic / dataclass field: `name: Type = ...`
+                    fields.append(n.target.id)
             cls_str = node.name
             if bases:
                 cls_str += f"({', '.join(bases)})"
             decs = _extract_key_decorators(node.decorator_list)
             if decs:
                 cls_str += f" [{', '.join(f'@{d}' for d in decs)}]"
+            # Show methods if present, otherwise show fields (Pydantic/dataclass)
             if methods:
                 cls_str += f" [{', '.join(methods)}]"
+            elif fields:
+                cls_str += f" [{', '.join(fields)}]"
             classes.append(cls_str)
     if classes:
         lines.append(f"classes: {'; '.join(classes)}")
