@@ -67,6 +67,9 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | **67a-j** | **04-04** | **+ best-of-3 scope consensus** | **12-15** | **—** | **8.3** | **8.5** | **7.1** | **7.0** | **7.2** | **7.6** | **45.3 avg** | **10 plans. +5.2 over baseline. Floor 37. Two 53s. Top 5 avg 49.2.** |
 | 72a-j | 04-05 | + F10 deterministic corrector + import graph fix + decision filter | 13-15 | — | 7.7 | 7.5 | 5.5 | 6.1 | 5.5 | 8.0 | **40.3 avg** | 10 plans. F10 54%→22% plan-level (0% executable code). Score flat vs baseline (40.1). _detection_orchestrator() callable in 50% of plans (same as run 67). **F10 was NOT the score bottleneck — self._xxx fabrication patterns dominate.** |
 | **73a-e** | **04-06** | **commit I + import graph fix (relative imports, BFS 200, chain completeness prompt)** | **12-15** | **—** | **7.4** | **7.6** | **5.8** | **5.6** | **6.0** | **8.0** | **40.6 avg** | **5 plans. Range 35-44. Neutral vs baseline (~41). Import graph fix is correct infrastructure but doesn't move scores. Run 67 rescored cold = 40.9 (original 45.3 was inflated).** |
+| 74a-e | 04-06 | + F25 typed attr validation (no indexer fix) | — | — | — | — | — | — | — | — | **not scored** | 5 plans. 4/5 (80%) query.py artifacts had wrong ChatRequest fields. F25 detection found all violations but couldn't fire — ChatRequest missing from structural index (truncated). |
+| 75a-e | 04-06 | + F25 with indexer fix (wrong import — fitz_sage not fitz_forge) | — | — | — | — | — | — | — | — | **not scored** | 4 plans with query.py. 2/4 (50%) wrong. Partial improvement — index sometimes had data. |
+| 76a-f | 04-06 | + F25 with correct import + Pydantic field extraction + truncation fix | — | — | — | — | — | — | — | — | **not scored** | 6 plans (5 batch + 1 single). 2/5 wrong (40%). Remaining 2 had **syntax errors** (double-quotes) bypassing wrong_field-only retry. Fix: retry on ALL violation kinds. |
 
 ---
 

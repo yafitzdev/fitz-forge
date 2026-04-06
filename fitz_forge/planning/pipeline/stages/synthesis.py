@@ -2628,22 +2628,24 @@ class SynthesisStage(PipelineStage):
                 return artifact
 
             violations = check_artifact(artifact, lookup)
-            wrong_fields = [v for v in violations if v.kind == "wrong_field"]
 
-            if not wrong_fields:
+            if not violations:
                 return artifact
 
+            desc = ", ".join(
+                f"{v.kind}: {v.symbol}" if v.symbol else v.kind
+                for v in violations[:5]
+            )
             if attempt < max_retries:
                 logger.warning(
-                    f"Stage 'synthesis': {filename} has {len(wrong_fields)} "
-                    f"wrong field access(es), retrying "
-                    f"({attempt + 1}/{max_retries}): "
-                    + ", ".join(f"{v.symbol}" for v in wrong_fields)
+                    f"Stage 'synthesis': {filename} has {len(violations)} "
+                    f"AST violation(s), retrying "
+                    f"({attempt + 1}/{max_retries}): {desc}"
                 )
             else:
                 logger.warning(
                     f"Stage 'synthesis': {filename} still has "
-                    f"{len(wrong_fields)} wrong field(s) after "
+                    f"{len(violations)} violation(s) after "
                     f"{max_retries} retry(ies), keeping best attempt"
                 )
 

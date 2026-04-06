@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fitz_sage.code import CodeRetriever
-from fitz_sage.code.indexer import build_structural_index
 
 from fitz_forge.planning.agent.compressor import compress_file
 from fitz_forge.planning.agent.indexer import (
+    build_structural_index,
     extract_interface_signatures,
     extract_library_signatures,
 )
