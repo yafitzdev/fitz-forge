@@ -36,8 +36,12 @@ The F7 fix eliminated F2 in engine.py artifacts but **not in route artifacts**. 
 
 The model still conflates `QueryRequest` and `ChatRequest` fields when generating streaming route endpoints. The schema field injection only helps when the model pays attention to it — in long generation contexts (route artifacts with SSE boilerplate), it drifts back to wrong fields.
 
-### Potential additional fixes
-1. **Per-artifact schema scoping**: Inject ONLY the relevant request model fields for each artifact (e.g., only ChatRequest fields for /chat endpoints), not all schemas together.
-2. **Post-generation field validation**: AST-parse route code, extract `request.xxx` accesses, validate against declared request model. Deterministic, 0 LLM cost.
+### Fix: F25 per-function artifact decomposition (2026-04-06)
 
-## Status: 🟡 PARTIALLY FIXED (engine.py fixed, route artifacts still affected — 60% in run 73)
+Root cause was not schema injection — the model had the right data. The problem was `_extract_reference_method` picking `query()` (longest body) as the reference for ALL new endpoints, including `/chat/stream`. The model was told "follow this pattern exactly" with the wrong handler.
+
+**Fix**: `_decompose_multi_handler_artifacts` splits file-level artifacts into per-function artifacts when the source file has multiple route handlers. Each artifact gets a focused purpose like "streaming variant of chat()" and `_extract_reference_method` correctly picks `chat()` as the reference.
+
+**Result**: wrong_field violations 83% → 0% (run 74 → run 77).
+
+## Status: ✅ FIXED (engine.py by F7 prompt reorder, route artifacts by F25 per-function decomposition)

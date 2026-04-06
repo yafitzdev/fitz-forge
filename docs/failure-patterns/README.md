@@ -90,7 +90,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | ID | Pattern | Occurrence | Impact | Fix Type | Harness | Isolated Runs | Before | After | Status |
 |----|---------|-----------|--------|----------|---------|---------------|--------|-------|--------|
 | F1 | Duplicate decisions | ~17% of raw LLM output | est. ~3 pts | Deterministic dedup | ✅ | 100 (2×50) | 17% (8/47) | **0%** (dedup in execute) | ✅ |
-| F2 | Wrong request fields | 80% of route artifacts (run 74) | est. ~2 pts (alignment+implementability) | Prompt reorder (F7) + F25 typed attr validation + retry | ✅ | 100 (2×50 traces) + 16 pipeline | 80% (4/5) | **40% (2/5)** after F25 fix | 🟡 |
+| F2 | Wrong request fields | 83% of route artifacts (run 74) | est. ~2 pts (alignment+implementability) | Prompt reorder (F7) + F25 per-function decomposition | ✅ | 100 (2×50 traces) + 16 pipeline | 83% (5/6) | **0% (0/7)** after F25 decomposition fix | ✅ |
 | F3 | Cross-artifact mismatch | ~33% of plans | est. ~5 pts | Signature injection | ❌ | 0 | ? | — (needs full pipeline test) | ✅ |
 | F4 | Phantom phases | ~100% of plans | est. ~2 pts | Deterministic filter | ❌ | 0 | ~100% | **0%** (deterministic filter) | ✅ |
 | F5 | Wrong imports | ~33% of plans | est. ~2 pts | Index lookup | ❌ | 0 | ? | **0%** (deterministic repair) | ✅ |
@@ -112,7 +112,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F21 | Structural overview stub confusion | 60% of plans (3/5, run 73) | ~3 pts (alignment+implementability) | Format change or prompt note | ❌ | 0 | 60% | — | ❌ |
 | F23 | JSON-in-JSON decision fields | 20% of plans (1/5, run 73) | ~1 pt (consistency) | Deterministic JSON unwrap | ❌ | 0 | 20% | — | ❌ |
 | F24 | Semantic file misidentification | 40% of plans (2/5, run 73) | ~2 pts (alignment+file_identification) | Purpose annotations + path validation | ❌ | 0 | 40% | — | ❌ |
-| F25 | Unvalidated local attr access | 80% of route artifacts (run 74) | ~3 pts (alignment+implementability) | Typed attr validation + retry on all violations | ✅ | 5+5+6 plans | 80% (4/5) | **40% (2/5)** — syntax errors bypass first fix, now retried | 🟡 |
+| F25 | Unvalidated local attr access | 83% of route artifacts (run 74) | ~3 pts (alignment+implementability) | Per-function artifact decomposition + typed attr validation | ✅ | 5+6+5 plans | 83% (5/6) | **0% (0/7)** | ✅ |
 
 **Fix Types:** Deterministic = pure code, 0 LLM cost. Prompt = change prompt text. LLM retry = extra LLM call. Cross-validation = post-generation check.
 
@@ -133,7 +133,7 @@ Every LLM call in the pipeline that can or has produced failures:
 1. ~~**F4** — Phantom phases.~~ ✅ DONE. Deterministic filter.
 2. ~~**F1** — Duplicate decisions.~~ ✅ DONE. String similarity dedup (17%→0%).
 3. ~~**F6** — Empty extraction.~~ ✅ DONE. Retry safety net (baseline already 0% after JSON regex fix).
-4. **F2** — Wrong request fields. 🟡 PARTIAL. Engine.py fixed by F7 prompt reorder, but route artifacts still affected (60% in run 73).
+4. ~~**F2** — Wrong request fields.~~ ✅ DONE. Engine.py by F7 prompt reorder, route artifacts by F25 per-function decomposition (83%→0%).
 5. ~~**F5** — Wrong imports.~~ ✅ DONE. Deterministic import path repair from structural index.
 6. ~~**F3** — Cross-artifact mismatch.~~ ✅ DONE. Prior artifact signature injection (zero LLM cost).
 7. ~~**F9** — Source compression blindness.~~ ✅ DONE. Reference method body + param type fields + callable annotation.

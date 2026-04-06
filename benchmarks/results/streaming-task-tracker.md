@@ -70,6 +70,7 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | 74a-e | 04-06 | + F25 typed attr validation (no indexer fix) | — | — | — | — | — | — | — | — | **not scored** | 5 plans. 4/5 (80%) query.py artifacts had wrong ChatRequest fields. F25 detection found all violations but couldn't fire — ChatRequest missing from structural index (truncated). |
 | 75a-e | 04-06 | + F25 with indexer fix (wrong import — fitz_sage not fitz_forge) | — | — | — | — | — | — | — | — | **not scored** | 4 plans with query.py. 2/4 (50%) wrong. Partial improvement — index sometimes had data. |
 | 76a-f | 04-06 | + F25 with correct import + Pydantic field extraction + truncation fix | — | — | — | — | — | — | — | — | **not scored** | 6 plans (5 batch + 1 single). 2/5 wrong (40%). Remaining 2 had **syntax errors** (double-quotes) bypassing wrong_field-only retry. Fix: retry on ALL violation kinds. |
+| **77a-e** | **04-06** | **+ F25 per-function artifact decomposition** | **—** | **—** | — | — | — | — | — | — | **scoring** | **5 plans. 0/7 wrong_field violations (0%) — down from 83%. Per-function decomposition gives each artifact the correct reference handler. Retry on all violation kinds. Pydantic fields in structural index.** |
 
 ---
 

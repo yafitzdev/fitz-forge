@@ -121,7 +121,17 @@ Cherry-picked from `835e9fdc` onto commit I:
 2. **Cached class resolver** (`ec34e778`) — Not yet re-evaluated. Apply cache without corrector.
 3. **F10 corrector concept** — Dead end for scores. Consider logging-only approach.
 
+### F25 fix (2026-04-06, later in session)
+Per-function artifact decomposition eliminated wrong field access in route artifacts:
+- **Root cause**: `_extract_reference_method` picked `query()` (longest) as reference for BOTH `/query/stream` and `/chat/stream`. Model was told "follow this pattern exactly" with the wrong handler.
+- **Fix**: `_decompose_multi_handler_artifacts` splits file-level artifacts into per-function artifacts. Each gets its correct reference handler.
+- **Also fixed**: Pydantic field extraction in indexer, truncation preserves classes line, gatherer uses fitz_forge's own indexer, retry on ALL violation kinds.
+- **Result**: wrong_field violations 83% → 0% (run 74 → run 77). Scoring run 77 in progress.
+
 ### Current priorities
-- **Weakest dimensions**: consistency (5.8) and alignment (5.6) are the biggest score levers
-- Consistency failures: duplicate decision IDs, wrong critical paths, type mismatches across artifacts, ADR contradictions
-- Alignment failures: wrong field names (request.question vs request.message), fabricated attributes (self._chat_provider), wrong service paths, misidentified file purposes (firstrun.py)
+- Scoring run 77 to measure overall impact on plan quality
+- **Weakest dimensions** (from run 73): consistency (5.8) and alignment (5.6)
+- Consistency failures: duplicate decision IDs, wrong critical paths, type mismatches across artifacts
+- Alignment failures: ~~wrong field names~~ (FIXED by F25), fabricated attributes (self._chat_provider), wrong service paths
+- Cached class resolver (`ec34e778`) — still not re-evaluated
+- F10 corrector concept — dead end for scores

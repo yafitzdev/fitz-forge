@@ -1,53 +1,103 @@
-# F25: Unvalidated Local Variable Attribute Access
+# F25: Wrong Field Access on Typed Local Variables
 
-## Problem
-Post-generation validation checks `self.method()` calls against the structural index but completely skips attribute access on local variables (`request.xxx`, `service.xxx`, `answer.xxx`). The AST checker had an explicit comment: "For known variable names like 'request', we'd need type info — This is deferred to the LLM path." But the type info IS available from parameter annotations and the structural index.
+## The Bug (with real example)
 
-## Artifact Post-Generation Validation Map
+The model generates a `_stream_chat(request: ChatRequest)` handler but uses `request.question` instead of `request.message`. `question` is a field on `QueryRequest`, not `ChatRequest`. The generated code would crash with `AttributeError` at runtime.
 
-| # | Artifact state | Example | Handling | Outcome |
-|---|---------------|---------|----------|---------|
-| 1 | Clean — all refs correct | `request.message`, `self._chat.chat_stream()` | Nothing needed | PASS |
-| 2 | Fabricated `self.xxx()` method | `self._chat_provider.stream()` | `_repair_fabricated_refs` + `check_artifact` AST + **retry** | PASS |
-| 3 | Fabricated `request.xxx` field | `request.question` on ChatRequest handler | `check_artifact` `wrong_field` + **retry** | **FIXED** |
-| 4 | Fabricated function/class call | `TokenDeltaNormalizer()` | `check_artifact` `missing_class` + **retry** | PASS |
-| 5 | Wrong import path | `from fitz_sage.service import X` | F5 import repair | PASS |
-| 6 | Wrong method on correct object | `self._chat.generate_stream()` | `_repair_fabricated_refs` + `check_artifact` + **retry** | PASS |
-| 7 | Fabricated `obj.xxx()` on local var | `service.query_stream()` | Prompt-only (`_resolve_imported_type_apis`), no post-gen check | PARTIAL |
-| 8 | Wrong parameter names/count | `service.query(ctx=...)` | `check_artifact` `wrong_arity` + **retry** | PARTIAL |
-| 9 | Syntax error in generated code | `""Convert...""` (double quotes) | `check_artifact` `parse_error` + **retry** | **FIXED** |
-| 10 | Correct code, wrong file | streaming logic in firstrun.py | No validation | FAIL (semantic) |
-| 11 | Bypasses existing layer | Calls chat_stream() directly, skips synthesizer | No validation | FAIL (semantic) |
+### Real source code (what the model sees in prompt)
+```python
+# /query handler — uses QueryRequest fields
+async def query(request: QueryRequest) -> QueryResponse:
+    answer = service.query(
+        question=request.question,              # QueryRequest.question ✓
+        conversation_context=_to_conversation_context(request.conversation_history),  # QueryRequest ✓
+    )
 
-## Root Causes Found
+# /chat handler — uses ChatRequest fields  
+async def chat(request: ChatRequest) -> ChatResponse:
+    answer = service.query(
+        question=request.message,               # ChatRequest.message ✓
+        conversation_context=_to_conversation_context(request.history),  # ChatRequest ✓
+    )
+```
 
-### 1. Missing type info in structural index
-The structural index truncation (Pass 3) dropped low-connectivity files like `schemas.py` to path-only `""`, losing all class/field info. The `StructuralIndexLookup` had no `ChatRequest` entry → validation couldn't check `request.xxx`.
+### What the model generates
+```python
+# _stream_query — correct, copies from /query handler
+async def _stream_query(request: QueryRequest):
+    answer = service.query(
+        question=request.question,              # ✓ correct for QueryRequest
+        conversation_context=_to_conversation_context(request.conversation_history),  # ✓
+    )
 
-**Fix**: Indexer now extracts Pydantic `AnnAssign` fields. Truncation now strips `doc:` lines before `classes:` lines, and keeps `classes:` line even in last-resort truncation. `ChatRequest [message, history, collection, top_k]` now survives.
+# _stream_chat — WRONG, copies from _stream_query instead of /chat handler
+async def _stream_chat(request: ChatRequest):
+    answer = service.query(
+        question=request.question,              # ✗ WRONG — should be request.message
+        conversation_context=_to_conversation_context(request.history),  # ✓ this one was fixed
+    )
+```
 
-### 2. Per-function scope needed for type resolution
-The initial implementation built ONE `var_type_map` from ALL functions in the artifact. When an artifact had both `_stream_query(request: QueryRequest)` and `_stream_chat(request: ChatRequest)`, the second annotation overwrote the first — so `request.question` in the QueryRequest handler was flagged as a violation.
+The model writes `_stream_query` first (correct), then copies its body for `_stream_chat` and partially fixes the field names. It changes `conversation_history` → `history` but misses `question` → `message`.
 
-**Fix**: Type maps are now built per-function scope. Each function's parameter annotations only apply within that function's body.
+## Why it happens
 
-### 3. No retry on ANY violations (not just wrong_field)
-The initial `_generate_single_artifact_checked` only retried on `wrong_field` violations. But the 2 remaining faulty plans had **syntax errors** (`""double quotes""` instead of `"""triple quotes"""`), which produced `parse_error` violations that were ignored.
+1. The source file has both `/query` and `/chat` handlers. `/query` comes first.
+2. The task says "query result streaming" — the word "query" primes the model.
+3. The model generates `_stream_query` first (copying from the `/query` handler).
+4. Then it generates `_stream_chat` by copying from its own `_stream_query` output instead of from the real `/chat` handler in the source code.
+5. It partially fixes fields (history is fixed, question is not) — classic attention drift in long generation.
 
-**Fix**: Retry fires on ALL violation kinds: `parse_error`, `missing_method`, `missing_class`, `missing_function`, `wrong_arity`, `wrong_field`.
+## Why retry doesn't work
 
-### 4. Gatherer imported indexer from target codebase
-`gatherer.py` imported `build_structural_index` from `fitz_sage.code.indexer` (the target codebase) instead of `fitz_forge.planning.agent.indexer` (our own). Our fixes to the indexer had no effect.
+The retry regenerates the artifact from the **same prompt** with the same reasoning. The reasoning upstream already contains references to `request.question` for the streaming endpoint. The model sees "use request.question" in the reasoning context and follows it, even though the source code and schema fields section show the correct field name. With temperature=0.7, the retry produces slightly different code but the same wrong fields ~80% of the time.
 
-**Fix**: Changed import to use fitz_forge's own indexer.
+## What we've done so far
 
-## Measurements
+### Detection (WORKS)
+1. **Indexer**: extracts Pydantic `AnnAssign` fields → `ChatRequest [message, history, collection, top_k]` in structural index
+2. **Truncation**: preserves `classes:` line even for low-connectivity files (schemas.py was being dropped to path-only)
+3. **check_artifact**: resolves parameter type annotations per-function scope, validates `request.xxx` against the type's fields
+4. **Import fix**: gatherer now uses fitz_forge's own indexer (was importing fitz_sage's copy which didn't have our fixes)
 
-| Run | Fix state | Wrong field rate (query.py artifacts) |
-|-----|-----------|---------------------------------------|
-| 74 (before) | No fix | 4/5 (80%) |
-| 75 (partial) | Indexer fix but wrong import | 2/4 (50%) — detection worked when index happened to have data |
-| 76 (full but wrong_field only) | All fixes but retry only on wrong_field | 2/5 (40%) — syntax errors bypassed retry |
-| 77 (pending) | All fixes, retry on all violations | TBD |
+Detection catches 100% of wrong-field violations on actual faulty artifacts.
 
-## Status: 🟡 PARTIALLY FIXED — detection works, retry on all violations, but upstream reasoning contamination means ~40% of artifacts still fail both attempts
+### Repair (DOESN'T WORK)
+- **Retry**: same prompt → same contaminated reasoning → same wrong fields (~80% of the time)
+- **Fuzzy string match**: `difflib.get_close_matches("question", ["message", "history", "collection", "top_k"])` returns `collection`, not `message` — character similarity doesn't map to semantic correspondence
+- **LLM repair**: historically unreliable (bisect showed it makes wrong corrections)
+
+## What needs to happen
+
+The detection works. The repair doesn't. Options:
+
+1. **Cross-model field mapping**: if `question` is wrong on `ChatRequest` but correct on `QueryRequest`, and the source code shows `/chat` uses `request.message` where `/query` uses `request.question` — extract this mapping from the source and apply it. Deterministic, uses actual codebase as ground truth.
+
+2. **Scope the source in the prompt**: instead of giving the full 106-line file with both handlers, inject only the `/chat` handler source when generating a `/chat/stream` artifact. Remove the source of confusion.
+
+3. **Fix the reasoning**: the contamination starts in the synthesis reasoning, which says "use request.question for the streaming endpoint." If the reasoning used correct field names, the artifact would too. This means validating the reasoning text, not just the artifact.
+
+## Occurrence
+- Run 74 (before fix): 4/5 route artifacts had wrong fields (80%)
+- Run 76 (with detection + retry): 2/5 (40%) — retry helped on syntax errors, not on field contamination
+- Affects alignment (-2 pts) and implementability (-1 pt) per plan
+
+## Final Fix: Per-Function Artifact Decomposition
+
+The retry approach failed because the same contaminated reasoning produces the same wrong fields. The real fix was **decomposing file-level artifacts into per-function artifacts**.
+
+### How it works
+1. `_decompose_multi_handler_artifacts` runs after `needed_artifacts` extraction
+2. Parses source file AST → finds route handlers via `@router.post("/path")` decorators
+3. Finds new endpoint paths in decisions (e.g., `/query/stream`, `/chat/stream`)
+4. Matches each new endpoint to its base handler: `/chat/stream` → `/chat` → `chat()`
+5. Splits into separate artifacts: one per new function
+
+### Result
+Each artifact gets a focused purpose like "streaming variant of chat()". `_extract_reference_method` then correctly picks `chat()` (with `request.message`) instead of `query()` (with `request.question`). The model can't copy from the wrong handler because it's not in the prompt.
+
+### Before/After
+- **Before (run 74)**: 5/6 route artifacts had wrong fields (83%) — AST-confirmed
+- **After (run 77)**: 0/7 route artifacts had wrong fields (0%)
+
+## Status: ✅ FIXED — per-function decomposition eliminates the source of confusion
