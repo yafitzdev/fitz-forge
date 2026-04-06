@@ -35,139 +35,6 @@ from fitz_forge.planning.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Cached class resolver — scans all .py files on disk ONCE, builds a
-# {ClassName: ClassInfo} map. Used by all functions that need to look up
-# class methods/fields when the structural index (30 files) doesn't have them.
-# Replaces 5+ scattered disk fallbacks that each had a broken filename filter.
-# ---------------------------------------------------------------------------
-
-import ast as _ast_module
-from dataclasses import dataclass as _dataclass, field as _field
-from pathlib import Path as _Path
-
-
-@_dataclass
-class _CachedClassInfo:
-    """Cached class metadata from AST parsing."""
-
-    file_path: str
-    methods: list[str] = _field(default_factory=list)  # public method names
-    method_sigs: list[str] = _field(default_factory=list)  # "name(params) -> ret"
-    fields: list[str] = _field(default_factory=list)  # annotated field names
-
-
-class _ClassCache:
-    """Lazy-built cache of all classes in a source directory.
-
-    First call to `get()` triggers a full scan of all .py files.
-    Subsequent calls are O(1) dict lookups. The scan takes ~1-2s
-    for ~800 files — negligible vs 300s+ LLM calls.
-    """
-
-    def __init__(self) -> None:
-        self._cache: dict[str, _CachedClassInfo] | None = None
-        self._source_dir: str = ""
-
-    def get(
-        self,
-        class_name: str,
-        source_dir: str,
-    ) -> _CachedClassInfo | None:
-        """Look up a class by name. Builds cache on first call."""
-        if self._cache is None or source_dir != self._source_dir:
-            self._build(source_dir)
-        return self._cache.get(class_name) if self._cache else None
-
-    def get_all(self, source_dir: str) -> dict[str, _CachedClassInfo]:
-        """Return the full cache. Builds on first call."""
-        if self._cache is None or source_dir != self._source_dir:
-            self._build(source_dir)
-        return self._cache or {}
-
-    def _build(self, source_dir: str) -> None:
-        self._source_dir = source_dir
-        self._cache = {}
-        root = _Path(source_dir)
-        if not root.is_dir():
-            return
-
-        for py_file in root.rglob("*.py"):
-            rel = str(py_file.relative_to(root)).replace("\\", "/")
-            if ".venv" in rel or "__pycache__" in rel:
-                continue
-            try:
-                text = py_file.read_bytes()[:200_000].decode(
-                    "utf-8", errors="replace",
-                )
-                tree = _ast_module.parse(text)
-            except (SyntaxError, OSError):
-                continue
-
-            for node in _ast_module.iter_child_nodes(tree):
-                if not isinstance(node, _ast_module.ClassDef):
-                    continue
-                info = _CachedClassInfo(file_path=rel)
-
-                for child in _ast_module.iter_child_nodes(node):
-                    # Methods
-                    if isinstance(
-                        child,
-                        (_ast_module.FunctionDef, _ast_module.AsyncFunctionDef),
-                    ):
-                        name = child.name
-                        if not name.startswith("_") or name == "__init__":
-                            if not name.startswith("_"):
-                                info.methods.append(name)
-                            # Build signature
-                            params = []
-                            for a in child.args.args:
-                                if a.arg == "self":
-                                    continue
-                                ann = ""
-                                if a.annotation:
-                                    try:
-                                        ann = f": {_ast_module.unparse(a.annotation)}"
-                                    except Exception:
-                                        pass
-                                params.append(f"{a.arg}{ann}")
-                            ret = ""
-                            if child.returns:
-                                try:
-                                    ret = f" -> {_ast_module.unparse(child.returns)}"
-                                except Exception:
-                                    pass
-                            prefix = (
-                                "async "
-                                if isinstance(child, _ast_module.AsyncFunctionDef)
-                                else ""
-                            )
-                            sig = f"{prefix}{name}({', '.join(params)}){ret}"
-                            if not name.startswith("_"):
-                                info.method_sigs.append(sig)
-
-                    # Fields (annotated assignments — Pydantic/dataclass)
-                    if isinstance(child, _ast_module.AnnAssign):
-                        if isinstance(child.target, _ast_module.Name):
-                            fname = child.target.id
-                            if not fname.startswith("_"):
-                                info.fields.append(fname)
-
-                if info.methods or info.fields:
-                    # First definition wins (avoid test class shadowing)
-                    if node.name not in self._cache:
-                        self._cache[node.name] = info
-
-        logger.info(
-            f"Class cache: indexed {len(self._cache)} classes "
-            f"from {source_dir}"
-        )
-
-
-# Module-level singleton — shared across all function calls in one run.
-_class_cache = _ClassCache()
-
-
 # Field groups for per-field extraction (same schemas as classic pipeline).
 
 _CONTEXT_FIELD_GROUPS = [
@@ -550,17 +417,57 @@ def _resolve_imported_type_apis(
                         sig_parts.append(sig)
                     lines.append(f"{type_name} methods: {', '.join(sig_parts)}")
 
-    # Fallback: class cache for types not found in structural index
+    # Fallback: parse source files on disk for types not found in index
     if source_dir:
+        from pathlib import Path as _Path
+
         found_in_index = {l.split(" methods:")[0] for l in lines}
         missing = imported_types - found_in_index
 
         for type_name in missing:
-            cached = _class_cache.get(type_name, source_dir)
-            if cached and cached.method_sigs:
-                lines.append(
-                    f"{type_name} methods: {', '.join(cached.method_sigs[:10])}"
-                )
+            # Search disk for class definition
+            for py in _Path(source_dir).rglob("*.py"):
+                if ".venv" in str(py) or "__pycache__" in str(py):
+                    continue
+                stem = py.stem.lower()
+                tn_lower = type_name.lower()
+                if len(stem) < 3 or (
+                    tn_lower not in stem
+                    and stem not in tn_lower
+                    and "service" not in stem
+                    and "model" not in stem
+                ):
+                    continue
+                try:
+                    src = py.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if f"class {type_name}" not in src:
+                    continue
+                try:
+                    file_tree = _ast.parse(src)
+                except SyntaxError:
+                    continue
+                for cnode in _ast.walk(file_tree):
+                    if isinstance(cnode, _ast.ClassDef) and cnode.name == type_name:
+                        meths = []
+                        for child in _ast.iter_child_nodes(cnode):
+                            if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                                if child.name.startswith("_"):
+                                    continue
+                                params = [a.arg for a in child.args.args if a.arg != "self"]
+                                sig = f"{child.name}({', '.join(params)})"
+                                if child.returns:
+                                    try:
+                                        sig += f" -> {_ast.unparse(child.returns)}"
+                                    except Exception:
+                                        pass
+                                meths.append(sig)
+                        if meths:
+                            lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
+                        break
+                if type_name in {l.split(" methods:")[0] for l in lines}:
+                    break
 
     if lines:
         header = "## IMPORTED TYPE APIs (use ONLY these methods)"
@@ -761,54 +668,6 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
     return sigs
 
 
-def _filter_fabricated_signatures(
-    signatures: list[str],
-    prior_outputs: dict[str, Any],
-) -> list[str]:
-    """Filter out cross-artifact signatures containing fabricated methods.
-
-    Prevents F3 signature propagation from amplifying fabrication:
-    if one artifact invents a nonexistent method, its signature would tell
-    subsequent artifacts to "match these exactly" — creating a cascade.
-
-    Only filters methods that don't exist on ANY known class. New methods
-    that the artifact legitimately creates will pass through if they share
-    a name with an existing method on some class.
-    """
-    import re as _re
-
-    agent_ctx = prior_outputs.get("_agent_context", {})
-    full_index = agent_ctx.get("full_structural_index", "")
-    if not full_index:
-        full_index = prior_outputs.get("_gathered_context", "")
-    if not full_index:
-        return signatures
-
-    from fitz_forge.planning.validation.grounding import StructuralIndexLookup
-
-    lookup = StructuralIndexLookup(full_index)
-    known_methods: set[str] = set()
-    for cls_name in lookup.classes:
-        cls = lookup.find_class(cls_name)
-        if cls and cls.methods:
-            known_methods.update(m for m in cls.methods if not m.startswith("__"))
-
-    filtered = []
-    for sig in signatures:
-        m = _re.search(r"def\s+(\w+)\s*\(", sig)
-        if m:
-            method = m.group(1)
-            if method not in known_methods:
-                logger.info(
-                    f"Stage 'synthesis': filtering fabricated signature: "
-                    f"{sig[:80]}"
-                )
-                continue
-        filtered.append(sig)
-
-    return filtered
-
-
 def _compress_reasoning_for_artifact(reasoning: str) -> str:
     """Compress synthesis reasoning for per-artifact prompts.
 
@@ -890,32 +749,53 @@ def _extract_class_fields(
     """Extract Pydantic/dataclass field names from a class definition.
 
     Returns list of field names like ['question', 'source', 'top_k'].
+    Works by finding the class in source and extracting annotated assignments.
     """
     import ast as _ast
+    from pathlib import Path as _Path
 
-    # Strategy 1: check file_contents pool
+    # Find source containing this class
     class_marker = f"class {class_name}"
+    src = None
     for path, content in (file_contents or {}).items():
         if class_marker in content:
-            try:
-                tree = _ast.parse(content)
-            except SyntaxError:
-                continue
-            for node in _ast.walk(tree):
-                if isinstance(node, _ast.ClassDef) and node.name == class_name:
-                    return [
-                        child.target.id
-                        for child in _ast.iter_child_nodes(node)
-                        if isinstance(child, _ast.AnnAssign)
-                        and isinstance(child.target, _ast.Name)
-                        and not child.target.id.startswith("_")
-                    ]
+            src = content
+            break
 
-    # Strategy 2: class cache
-    if source_dir:
-        cached = _class_cache.get(class_name, source_dir)
-        if cached and cached.fields:
-            return cached.fields
+    if not src and source_dir:
+        cn_lower = class_name.lower()
+        for py in _Path(source_dir).rglob("*.py"):
+            if ".venv" in str(py) or "__pycache__" in str(py):
+                continue
+            stem = py.stem.lower()
+            if len(stem) >= 4 and (
+                cn_lower in stem or stem in cn_lower or "schema" in stem or "model" in stem
+            ):
+                try:
+                    content = py.read_text(encoding="utf-8", errors="replace")
+                    if class_marker in content:
+                        src = content
+                        break
+                except OSError:
+                    continue
+
+    if not src:
+        return []
+
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        return []
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef) and node.name == class_name:
+            fields = []
+            for child in _ast.iter_child_nodes(node):
+                if isinstance(child, _ast.AnnAssign) and isinstance(child.target, _ast.Name):
+                    name = child.target.id
+                    if not name.startswith("_"):
+                        fields.append(name)
+            return fields
 
     return []
 
@@ -1054,15 +934,46 @@ def _build_attr_methods(
                         remaining.pop(type_name, None)
                         break
 
-    # Strategy 2: class cache (scans all .py files once, cached)
+    # Strategy 2: parse source files for remaining types
     if remaining:
+        file_contents = agent_ctx.get("file_contents", {})
         source_dir = prior_outputs.get("_source_dir", "")
+        all_sources = list((file_contents or {}).values())
+
         if source_dir:
-            for type_name, attr_name in list(remaining.items()):
-                cached = _class_cache.get(type_name, source_dir)
-                if cached and cached.methods:
-                    result[attr_name] = cached.methods[0]
-                    remaining.pop(type_name, None)
+            from pathlib import Path as _Path
+
+            for _py in _Path(source_dir).rglob("*.py"):
+                if not remaining:
+                    break
+                _stem = _py.stem.lower()
+                if not any(t.lower() in _stem or _stem in t.lower() for t in remaining):
+                    continue
+                if ".venv" in str(_py) or "__pycache__" in str(_py):
+                    continue
+                try:
+                    all_sources.append(
+                        _py.read_text(encoding="utf-8", errors="replace"),
+                    )
+                except OSError:
+                    continue
+
+        for _src in all_sources:
+            if not remaining:
+                break
+            try:
+                _tree = _ast.parse(_src)
+            except SyntaxError:
+                continue
+            for _node in _ast.walk(_tree):
+                if isinstance(_node, _ast.ClassDef) and _node.name in remaining:
+                    for _child in _ast.iter_child_nodes(_node):
+                        if isinstance(
+                            _child, (_ast.FunctionDef, _ast.AsyncFunctionDef)
+                        ) and not _child.name.startswith("_"):
+                            attr_name = remaining.pop(_node.name)
+                            result[attr_name] = _child.name
+                            break
 
     return result
 
@@ -1317,294 +1228,8 @@ def _repair_fabricated_refs(
         if import_fixes:
             repaired = "\n".join(new_lines)
 
-    # List-arg-to-batch repair: if the model calls method([list]) but
-    # method_batch([list]) exists on any class, it meant the batch
-    # variant. Common pattern: self._embedder.embed([x]) should be
-    # self._embedder.embed_batch([x]) since embed() takes a single string.
-    # Uses class cache (not structural index) since embedding providers
-    # may not be in the 30 selected files.
-    batch_fixes = 0
-    source_dir = prior_outputs.get("_source_dir", "")
-    if source_dir and tree:
-        all_classes = _class_cache.get_all(source_dir)
-        all_methods = {m for info in all_classes.values() for m in info.methods}
-        for node in _ast.walk(tree):
-            if (
-                isinstance(node, _ast.Call)
-                and isinstance(node.func, _ast.Attribute)
-                and isinstance(node.func.value, _ast.Attribute)
-                and isinstance(node.func.value.value, _ast.Name)
-                and node.func.value.value.id == "self"
-                and node.args
-                and isinstance(node.args[0], _ast.List)
-            ):
-                method = node.func.attr
-                batch_method = f"{method}_batch"
-                if method in all_methods and batch_method in all_methods:
-                    old_call = f".{method}(["
-                    new_call = f".{batch_method}(["
-                    if old_call in repaired:
-                        repaired = repaired.replace(old_call, new_call)
-                        batch_fixes += 1
-                        logger.info(f"  repair: .{method}([...]) -> .{batch_method}([...])")
-
-    total_fixes = len(fixes) + len(removals) + field_fixes + import_fixes + batch_fixes
+    total_fixes = len(fixes) + len(removals) + field_fixes + import_fixes
     return repaired, total_fixes
-
-
-def _detect_fabricated_calls(
-    content: str,
-    prior_outputs: dict[str, Any],
-    source: str = "",
-) -> list[dict]:
-    """Detect object.method() calls where method doesn't exist on the object's type.
-
-    Unlike _repair_fabricated_refs (which handles self._xxx patterns),
-    this catches calls on local variables and imported objects:
-        service.query_stream()  — FitzService has no query_stream
-        engine.answer_stream()  — FitzKragEngine has no answer_stream
-
-    Uses both the structural index AND disk-resolved imported type APIs
-    to build the known methods map (since key classes like FitzService
-    may not be in the agent's selected files).
-
-    Returns a list of violations: [{"object": str, "method": str, "type": str, "real_methods": list[str]}]
-    """
-    import ast as _ast
-    import textwrap as _tw
-
-    agent_ctx = prior_outputs.get("_agent_context", {})
-    full_index = agent_ctx.get("full_structural_index", "")
-    if not full_index:
-        full_index = prior_outputs.get("_gathered_context", "")
-
-    # Build known methods from structural index (skip test classes)
-    class_methods: dict[str, list[str]] = {}
-    if full_index:
-        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
-
-        lookup = StructuralIndexLookup(full_index)
-        for cls_name in lookup.classes:
-            if cls_name.startswith("Test") or cls_name.startswith("Mock"):
-                continue
-            cls = lookup.find_class(cls_name)
-            if cls and cls.methods:
-                class_methods[cls_name] = [
-                    m for m in cls.methods if not m.startswith("__")
-                ]
-
-    # ALSO resolve imported type APIs from disk — key classes like
-    # FitzService may not be in the structural index.
-    target_source = source or ""
-    if not target_source:
-        return []
-    _imported_apis = _resolve_imported_type_apis(target_source, prior_outputs)
-    if _imported_apis:
-        import re as _re
-        # Parse "FitzService methods: query(...), point(...), ..."
-        for line in _imported_apis.split("\n"):
-            m = _re.match(r"(\w+)\s+methods:\s*(.+)", line)
-            if m:
-                cls_name = m.group(1)
-                methods_raw = m.group(2)
-                methods = []
-                for part in methods_raw.split(","):
-                    pm = _re.search(r"(\w+)", part.strip())
-                    if pm:
-                        methods.append(pm.group(1))
-                if methods and cls_name not in class_methods:
-                    class_methods[cls_name] = methods
-
-    if not class_methods:
-        return []
-
-    # Parse the generated content
-    tree = None
-    for attempt in [
-        content,
-        _tw.dedent(content),
-        "class _:\n    " + content.replace("\n", "\n    "),
-    ]:
-        try:
-            tree = _ast.parse(attempt)
-            break
-        except SyntaxError:
-            continue
-    if tree is None:
-        # AST parse failed — fall back to regex detection.
-        # Less precise but catches fabrications in unparseable fragments.
-        import re as _re
-        violations = []
-        seen = set()
-        for m in _re.finditer(r"(\w+)\.(\w+)\s*\(", content):
-            obj_name, method_name = m.group(1), m.group(2)
-            key = f"{obj_name}.{method_name}"
-            if key in seen or obj_name in {
-                "self", "cls", "super", "app", "router",
-                "os", "re", "sys", "json", "math", "time",
-                "path", "ast", "io", "logging", "logger",
-            }:
-                continue
-            seen.add(key)
-            for cls_name, methods in class_methods.items():
-                if obj_name.lower() in cls_name.lower():
-                    if method_name not in methods:
-                        violations.append({
-                            "object": obj_name,
-                            "method": method_name,
-                            "type": cls_name,
-                            "real_methods": methods[:10],
-                        })
-                    break
-        return violations
-
-    # Collect artifact-defined methods (new methods are valid)
-    artifact_methods: set[str] = set()
-    for n in _ast.walk(tree):
-        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            artifact_methods.add(n.name)
-
-    # Build variable -> type mapping from annotations and assignments
-    var_types: dict[str, str] = {}
-    for node in _ast.walk(tree):
-        # var: Type = expr
-        if isinstance(node, _ast.AnnAssign) and isinstance(node.target, _ast.Name):
-            if isinstance(node.annotation, _ast.Name):
-                var_types[node.target.id] = node.annotation.id
-        # var = func() where func returns a known type
-        if isinstance(node, _ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-            if isinstance(target, _ast.Name) and isinstance(node.value, _ast.Call):
-                if isinstance(node.value.func, _ast.Name):
-                    func_name = node.value.func.id
-                    for cls_name in class_methods:
-                        if cls_name.lower().replace("_", "") in func_name.lower().replace("_", ""):
-                            var_types[target.id] = cls_name
-                            break
-
-    # Find object.method() calls where method doesn't exist.
-    # Handles both direct (service.query_stream) and chained
-    # (self._service.query_stream) patterns.
-    violations = []
-    seen = set()
-    for node in _ast.walk(tree):
-        if not isinstance(node, _ast.Call):
-            continue
-        if not isinstance(node.func, _ast.Attribute):
-            continue
-
-        method_name = node.func.attr
-        obj_name = ""
-
-        # Direct: service.method()
-        if isinstance(node.func.value, _ast.Name):
-            obj_name = node.func.value.id
-        # Chained: self._service.method()
-        elif (
-            isinstance(node.func.value, _ast.Attribute)
-            and isinstance(node.func.value.value, _ast.Name)
-            and node.func.value.value.id == "self"
-        ):
-            obj_name = node.func.value.attr  # e.g. "_service"
-
-        if not obj_name:
-            continue
-
-        # Skip self, common framework objects, stdlib, and
-        # common variable names that match unrelated classes
-        _SKIP_OBJECTS = {
-            "self", "cls", "super", "app", "router",
-            "os", "re", "sys", "json", "math", "time",
-            "path", "ast", "io", "logging", "logger",
-            "typing", "functools", "itertools",
-            "collections", "datetime", "hashlib",
-            "textwrap", "pathlib", "shutil",
-            "pytest", "mock", "patch",
-            # Common variable names with builtin methods
-            "token", "chunk", "text", "data", "result",
-            "response", "request", "content", "message",
-            "line", "item", "value", "key", "name",
-            "string", "output", "input", "buffer",
-            "stream", "file", "doc", "node",
-            "q", "e", "f", "s", "t", "x", "r",
-            "thread", "task", "future", "loop",
-        }
-        if obj_name in _SKIP_OBJECTS or method_name.startswith("__"):
-            continue
-
-        key = f"{obj_name}.{method_name}"
-        if key in seen:
-            continue
-        seen.add(key)
-
-        # Try to resolve obj_name to a type
-        type_name = var_types.get(obj_name)
-        if not type_name:
-            # Heuristic: if obj_name (stripped of underscores) is a
-            # substring of a known class name. Handles _service -> FitzService.
-            stripped = obj_name.lower().lstrip("_")
-            for cls_name in class_methods:
-                if stripped in cls_name.lower():
-                    type_name = cls_name
-                    break
-
-        if not type_name or type_name not in class_methods:
-            continue
-
-        real_methods = class_methods[type_name]
-        if method_name in real_methods:
-            continue
-        # Only skip artifact methods for self.xxx() calls — NOT for
-        # external objects. def query_stream() in the artifact is the
-        # endpoint; service.query_stream() is a fabricated method call.
-        if method_name in artifact_methods and obj_name == "self":
-            continue
-
-        violations.append({
-            "object": obj_name,
-            "method": method_name,
-            "type": type_name,
-            "real_methods": real_methods[:10],
-        })
-
-    return violations
-
-
-def _repair_fabricated_calls(
-    content: str,
-    violations: list[dict],
-) -> str:
-    """Deterministic repair: replace fabricated object.method() with closest real method.
-
-    For each violation (e.g. service.query_stream), find the real method with
-    the most similar name (e.g. service.query) and do a string replacement.
-    Zero LLM cost, guaranteed to remove the fabrication.
-    """
-    import difflib
-
-    repaired = content
-    for v in violations:
-        obj = v["object"]
-        fab_method = v["method"]
-        real_methods = v["real_methods"]
-
-        if not real_methods:
-            continue
-
-        # Find closest real method by name similarity
-        best = difflib.get_close_matches(fab_method, real_methods, n=1, cutoff=0.0)
-        replacement = best[0] if best else real_methods[0]
-
-        # Replace object.fabricated_method( with object.real_method(
-        old = f"{obj}.{fab_method}("
-        new = f"{obj}.{replacement}("
-        if old in repaired:
-            repaired = repaired.replace(old, new)
-            logger.info(
-                f"  repair: {old[:-1]} -> {new[:-1]}"
-            )
-
-    return repaired
 
 
 def _build_attribute_template(
@@ -1732,15 +1357,53 @@ def _build_attribute_template(
                             if methods:
                                 component_methods[type_name] = methods
 
-            # Strategy 2: class cache for types not found in index
+            # Strategy 2: parse source files for classes not found in index
+            # Search file_contents first, then fall back to disk via source_dir
             missing_types = set(attrs.values()) - set(component_methods.keys())
             source_dir = prior_outputs.get("_source_dir", "")
+            all_sources = list((agent_ctx.get("file_contents") or {}).values())
+
+            # Also read from disk for files not in the agent's pool
             if missing_types and source_dir:
-                for type_name in list(missing_types):
-                    cached = _class_cache.get(type_name, source_dir)
-                    if cached and cached.method_sigs:
-                        component_methods[type_name] = cached.method_sigs
-                        missing_types.discard(type_name)
+                from pathlib import Path as _Path
+
+                for _py in _Path(source_dir).rglob("*.py"):
+                    if not missing_types:
+                        break
+                    # Quick check: does the filename hint at a missing type?
+                    _stem = _py.stem.lower()
+                    if not any(t.lower() in _stem or _stem in t.lower() for t in missing_types):
+                        continue
+                    try:
+                        all_sources.append(_py.read_text(encoding="utf-8", errors="replace"))
+                    except OSError:
+                        continue
+
+            for _src in all_sources:
+                if not missing_types:
+                    break
+                try:
+                    _tree = _ast.parse(_src)
+                except SyntaxError:
+                    continue
+                for _node in _ast.walk(_tree):
+                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
+                        meths = []
+                        for _child in _ast.iter_child_nodes(_node):
+                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                                if _child.name.startswith("__"):
+                                    continue
+                                params = [a.arg for a in _child.args.args if a.arg != "self"]
+                                sig = f"{_child.name}({', '.join(params)})"
+                                if _child.returns:
+                                    try:
+                                        sig += f" -> {_ast.unparse(_child.returns)}"
+                                    except Exception:
+                                        pass
+                                meths.append(sig)
+                        if meths:
+                            component_methods[_node.name] = meths
+                            missing_types.discard(_node.name)
 
             lines.append(f"### {cls_node.name} ({ref_path})")
             lines.append("  Attributes:")
@@ -1858,90 +1521,6 @@ class SynthesisStage(PipelineStage):
             "If you need behavior a class doesn't have, compose it from "
             "the methods above."
         )
-
-    @staticmethod
-    def _filter_fabricated_from_reasoning(
-        reasoning: str,
-        prior_outputs: dict[str, Any],
-    ) -> str:
-        """Remove fabricated method calls from reasoning/decisions.
-
-        Scans text for qualified calls like `object.method(` where `method`
-        doesn't exist on any known class in the structural index. Replaces
-        the call with a generic placeholder so the artifact generator
-        doesn't treat it as an instruction to call a nonexistent method.
-
-        Codebase-agnostic: no hardcoded method names or patterns.
-        """
-        import re as _re
-
-        agent_ctx = prior_outputs.get("_agent_context", {})
-        full_index = agent_ctx.get("full_structural_index", "")
-        if not full_index:
-            full_index = prior_outputs.get("_gathered_context", "")
-        if not full_index:
-            return reasoning
-
-        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
-        lookup = StructuralIndexLookup(full_index)
-
-        # Build flat set of all known public methods across all classes
-        all_known_methods: set[str] = set()
-        for cls_name in lookup.classes:
-            cls = lookup.find_class(cls_name)
-            if cls and cls.methods:
-                all_known_methods.update(
-                    m for m in cls.methods if not m.startswith("__")
-                )
-
-        n_filtered = 0
-        lines = reasoning.split("\n")
-        filtered_lines = []
-
-        for line in lines:
-            # Match qualified method calls: object.method(
-            # This catches service.query_stream(), engine.answer(),
-            # self._router.retrieve_chunks(), etc.
-            matches = list(_re.finditer(
-                r'(\w+)\.(\w+)\s*\(',
-                line,
-            ))
-            if matches:
-                _SKIP_OBJECTS = {
-                    "self", "cls", "super",
-                    "os", "re", "sys", "json", "math", "time",
-                    "path", "ast", "io", "logging", "logger",
-                    "typing", "functools", "itertools",
-                    "collections", "datetime", "hashlib",
-                    "textwrap", "pathlib", "shutil",
-                    "e", "i",  # e.g., i.e.
-                }
-                for m in reversed(matches):
-                    obj, method = m.group(1), m.group(2)
-                    if obj in _SKIP_OBJECTS:
-                        continue
-                    if method.startswith("__"):
-                        continue
-                    # Skip if method exists on ANY known class
-                    if method in all_known_methods:
-                        continue
-                    # Method doesn't exist — replace with placeholder
-                    line = (
-                        line[:m.start()]
-                        + "/* compose from existing methods */"
-                        + line[m.end():]
-                    )
-                    n_filtered += 1
-
-            filtered_lines.append(line)
-
-        if n_filtered > 0:
-            logger.info(
-                f"Stage 'synthesis': filtered {n_filtered} fabricated "
-                f"method refs from text before artifact gen"
-            )
-
-        return "\n".join(filtered_lines)
 
     @staticmethod
     def _extract_referenced_files(reasoning: str) -> set[str]:
@@ -2385,11 +1964,6 @@ class SynthesisStage(PipelineStage):
                     artifact.get("content", ""),
                     filename,
                 )
-                # Filter out signatures with fabricated methods to
-                # prevent F3 propagation amplifying F10 fabrication
-                sigs = _filter_fabricated_signatures(
-                    sigs, prior_outputs,
-                )
                 prior_signatures.extend(sigs)
 
         elapsed = time.monotonic() - t0
@@ -2623,16 +2197,56 @@ class SynthesisStage(PipelineStage):
                     if meths:
                         component_methods[type_name] = meths
 
-        # Fallback: class cache for types not found in structural index
+        # Fallback: parse source files for types not found in index
         missing_types = set(attrs.values()) - set(component_methods.keys())
         if missing_types:
+            file_contents = agent_ctx.get("file_contents", {})
             source_dir = prior_outputs.get("_source_dir", "")
+            all_sources = list((file_contents or {}).values())
+
             if source_dir:
-                for type_name in list(missing_types):
-                    cached = _class_cache.get(type_name, source_dir)
-                    if cached and cached.method_sigs:
-                        component_methods[type_name] = cached.method_sigs
-                        missing_types.discard(type_name)
+                from pathlib import Path as _Path
+
+                for _py in _Path(source_dir).rglob("*.py"):
+                    if not missing_types:
+                        break
+                    _stem = _py.stem.lower()
+                    if not any(t.lower() in _stem or _stem in t.lower() for t in missing_types):
+                        continue
+                    if ".venv" in str(_py) or "__pycache__" in str(_py):
+                        continue
+                    try:
+                        all_sources.append(
+                            _py.read_text(encoding="utf-8", errors="replace"),
+                        )
+                    except OSError:
+                        continue
+
+            for _src in all_sources:
+                if not missing_types:
+                    break
+                try:
+                    _tree = _ast.parse(_src)
+                except SyntaxError:
+                    continue
+                for _node in _ast.walk(_tree):
+                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
+                        meths = []
+                        for _child in _ast.iter_child_nodes(_node):
+                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                                if _child.name.startswith("__"):
+                                    continue
+                                params = [a.arg for a in _child.args.args if a.arg != "self"]
+                                sig = f"{_child.name}({', '.join(params)})"
+                                if _child.returns:
+                                    try:
+                                        sig += f" -> {_ast.unparse(_child.returns)}"
+                                    except Exception:
+                                        pass
+                                meths.append(sig)
+                        if meths:
+                            component_methods[_node.name] = meths
+                            missing_types.discard(_node.name)
 
         # Build compact cheat sheet
         _MAX_INTERFACE_LINES = 50
@@ -2782,11 +2396,6 @@ class SynthesisStage(PipelineStage):
                 reasoning,
                 prior_outputs,
             )
-
-        # NOTE: Decision filter REMOVED. Bisect showed it caused -5.7 point
-        # score regression (commit 67032f5a). Decisions contain method names
-        # the model needs to write correct artifacts. The F10 corrector
-        # handles fabricated methods post-generation instead.
 
         # Compress reasoning: keep architecture + design, drop roadmap/risk
         reasoning_compressed = _compress_reasoning_for_artifact(reasoning)
@@ -2944,38 +2553,6 @@ class SynthesisStage(PipelineStage):
                     logger.info(
                         f"Stage 'synthesis': repaired {n_fixes} fabricated refs in {filename}"
                     )
-
-            # F10 corrector: detect fabricated object.method() calls and
-            # regenerate with a SHORT, FOCUSED correction prompt. The full
-            # original prompt is ~20K chars — appending a correction to it
-            # loses to lost-in-the-middle. Instead, send a small prompt
-            # with just the broken code, the error, and the real API.
-            violations = _detect_fabricated_calls(
-                content, prior_outputs or {},
-                source=disk_source or source,
-            )
-            if violations and prior_outputs:
-                correction_lines = []
-                for v in violations:
-                    methods_str = ", ".join(v["real_methods"][:8])
-                    correction_lines.append(
-                        f"- {v['object']}.{v['method']}() does NOT exist. "
-                        f"{v['type']} only has: [{methods_str}]"
-                    )
-                correction = "\n".join(correction_lines)
-                logger.info(
-                    f"Stage 'synthesis': {filename} has {len(violations)} "
-                    f"fabricated call(s), regenerating with correction"
-                )
-
-                # Deterministic repair: replace fabricated method calls with
-                # the closest real method. LLM correction prompts fail
-                # because decisions override any constraint.
-                content = _repair_fabricated_calls(content, violations)
-                logger.info(
-                    f"Stage 'synthesis': {filename} repaired "
-                    f"{len(violations)} fabricated call(s)"
-                )
 
             logger.info(
                 f"Stage 'synthesis': artifact for {filename} ({len(content)} chars, {elapsed:.1f}s)"
@@ -3733,22 +3310,13 @@ class SynthesisStage(PipelineStage):
                 )
                 design_merged.update(partial)
 
-            # F10 fix: filter fabricated method references from reasoning
-            # before passing to artifact generation. The reasoning may
-            # mention hypothetical methods (e.g. "service.answer_stream()")
-            # that don't exist. If we pass them through, the artifact
-            # generator treats them as instructions and fabricates code.
-            filtered_reasoning = self._filter_fabricated_from_reasoning(
-                reasoning, prior_outputs,
-            )
-
             # Artifact building: per-artifact focused generation.
             # Each artifact gets its own generate() call with the target
             # file's real source code, so the model sees actual method
             # names, attributes, and signatures — not just an index.
             design_merged["artifacts"] = await self._build_artifacts_per_file(
                 client,
-                filtered_reasoning,
+                reasoning,
                 prior_outputs,
                 context_merged,
             )
