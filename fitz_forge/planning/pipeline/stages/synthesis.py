@@ -612,11 +612,23 @@ def _decompose_multi_handler_artifacts(
                 relevant_text += " " + res_text
 
         # Extract new streaming/variant endpoint paths from decisions
-        # Patterns like: /query/stream, /chat/stream, /query/ws
+        # Patterns like: /query/stream, /chat/stream, query_stream, chat_stream
+        path_endpoints = _re.findall(
+            r"/(\w+)/(stream|ws|async|sse)\b", relevant_text.lower(),
+        )
+        # Also match function-name patterns: query_stream, chat_stream
+        func_endpoints = _re.findall(
+            r"\b(\w+)_(stream|streaming|ws|async|sse)\b", relevant_text.lower(),
+        )
+        # Filter func_endpoints to only those matching existing route handlers
+        handler_names = set(route_handlers.values())
+        func_endpoints = [
+            (base, suffix)
+            for base, suffix in func_endpoints
+            if base in handler_names
+        ]
         new_endpoints: list[tuple[str, str]] = list(dict.fromkeys(
-            _re.findall(
-                r"/(\w+)/(stream|ws|async|sse)\b", relevant_text.lower(),
-            )
+            path_endpoints + func_endpoints
         ))
 
         if len(new_endpoints) < 2:
