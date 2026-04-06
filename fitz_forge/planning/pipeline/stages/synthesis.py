@@ -3659,7 +3659,7 @@ class SynthesisStage(PipelineStage):
             roadmap_risk_prompt = load_prompt("synthesis_roadmap_risk")
             rr_prompt = roadmap_risk_prompt.format(
                 task_description=job_description,
-                design_summary=design_reasoning[:8000],  # first 8K of design
+                design_summary=design_reasoning,
             )
             rr_messages = self._make_messages(rr_prompt)
             t0_rr = time.monotonic()
