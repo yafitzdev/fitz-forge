@@ -686,12 +686,32 @@ def _estimate_size(entries: list[tuple[str, str]]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _extract_full_imports(content: str) -> set[str]:
-    """Extract full dotted import paths from Python source (AST, regex fallback)."""
+def _extract_full_imports(
+    content: str,
+    file_path: str = "",
+) -> set[str]:
+    """Extract full dotted import paths from Python source (AST, regex fallback).
+
+    Args:
+        content: Python source code.
+        file_path: Relative posix path of the file (e.g. "pkg/sub/mod.py").
+            Used to resolve relative imports (from .sibling import X).
+    """
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return _extract_full_imports_regex(content)
+
+    # Derive the package path for resolving relative imports.
+    # "pkg/sub/__init__.py" → "pkg.sub"
+    # "pkg/sub/mod.py" → "pkg.sub"
+    pkg = ""
+    if file_path:
+        parts = file_path.replace("\\", "/").split("/")
+        if parts[-1] == "__init__.py":
+            pkg = ".".join(parts[:-1])
+        else:
+            pkg = ".".join(parts[:-1])
 
     imports: set[str] = set()
     for node in ast.walk(tree):
@@ -699,7 +719,18 @@ def _extract_full_imports(content: str) -> set[str]:
             for alias in node.names:
                 imports.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
+            if node.module and node.level and node.level > 0 and pkg:
+                # Relative import: from .foo import X or from ..foo import X
+                # Go up `level - 1` packages, then append the module.
+                parent = pkg
+                for _ in range(node.level - 1):
+                    dot = parent.rfind(".")
+                    if dot >= 0:
+                        parent = parent[:dot]
+                    else:
+                        break
+                imports.add(f"{parent}.{node.module}")
+            elif node.module:
                 imports.add(node.module)
     return imports
 
@@ -765,7 +796,7 @@ def build_import_graph(
         except OSError:
             continue
 
-        full_imports = _extract_full_imports(content)
+        full_imports = _extract_full_imports(content, file_path=rel_path)
         resolved = set()
         for imp in full_imports:
             target = module_lookup.get(imp)

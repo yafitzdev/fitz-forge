@@ -5,12 +5,12 @@ Benchmarks evaluate plan quality by running the planning pipeline against a fixe
 ## Quick Start
 
 ```bash
-# 1. Load model in LM Studio (--parallel 2 for concurrent runs)
-lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536 --parallel 2
+# 1. Load model in LM Studio
+lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536
 
-# 2. Run 5 plans, 2 at a time
+# 2. Run 5 plans
 .venv/Scripts/python -m benchmarks.plan_factory decomposed \
-  --runs 5 -p 2 \
+  --runs 5 \
   --source-dir ../fitz-sage \
   --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
@@ -36,7 +36,6 @@ Options:
   --context-file F   JSON with pre-gathered retrieval context
   --query TEXT       Task description
   --score            Generate scoring prompts after runs
-  -p, --parallel-runs N  Run N plans concurrently (default: 1)
 ```
 
 ### `reasoning`
@@ -50,46 +49,6 @@ Benchmarks code retrieval only (no LLM planning). Tests which files the agent fi
 ### `prepare-scoring`
 
 Generates scoring prompts from existing plan files without re-running the pipeline.
-
-## Parallel Runs
-
-LM Studio supports concurrent request batching. With `--parallel N` on model load, multiple requests are served simultaneously via continuous batching.
-
-### Setup
-
-The LM Studio `--parallel` flag and the benchmark `-p` flag must match:
-
-```bash
-# Load with 2 parallel slots
-lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536 --parallel 2
-
-# Run with 2 concurrent plans
-.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 5 -p 2 ...
-```
-
-Runs are batched: with `-p 2` and `--runs 5`, execution is 3 batches (2+2+1).
-
-### Throughput Scaling (RTX 5090 32GB, 40B Q5_K_S MoE, 65K ctx)
-
-Measured with `benchmarks/test_parallel_throughput.py`:
-
-| Concurrency | Combined Throughput | Gain vs N=1 | Per-request tok/s | TTFT |
-|:-----------:|:-------------------:|:-----------:|:-----------------:|:----:|
-| 1 | 150.6 tok/s | 1.00x | 158.9 | 0.76s |
-| 2 | 209.1 tok/s | **1.39x** | 114.0 | 1.80s |
-| 3 | 234.2 tok/s | 1.56x | 83.6 | 1.90s |
-| 4 | 249.0 tok/s | 1.65x | 67.1 | 2.59s |
-
-**N=2 is the sweet spot.** +39% throughput with only 28% per-request slowdown. N=3+ has diminishing returns because the model is memory-bandwidth bound — all requests compete for the same VRAM bandwidth to read model weights.
-
-### Wall Time Impact
-
-For a typical 5-run benchmark (~300s per run):
-
-| Mode | Batches | Est. Wall Time | Savings |
-|------|---------|---------------|---------|
-| `-p 1` (sequential) | 5 | ~1500s | baseline |
-| `-p 2` | 3 (2+2+1) | ~1050s | ~30% |
 
 ## Scoring
 
@@ -148,7 +107,7 @@ After all 5 plans, synthesize: compare to baseline avg, note floor/ceiling shift
 **Full 5-run batch (verification only, not for active experiments):**
 
 ```bash
-.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 5 -p 2 \
+.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 5 \
   --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
   --score
@@ -170,12 +129,7 @@ plan_factory.py          CLI entry (typer)
   |           |
   |           +-- LM Studio API     http://localhost:1234/v1 (OpenAI-compat)
   |
-  +-- asyncio.gather()          batches N runs when -p N > 1
-  |
   +-- eval_plans.py             scoring prompt generation (--score)
-```
-
-Each concurrent run gets its own `LMStudioClient` instance. No shared mutable state between runs — safe for parallel execution.
 
 ### Key files
 
@@ -185,7 +139,6 @@ Each concurrent run gets its own `LMStudioClient` instance. No shared mutable st
 | `benchmarks/eval_plans.py` | Scoring prompt generation |
 | `benchmarks/eval_prompt.py` | Prompt template for Sonnet-as-Judge |
 | `benchmarks/ideal_context.json` | Pre-gathered retrieval context (fixed across runs) |
-| `benchmarks/test_parallel_throughput.py` | Standalone parallel throughput test |
 | `benchmarks/results/streaming-task-tracker.md` | Run log with all results and session handoffs |
 
 ## Fixed Context

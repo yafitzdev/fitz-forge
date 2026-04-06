@@ -93,7 +93,7 @@ def extract_call_graph(
     forward_map: dict[str, set[str]],
     file_index_entries: dict[str, str],
     max_depth: int = 3,
-    max_nodes: int = 80,
+    max_nodes: int = 200,
     seed_files: list[str] | None = None,
     source_dir: str | None = None,
 ) -> CallGraph:
