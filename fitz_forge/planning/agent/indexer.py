@@ -663,10 +663,26 @@ def _format_index(
             if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
                 break
 
-    # Pass 3: last resort — reduce to path-only for least-connected files
+    # Pass 3: strip doc lines from least-connected files
     if _estimate_size(mutable) > _MAX_INDEX_CHARS:
         for idx in by_priority:
-            mutable[idx] = (mutable[idx][0], "")
+            rel_path, info = mutable[idx]
+            lines = [ln for ln in info.splitlines() if not ln.startswith("doc:")]
+            mutable[idx] = (rel_path, "\n".join(lines))
+            if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
+                break
+
+    # Pass 4: last resort — keep only classes line (type interface is most
+    # valuable per char; dropping it breaks typed attribute validation)
+    if _estimate_size(mutable) > _MAX_INDEX_CHARS:
+        for idx in by_priority:
+            rel_path, info = mutable[idx]
+            classes_line = ""
+            for ln in info.splitlines():
+                if ln.startswith("classes:"):
+                    classes_line = ln
+                    break
+            mutable[idx] = (rel_path, classes_line)
             if _estimate_size(mutable) <= _MAX_INDEX_CHARS:
                 break
 
