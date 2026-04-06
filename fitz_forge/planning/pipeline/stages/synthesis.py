@@ -2783,13 +2783,10 @@ class SynthesisStage(PipelineStage):
                 prior_outputs,
             )
 
-        # Filter fabricated method refs from decisions — same filter as
-        # reasoning. Decisions often say "implement service.query_stream()"
-        # which the artifact generator treats as an instruction.
-        if prior_outputs:
-            relevant_decisions = self._filter_fabricated_from_reasoning(
-                relevant_decisions, prior_outputs or {},
-            )
+        # NOTE: Decision filter REMOVED. Bisect showed it caused -5.7 point
+        # score regression (commit 67032f5a). Decisions contain method names
+        # the model needs to write correct artifacts. The F10 corrector
+        # handles fabricated methods post-generation instead.
 
         # Compress reasoning: keep architecture + design, drop roadmap/risk
         reasoning_compressed = _compress_reasoning_for_artifact(reasoning)
