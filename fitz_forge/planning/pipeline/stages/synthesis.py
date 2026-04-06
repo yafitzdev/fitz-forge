@@ -3698,7 +3698,9 @@ class SynthesisStage(PipelineStage):
             _RETRY_FIELDS = {
                 "approaches": "approaches",
                 "components": "components",
+                "adrs": "adrs",
                 "phases": "phases",
+                "risks": "risks",
             }
             arch_merged: dict[str, Any] = {}
             for group in _ARCH_FIELD_GROUPS:
