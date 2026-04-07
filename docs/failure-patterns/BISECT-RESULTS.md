@@ -121,17 +121,38 @@ Cherry-picked from `835e9fdc` onto commit I:
 2. **Cached class resolver** (`ec34e778`) — Not yet re-evaluated. Apply cache without corrector.
 3. **F10 corrector concept** — Dead end for scores. Consider logging-only approach.
 
-### F25 fix (2026-04-06, later in session)
-Per-function artifact decomposition eliminated wrong field access in route artifacts:
-- **Root cause**: `_extract_reference_method` picked `query()` (longest) as reference for BOTH `/query/stream` and `/chat/stream`. Model was told "follow this pattern exactly" with the wrong handler.
-- **Fix**: `_decompose_multi_handler_artifacts` splits file-level artifacts into per-function artifacts. Each gets its correct reference handler.
-- **Also fixed**: Pydantic field extraction in indexer, truncation preserves classes line, gatherer uses fitz_forge's own indexer, retry on ALL violation kinds.
-- **Result**: wrong_field violations 83% → 0% (run 74 → run 77). Scoring run 77 in progress.
+### F25 fix (2026-04-06 through 2026-04-07)
+
+Per-function artifact decomposition eliminated wrong field access in route artifacts.
+
+**Root cause chain** (discovered incrementally):
+1. `_extract_reference_method` picked `query()` (longest body) as reference for ALL new endpoints, including `/chat/stream`. Model was told "follow this pattern exactly" with the wrong handler.
+2. Indexer didn't extract Pydantic fields → structural index had `ChatRequest(BaseModel)` with no fields → validation couldn't detect wrong attribute access.
+3. Structural index truncation dropped `schemas.py` to path-only, losing all class info.
+4. Gatherer imported indexer from fitz_sage (target codebase) instead of fitz_forge — our fixes had no effect.
+5. Using fitz_forge's indexer for LLM context inflated the index 119K→172K, causing a -9pt regression (run 77: 31.8 avg).
+6. Decomposition regex only matched `/xxx/stream` paths, not `xxx_stream` function names.
+7. `_extract_reference_method` searched purpose+decisions together — decisions mention all functions, overriding the decomposed purpose.
+
+**Final fix** (multiple commits):
+- `_decompose_multi_handler_artifacts`: splits file-level artifacts into per-function when source has multiple route handlers. Matches both `/xxx/stream` paths and `xxx_stream` function names.
+- `_extract_reference_method`: searches purpose first, falls back to decisions only if purpose yields no match.
+- Dual index: fitz_sage's indexer for LLM context (120K budget, unchanged), fitz_forge's indexer for validation (untruncated, includes Pydantic fields).
+- `check_artifact`: per-function-scoped type resolution + `wrong_field` violations.
+- `_generate_single_artifact_checked`: retry on ALL violation kinds.
+- Artifact prompt/response tracing for replay.
+
+**Results**:
+- wrong_field violations: 83% → 0% on decomposed plans
+- Run 77 (inflated index): 31.8 avg — regression caused by fitz_forge indexer
+- Run 79 (dual index, all fixes): **38.8 avg** — back to baseline range (~41 ±3)
+- Net score impact: **neutral** — F25 fixed a real bug but didn't improve the dimensions that dominate scoring
 
 ### Current priorities
-- Scoring run 77 to measure overall impact on plan quality
-- **Weakest dimensions** (from run 73): consistency (5.8) and alignment (5.6)
-- Consistency failures: duplicate decision IDs, wrong critical paths, type mismatches across artifacts
-- Alignment failures: ~~wrong field names~~ (FIXED by F25), fabricated attributes (self._chat_provider), wrong service paths
+- **Weakest dimensions** (run 79): consistency (5.4) and implementability (5.2)
+- Consistency failures: artifacts contradict stated design (e.g., calling blocking `generate()` instead of `generate_stream()`), duplicate decision IDs, wrong critical paths
+- Implementability failures: fabricated method calls (`self._build_chat_kwargs()`, `self._detection_orchestrator()` as callable), wrong calling conventions, missing sync-to-async bridges
+- These are **upstream reasoning quality issues** (F13, F21) — the model generates wrong architecture decisions that cascade into broken artifacts
+- Alignment failures: ~~wrong field names~~ (FIXED by F25), fabricated attributes still present
 - Cached class resolver (`ec34e778`) — still not re-evaluated
 - F10 corrector concept — dead end for scores

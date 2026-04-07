@@ -98,6 +98,13 @@ Each artifact gets a focused purpose like "streaming variant of chat()". `_extra
 
 ### Before/After
 - **Before (run 74)**: 5/6 route artifacts had wrong fields (83%) — AST-confirmed
-- **After (run 77)**: 0/7 route artifacts had wrong fields (0%)
+- **After (run 77)**: 0/7 route artifacts had wrong fields (0%) on decomposed plans
+- **Run 77 scored 31.8** — regression from inflated index (172K vs 119K), NOT from decomposition
+- **Run 79 scored 38.8** — back to baseline after dual-index fix. Net score impact: **neutral** (wrong fields fixed but other dimensions unchanged)
 
-## Status: ✅ FIXED — per-function decomposition eliminates the source of confusion
+### Additional fixes needed after initial decomposition
+1. Decomposition regex: also match `xxx_stream` function names, not just `/xxx/stream` paths
+2. Reference method extraction: search purpose first, decisions as fallback — decisions mention all functions and override the decomposed purpose
+3. Dual index: fitz_sage's indexer for LLM context (120K budget), fitz_forge's for validation (untruncated with Pydantic fields)
+
+## Status: ✅ FIXED — per-function decomposition eliminates wrong field access. Overall score impact neutral (38.8 vs 41 baseline, within noise).

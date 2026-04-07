@@ -118,13 +118,15 @@ Every LLM call in the pipeline that can or has produced failures:
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 73, 2026-04-06):** Codebase reverted to commit I (E + bug fixes) after bisect found decision filter caused -5.7pt regression. Import graph fix re-applied (neutral). Run 67 rescored cold = 40.9 (original 45.3 inflated). True baseline: ~41. New failure patterns F21-F24 identified from run 73 scoring — structural overview confusion (60%), schema field cross-contamination (60%), decision structure defects (60%), file misidentification (40%). These are the current score bottlenecks alongside existing F10 (22%) and F13 (30%).
+**Current state (run 79, 2026-04-07):** F25 fix (per-function artifact decomposition) eliminated wrong field access in route artifacts (83%→0%). But overall scores are unchanged at ~38.8 avg (baseline ~41, within noise). The regression from run 77 (31.8, inflated index) was fixed by using dual indexes — fitz_sage's for LLM context, fitz_forge's for validation. The remaining score bottleneck is upstream reasoning quality: consistency (5.4) and implementability (5.2) are dominated by F13 (reasoning failures) and F21 (stub confusion), not artifact-level field errors.
 
 **Key lessons:**
 1. More LLM calls + pick the best = proactive fix for model quality limits (best-of-3, +2.8 pts)
 2. Frozen-state harness testing misses upstream variance — harnesses must vary ALL stages
 3. Prompt instructions can't survive 11K tokens of generation — reduce context instead of adding rules
 4. Explore-then-focus: let the model think broadly first, then refine with focused input
+5. Changing the structural index content (even within budget) can cause regressions — the LLM is sensitive to what gets truncated
+6. Per-function artifact decomposition eliminates cross-handler confusion but requires matching both URL paths and function name patterns
 
 ---
 
@@ -164,3 +166,5 @@ Every LLM call in the pipeline that can or has produced failures:
 | 70 | 2026-04-05 | + decision filter + generic fabrication detection | 10 | not scored | 50% plans with F10, 18% artifacts. query.py is persistent hotspot. Decision filter catches fabricated method refs in decisions. Signature filter prevents cross-artifact propagation. Generic: no hardcoded patterns. |
 | **72** | **2026-04-05** | **+ deterministic corrector (AST+regex, chained attrs, underscore strip)** | **10** | **40.3/60** | **F10 22% plan-level (0% executable code). Score flat vs baseline (40.1) despite F10 fix. F10 was NOT the score bottleneck — `_detection_orchestrator()` callable (50%) and `_embedder.embed([])` (40%) in engine.py dominate consistency (5.5) and implementability (5.5).** |
 | **73** | **2026-04-06** | **commit I + import graph fix (relative imports, BFS 200, chain completeness)** | **5** | **40.6/60** | **Neutral vs baseline (~41). Run 67 rescored cold = 40.9 (45.3 was inflated). New patterns identified: F21 stub confusion (60%), F22 schema cross-contamination (60%), F23 decision defects (60%), F24 file misidentification (40%).** |
+| 77 | 2026-04-06 | + F25 per-function decomposition (inflated index) | 5 | 31.8/60 | **REGRESSION** — fitz_forge indexer inflated structural index 119K→172K. F25 wrong fields 0% but overall quality tanked. |
+| **79** | **2026-04-07** | **+ dual index + func-name decomposition + purpose-first ref extraction** | **5** | **38.8/60** | **Back to baseline range. F25 wrong fields eliminated on decomposed plans. Dual index: fitz_sage for LLM (119K), fitz_forge for validation (335K). Net score impact: neutral.** |
