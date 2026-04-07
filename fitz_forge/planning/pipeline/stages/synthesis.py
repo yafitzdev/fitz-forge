@@ -2759,6 +2759,27 @@ class SynthesisStage(PipelineStage):
                     f"reference method ({len(reference_body)} chars)"
                 )
 
+        # F21 fix: if reference method has a complex pipeline (3+ internal
+        # calls), use a surgical rewrite approach instead of the normal
+        # prompt. Give the model ONLY the reference + one instruction
+        # in fresh context — prevents shortcutting.
+        if reference_body:
+            pipeline_steps = _extract_pipeline_constraint(reference_body)
+            if pipeline_steps:  # has 3+ pipeline steps
+                result = await self._surgical_rewrite_artifact(
+                    client, filename, purpose, reference_body,
+                )
+                if result:
+                    logger.info(
+                        f"Stage 'synthesis': {filename} used surgical "
+                        f"rewrite ({len(result.get('content', ''))} chars)"
+                    )
+                    return result
+                logger.warning(
+                    f"Stage 'synthesis': {filename} surgical rewrite "
+                    f"failed, falling back to normal prompt"
+                )
+
         # F9 supplement: extract parameter type fields from reference method
         # so the model knows Query has (text, constraints, metadata) not
         # (conversation_context, history, mode, provider).
