@@ -2594,9 +2594,8 @@ class SynthesisStage(PipelineStage):
             change_hint = (
                 f"\nThe line that produces the final output is:\n"
                 f"    {output_line}\n"
-                f"This is the ONLY line you should change for streaming "
-                f"(e.g., yield tokens from a streaming variant instead "
-                f"of returning a complete result).\n"
+                f"This is the ONLY line you should change for the variant. "
+                f"Keep everything above it identical.\n"
             )
 
         prompt = (
