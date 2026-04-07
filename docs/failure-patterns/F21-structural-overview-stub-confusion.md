@@ -80,4 +80,23 @@ Benefits:
 - **Codebase agnostic** — works for any "parallel variant" task in any codebase
 - The delta identification can be deterministic for common patterns (streaming, async)
 
-## Status: ❌ Not yet fixed — tool-based surgical rewrite proposed, not implemented
+## Attempted Fixes (2026-04-07)
+
+| Approach | F21 rate | Why it failed |
+|----------|----------|---------------|
+| Baseline (`...  # N lines`) | 35% (7/20) | — |
+| `pass  # N lines` | 95% (19/20) | Model reads `pass` as empty method |
+| `# [implemented] N lines` | 100% (20/20) | Model ignores comments |
+| Pipeline constraint injection (23 steps) | 60% (12/20) | Overwhelmed the model — too many instructions in an already 46K-char prompt |
+
+All prompt-level fixes failed or made things worse. The prompt is too crowded (~12K tokens) for additional instructions to have positive impact.
+
+## Next step: Tool-based surgical rewrite
+The only approach not yet tried. Instead of one big prompt, decompose into focused calls:
+1. Give the model JUST the reference method + one instruction ("copy this, change one line")
+2. Fresh context per call — no competing reasoning or decisions
+3. The model can't shortcut when the instruction is "copy exactly"
+
+This requires changing `_generate_single_artifact` to use a two-call flow for artifacts that have a reference method with 3+ pipeline steps.
+
+## Status: ❌ Not yet fixed — prompt-level approaches exhausted, tool-based decomposition needed
