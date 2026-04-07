@@ -130,6 +130,8 @@ Every LLM call in the pipeline that can or has produced failures:
 7. Fixing isolated patterns (F25, F21) doesn't improve overall scores when F10 fabrication dominates — fabricated methods in non-engine artifacts account for 22% of all artifacts
 8. Surgical rewrite outputs must NOT be injected into F3 signature chain — private method names leak and cause cascading fabrications
 9. **Scorer drift is real**: Sonnet-as-Judge scores drift -2.5pts between sessions on the SAME plans (run 73 plan 1: 38→36, plan 4: 44→41). Always rescore baseline plans alongside new runs for valid comparison. The nominal baseline of ~41 may rescore to ~38 in a later session.
+10. **Scorer rewards incomplete plans**: Run 67 (45.3 avg) had 33% of plans with only 1-2 tiny artifacts and 19% with NO engine.py. These plans scored high because there was barely any code to critique. Run 81 (34.0 avg) has engine.py in EVERY plan (surgical rewrite guarantees it). More complete plans = more surface area for scorer to find issues = lower scores. The scoring method penalizes ambition — a plan that attempts all hard files scores lower than one that only generates schemas.py.
+11. **Run 81 is the new baseline** (34.0 avg, 5 plans). All plans attempt engine.py. All plans have per-function route decomposition. The 6-dimension scorer is deprecated — it rewards plan incompleteness. A new evaluation method is needed that rewards completeness and rates implementation quality per artifact, not penalizes surface area.
 
 ---
 
