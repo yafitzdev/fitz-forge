@@ -1,106 +1,83 @@
-# F21: Compressed Source Stub Confusion
+# F21: Parallel Variant Pipeline Shortcutting
 
-## Problem
-The source code compressor replaces method bodies >6 lines with `...  # N lines`. The model interprets this as Python's Ellipsis literal (stub/abstract method convention) and concludes the method is unimplemented. This causes it to bypass existing fully-implemented layers or propose unnecessary reimplementations.
+## Problem (Reframed)
+When the model creates a parallel variant of an existing method (streaming, async, batch, cached), it sometimes **shortcuts to a low-level primitive** instead of replicating the original method's internal pipeline. The variant looks functional but silently drops all intermediate processing (validation, retrieval, enrichment, guardrails, etc).
 
-## Exact mechanism
+This is NOT caused by the `...  # N lines` compression format (tested: all alternatives were worse). It's caused by the model seeing a convenient low-level API and taking the shortcut.
 
-### What the model sees (compressed source in artifact prompt)
+## Generic Example
+
+**Original method** (complex pipeline):
 ```python
-async def answer(self, query: Query, *, progress=None) -> Answer:
-    """Answer a query using the full RAG pipeline."""
-    ...  # 332 lines
+def process(self, input):
+    validated = self._validator.validate(input)      # step 1
+    enriched = self._enricher.enrich(validated)      # step 2  
+    transformed = self._transformer.transform(enriched)  # step 3
+    result = self._generator.generate(transformed)   # step 4 (final)
+    self._auditor.log(result)                        # step 5
+    return result
 ```
 
-### What the model concludes
-Decision d3: *"their implementations (truncated as `...`) are likely consume LLM responses synchronously"*
-Decision d5: *"handle_api_errors has no implementation body (only stubs)"*
-
-### What actually exists
+**Correct variant** (replicate pipeline, change one step):
 ```python
-async def answer(self, query, *, progress=None) -> Answer:
-    """Answer a query using the full RAG pipeline."""
-    # 332 lines: rewrite query → fast_analyze → classify → embed → retrieve
-    # → read → expand → compress → assemble → guardrails → synthesize → govern
-    ...
+def process_stream(self, input):
+    validated = self._validator.validate(input)      # step 1 - SAME
+    enriched = self._enricher.enrich(validated)      # step 2 - SAME
+    transformed = self._transformer.transform(enriched)  # step 3 - SAME
+    for token in self._generator.generate_stream(transformed):  # step 4 - CHANGED
+        yield token
+    self._auditor.log(...)                           # step 5 - SAME
 ```
 
-The model sees `...  # 332 lines` and reads it as "this method is a stub with 332 lines of comment." It then makes architectural decisions that bypass the method entirely (e.g., calling `chat_stream()` directly instead of going through the synthesizer/engine pipeline).
-
-## Where the `...` comes from
-`fitz_forge/planning/agent/compressor.py`, line 174/177:
+**What the model produces** (shortcut):
 ```python
-replacements[body_start] = f"{indent_str}...  # {body_lines} lines\n"
+def process_stream(self, input):
+    # Skips steps 1-3 entirely
+    for token in self._generator.generate_stream(input):  # goes straight to step 4
+        yield token
 ```
 
-Bodies >6 lines are replaced. `__init__` and `_init_components` are special-cased to keep `self._xxx =` assignments. All other methods get collapsed to `...`.
+## Concrete Example (fitz-sage streaming task)
 
-## Occurrence in run 79
-- **BLOCKING-GENERATE**: 2/5 plans call `generate()` (blocking) instead of `generate_stream()` because the model thinks `generate()` is a stub and doesn't understand its full implementation
-- **Fabricated methods**: model invents `_build_messages_for_generation()`, `assemble_messages()`, etc. because it doesn't see what the real methods do and guesses
-- **Layer bypass**: model calls `chat_stream()` directly from the engine, skipping the entire RAG pipeline (retrieval, guardrails, context assembly)
-
-Estimated impact: ~3 pts across alignment (wrong architecture) + implementability (broken artifacts) + consistency (decisions contradict real code).
-
-## Fix Assessment
-
-### Option 1: Change `...` to explicit marker (RECOMMENDED)
-Replace `...  # N lines` with a format that can't be confused with Python stubs:
-
-```python
-# [IMPLEMENTATION: 332 lines — body omitted for brevity]
+**Original**: `FitzKragEngine.answer()` — 332-line RAG pipeline:
+```
+query → rewrite → analyze → classify → embed → retrieve → read → expand 
+→ compress → assemble → guardrails → synthesize → govern → Answer
 ```
 
-or:
+**Model's shortcut**: `answer_stream()` calls `self._chat.chat_stream()` directly — sends raw query to LLM with no retrieval, no context, no guardrails.
 
-```python
-# ... (332 lines of implementation omitted)
-```
+## Why the Model Shortcuts
 
-The key difference: a Python comment can't be mistaken for an Ellipsis literal. The model has no reason to think a comment means "unimplemented."
+The model receives:
+1. **Compressed source** with `...  # 332 lines` — can't see pipeline steps in source section
+2. **Full reference method** (16K chars) — CAN see the pipeline in the REFERENCE section
+3. **Available methods** listing `self._chat` has `chat_stream()` — a tempting shortcut
 
-**Cost**: 0 LLM calls, 1-line change in compressor.py.
-**Risk**: Low — changes what the model sees in the source section but doesn't add tokens (actually saves 3 chars: `...` → `#`).
-**Confidence**: High — the root cause is unambiguous (`...` = Ellipsis literal convention), and the fix removes the ambiguity entirely.
+The model follows the shortcut when the upstream reasoning/decisions already describe it. The artifact prompt has the right reference but the model's attention is split between 16K of reference code and 15K of reasoning that may describe a simpler architecture.
 
-### Option 2: Add a 1-line summary of what the method does
-Instead of just `...  # N lines`, include a brief summary:
+## Harness Measurements
 
-```python
-# [332 lines: rewrite query, retrieve chunks, assemble context, run guardrails, synthesize answer]
-```
+| Format | F21 shortcut rate | Notes |
+|--------|------------------|-------|
+| `...  # N lines` (baseline) | 15% (3/20) | Model sometimes ignores reference |
+| `pass  # N lines` | 95% (19/20) | Model reads `pass` as empty — much worse |
+| `# [implemented] N lines` | 100% (20/20) | Model ignores comments — worst |
 
-**Cost**: Requires either AST analysis (extract key method calls from the body before compressing) or manual annotation. More complex.
-**Risk**: Medium — summaries could be wrong or misleading.
-**Confidence**: Medium — the summary might not be accurate enough for all methods.
+Format changes DON'T fix this. The model shortcuts because it has a simpler design in mind, not because it thinks methods are stubs.
 
-### Option 3: Add explicit note in artifact prompt
-Add to the rules section: *"The `...` markers in the source code mean 'body omitted for brevity', NOT 'unimplemented'. All methods with `...` have full working implementations."*
+## Proposed Fix: Tool-Based Surgical Rewrite
 
-**Cost**: 0, prompt change only.
-**Risk**: Low, but the note competes with 10K+ tokens of other content. The model might ignore it.
-**Confidence**: Low — we already have rules like "Do NOT fabricate methods" that the model ignores when the signal from source code is stronger.
+Instead of giving the model 16K of reference + 15K of reasoning and asking "write a streaming variant," decompose into two focused calls:
 
-## Attempted Fixes (2026-04-07)
+**Call 1 (identify delta)**: Give fresh context with JUST the reference method. Ask: "Which line/call is the final generation step that should change for a streaming variant?"
 
-Tested three replacement formats for `...  # N lines`:
+**Call 2 (apply delta)**: Give fresh context with the reference method + the identified delta. Ask: "Copy this method exactly, but replace line X with Y. Change nothing else."
 
-| Format | F21 rate | Why |
-|--------|----------|-----|
-| `...  # N lines` (baseline) | 15% | Model sometimes reads `...` as stub |
-| `pass  # N lines of implementation` | 95% | Model reads `pass` as "empty method" — much worse |
-| `# [implemented] N lines omitted` | 100% | Model ignores comments entirely, treats body as missing |
+Benefits:
+- Each call has **one instruction** — can't shortcut when told "copy exactly, change one line"
+- **Fresh context** — no competing 15K of reasoning suggesting a simpler architecture
+- **Codebase agnostic** — works for any "parallel variant" task in any codebase
+- The delta identification can be deterministic for common patterns (streaming, async)
 
-**All replacements were worse than the original.** The `...` format is actually the best option because:
-1. `...` in Python is ambiguous (stub OR "omitted") — the model resolves correctly ~85% of the time
-2. `pass` is unambiguous but means "does nothing" — always wrong
-3. Comments are invisible to the model's code understanding
-
-### Key insight: "bypasses synthesizer" is not stub confusion
-The dominant F21 indicator (calling `self._chat.chat_stream()` directly) is NOT caused by the model thinking `generate()` is a stub. It's the model making a **reasonable architectural decision**: the `ChatProvider` already has `chat_stream()`, and for a streaming endpoint, going directly to the streaming provider is a natural design. The model bypasses the synthesizer because `CodeSynthesizer.generate()` returns a full `Answer` (non-streaming), and there's no `generate_stream()` to call.
-
-This is not a format/display problem — it's a **missing method problem**. The model can't stream through the synthesizer because the synthesizer doesn't have a streaming variant. The fix would be either:
-1. Add context to the prompt explaining that `answer_stream()` must replicate the full RAG pipeline (not shortcut to `chat_stream()`)
-2. Or accept that the model's design is reasonable and the scorer should not penalize it
-
-## Status: ⏸️ DEFERRED — format changes made it worse. Root cause is missing streaming method on synthesizer, not display format of compressed bodies.
+## Status: ❌ Not yet fixed — tool-based surgical rewrite proposed, not implemented
