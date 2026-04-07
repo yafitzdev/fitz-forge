@@ -81,7 +81,26 @@ Add to the rules section: *"The `...` markers in the source code mean 'body omit
 **Risk**: Low, but the note competes with 10K+ tokens of other content. The model might ignore it.
 **Confidence**: Low — we already have rules like "Do NOT fabricate methods" that the model ignores when the signal from source code is stronger.
 
-## Recommendation
-Option 1 (change `...` to comment) is the clear winner. It's a 1-line change that removes the ambiguity at source. No heuristics, no prompt engineering, no LLM calls. The model will never confuse a Python comment with an unimplemented stub.
+## Attempted Fixes (2026-04-07)
 
-## Status: ❌ Not yet fixed
+Tested three replacement formats for `...  # N lines`:
+
+| Format | F21 rate | Why |
+|--------|----------|-----|
+| `...  # N lines` (baseline) | 15% | Model sometimes reads `...` as stub |
+| `pass  # N lines of implementation` | 95% | Model reads `pass` as "empty method" — much worse |
+| `# [implemented] N lines omitted` | 100% | Model ignores comments entirely, treats body as missing |
+
+**All replacements were worse than the original.** The `...` format is actually the best option because:
+1. `...` in Python is ambiguous (stub OR "omitted") — the model resolves correctly ~85% of the time
+2. `pass` is unambiguous but means "does nothing" — always wrong
+3. Comments are invisible to the model's code understanding
+
+### Key insight: "bypasses synthesizer" is not stub confusion
+The dominant F21 indicator (calling `self._chat.chat_stream()` directly) is NOT caused by the model thinking `generate()` is a stub. It's the model making a **reasonable architectural decision**: the `ChatProvider` already has `chat_stream()`, and for a streaming endpoint, going directly to the streaming provider is a natural design. The model bypasses the synthesizer because `CodeSynthesizer.generate()` returns a full `Answer` (non-streaming), and there's no `generate_stream()` to call.
+
+This is not a format/display problem — it's a **missing method problem**. The model can't stream through the synthesizer because the synthesizer doesn't have a streaming variant. The fix would be either:
+1. Add context to the prompt explaining that `answer_stream()` must replicate the full RAG pipeline (not shortcut to `chat_stream()`)
+2. Or accept that the model's design is reasonable and the scorer should not penalize it
+
+## Status: ⏸️ DEFERRED — format changes made it worse. Root cause is missing streaming method on synthesizer, not display format of compressed bodies.
