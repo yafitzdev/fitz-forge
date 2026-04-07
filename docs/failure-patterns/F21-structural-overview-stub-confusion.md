@@ -91,12 +91,24 @@ Benefits:
 
 All prompt-level fixes failed or made things worse. The prompt is too crowded (~12K tokens) for additional instructions to have positive impact.
 
-## Next step: Tool-based surgical rewrite
-The only approach not yet tried. Instead of one big prompt, decompose into focused calls:
-1. Give the model JUST the reference method + one instruction ("copy this, change one line")
-2. Fresh context per call — no competing reasoning or decisions
-3. The model can't shortcut when the instruction is "copy exactly"
+## Surgical Rewrite Fix (2026-04-07)
 
-This requires changing `_generate_single_artifact` to use a two-call flow for artifacts that have a reference method with 3+ pipeline steps.
+When a reference method has 3+ pipeline steps, bypass the normal 46K-char artifact prompt entirely. Instead use a focused prompt with ONLY the reference method body + instructions.
 
-## Status: ❌ Not yet fixed — prompt-level approaches exhausted, tool-based decomposition needed
+**Key elements:**
+1. Fresh context — no reasoning, no decisions, no source, no schema fields
+2. One instruction: "copy this method, keep all pipeline steps, change only the final output"
+3. Explicit output line identification: finds the last `return` statement in the reference and tells the model "this is the line to change"
+
+**Prompt is ~17K chars** (just reference body + instructions) vs 46K for the normal prompt.
+
+| Approach | F21 rate | Bypass synth | Blocking generate | NotImplemented | Fabricated |
+|----------|----------|-------------|-------------------|----------------|-----------|
+| Baseline (normal prompt) | 35% (7/20) | 20% | 25% | 0% | 0% |
+| Format changes | 95-100% | — | — | — | — |
+| Pipeline constraint | 60% (12/20) | — | — | — | — |
+| **Surgical + output hint** | **25% (5/20)** | **0%** | 25% | **0%** | **0%** |
+
+The surgical rewrite eliminated shortcutting (0% bypass) and fabrication (0%). The remaining 25% is "calls blocking generate()" — the model copies `generate()` verbatim from the reference without changing it to a streaming variant. This is close-to-correct behavior (right pipeline, just didn't modify the final step).
+
+## Status: 🟡 PARTIALLY FIXED — shortcutting eliminated (35%→0%), but 25% of artifacts still copy the output step verbatim instead of changing it for streaming

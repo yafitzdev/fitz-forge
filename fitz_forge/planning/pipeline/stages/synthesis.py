@@ -2539,6 +2539,135 @@ class SynthesisStage(PipelineStage):
         )
         return "\n".join(capped)
 
+    async def _surgical_rewrite_artifact(
+        self,
+        client: Any,
+        filename: str,
+        purpose: str,
+        reference_body: str,
+    ) -> dict | None:
+        """F21 fix: generate artifact by surgically rewriting a reference method.
+
+        Instead of the normal prompt (46K chars with competing reasoning,
+        decisions, source, etc.), give the model ONLY the reference method
+        and one clear instruction. Fresh context prevents shortcutting.
+
+        This fires for artifacts where the reference method has a complex
+        pipeline (3+ internal self._xxx calls) — these are the cases where
+        the model tends to shortcut to a low-level primitive.
+        """
+        schema = json.dumps(
+            {
+                "filename": filename,
+                "content": "The complete rewritten method",
+                "purpose": "brief description of what changed",
+            },
+            indent=2,
+        )
+
+        # Identify the return/yield point in the reference — the line
+        # that produces the final output and should be changed.
+        import ast as _ast
+        import re as _re
+
+        output_line = ""
+        try:
+            wrapped = f"class _W:\n{reference_body}"
+            ref_tree = _ast.parse(wrapped)
+            # Find the last return statement
+            returns = []
+            for node in _ast.walk(ref_tree):
+                if isinstance(node, _ast.Return) and node.value:
+                    returns.append(node)
+            if returns:
+                last_return = max(returns, key=lambda n: n.lineno)
+                ref_lines = reference_body.split("\n")
+                # Adjust for the wrapper class offset
+                idx = last_return.lineno - 2  # -1 for 0-index, -1 for wrapper
+                if 0 <= idx < len(ref_lines):
+                    output_line = ref_lines[idx].strip()
+        except SyntaxError:
+            pass
+
+        change_hint = ""
+        if output_line:
+            change_hint = (
+                f"\nThe line that produces the final output is:\n"
+                f"    {output_line}\n"
+                f"This is the ONLY line you should change for streaming "
+                f"(e.g., yield tokens from a streaming variant instead "
+                f"of returning a complete result).\n"
+            )
+
+        prompt = (
+            f"Rewrite this existing method to: {purpose}\n\n"
+            f"## EXISTING METHOD (copy this structure exactly)\n"
+            f"```python\n{reference_body}\n```\n\n"
+            f"## INSTRUCTIONS\n"
+            f"1. Copy the method above, renaming it appropriately\n"
+            f"2. Keep ALL internal pipeline steps (every self._xxx call) "
+            f"in the same order — these do retrieval, validation, "
+            f"enrichment, etc. that must not be skipped\n"
+            f"3. Do NOT skip steps or call lower-level primitives directly\n"
+            f"{change_hint}\n"
+            f"Return ONLY valid JSON matching this schema:\n{schema}\n"
+        )
+
+        messages = self._make_messages(prompt)
+
+        logger.info(
+            f"Stage 'synthesis': {filename} surgical prompt="
+            f"{len(prompt)} chars (~{len(prompt) // 4} tok)"
+        )
+
+        try:
+            t0 = time.monotonic()
+            raw = await client.generate(
+                messages=messages,
+                max_tokens=8192,
+            )
+            elapsed = time.monotonic() - t0
+
+            # Trace
+            if self.trace_dir:
+                from pathlib import Path as _TracePath
+
+                trace = _TracePath(self.trace_dir)
+                trace.mkdir(parents=True, exist_ok=True)
+                safe = filename.replace("/", "_").replace("\\", "_")
+                (trace / f"{safe}_surgical_prompt.txt").write_text(
+                    prompt, encoding="utf-8",
+                )
+                (trace / f"{safe}_surgical_response.txt").write_text(
+                    raw, encoding="utf-8",
+                )
+
+            data = extract_json(raw)
+            content = data.get("content", "")
+            if not content:
+                logger.warning(
+                    f"Stage 'synthesis': surgical rewrite for "
+                    f"{filename} had empty content ({elapsed:.1f}s)"
+                )
+                return None
+
+            logger.info(
+                f"Stage 'synthesis': surgical artifact for "
+                f"{filename} ({len(content)} chars, {elapsed:.1f}s)"
+            )
+            return {
+                "filename": data.get("filename", filename),
+                "content": content,
+                "purpose": data.get("purpose", purpose),
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"Stage 'synthesis': surgical rewrite for "
+                f"{filename} failed: {e}"
+            )
+            return None
+
     async def _generate_single_artifact(
         self,
         client: Any,
@@ -2629,6 +2758,27 @@ class SynthesisStage(PipelineStage):
                 logger.info(
                     f"Stage 'synthesis': {filename} injecting "
                     f"reference method ({len(reference_body)} chars)"
+                )
+
+        # F21 fix: if reference method has a complex pipeline (3+ internal
+        # calls), use a surgical rewrite approach instead of the normal
+        # prompt. Give the model ONLY the reference + one instruction
+        # in fresh context — prevents shortcutting.
+        if reference_body:
+            pipeline_steps = _extract_pipeline_constraint(reference_body)
+            if pipeline_steps:  # has 3+ pipeline steps
+                result = await self._surgical_rewrite_artifact(
+                    client, filename, purpose, reference_body,
+                )
+                if result:
+                    logger.info(
+                        f"Stage 'synthesis': {filename} used surgical "
+                        f"rewrite ({len(result.get('content', ''))} chars)"
+                    )
+                    return result
+                logger.warning(
+                    f"Stage 'synthesis': {filename} surgical rewrite "
+                    f"failed, falling back to normal prompt"
                 )
 
         # F9 supplement: extract parameter type fields from reference method

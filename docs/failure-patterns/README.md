@@ -109,7 +109,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F18 | Overfitted artifact rules | 100% of prompts | no impact | Remove example | ✅ | 100 (2×50) | 0% fab | **0% fab** | ✅ |
 | F19 | Hardcoded schema keywords | 100% of code paths | load-bearing | N/A (reverted) | ✅ | 50 | 0% fab | **72% fab** (reverted) | ⏸️ |
 | F20 | Decision redundancy | 100% of plans | ~3.5K wasted chars (19% of decisions) | File-overlap merger | ✅ | 10 | 13.2 dec, 18.8K | **8 dec, 15.2K** (-19%) | ✅ |
-| F21 | Structural overview stub confusion | 60% of plans (3/5, run 73) | ~3 pts (alignment+implementability) | Format change or prompt note | ❌ | 0 | 60% | — | ❌ |
+| F21 | Pipeline shortcutting in variants | 35% of engine artifacts (harness) | ~3 pts (alignment+implementability) | Surgical rewrite + output hint | ✅ | 20+20+20+20+20 | 35% (7/20) | **25% (5/20)** — shortcutting eliminated, remaining is verbatim copy | 🟡 |
 | F23 | JSON-in-JSON decision fields | 20% of plans (1/5, run 73) | ~1 pt (consistency) | Deterministic JSON unwrap | ❌ | 0 | 20% | — | ❌ |
 | F24 | Semantic file misidentification | 40% of plans (2/5, run 73) | ~2 pts (alignment+file_identification) | Purpose annotations + path validation | ❌ | 0 | 40% | — | ❌ |
 | F25 | Unvalidated local attr access | 83% of route artifacts (run 74) | ~3 pts (alignment+implementability) | Per-function artifact decomposition + typed attr validation | ✅ | 5+6+5 plans | 83% (5/6) | **0% (0/7)** | ✅ |
