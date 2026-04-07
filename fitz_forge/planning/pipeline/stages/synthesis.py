@@ -681,7 +681,11 @@ def _extract_reference_method(
     """
     import ast as _ast
 
-    combined = (purpose + " " + relevant_decisions).lower()
+    # Search purpose first (may contain explicit reference from F25
+    # decomposition like "streaming variant of chat()"). Only include
+    # decisions as fallback — decisions mention ALL file functions and
+    # would cause the wrong match when multiple handlers exist.
+    combined = purpose.lower()
 
     # Detect variant patterns: "streaming version of X", "parallel to X",
     # "same as X but", "mirrors X", "variant of X"
@@ -715,6 +719,26 @@ def _extract_reference_method(
             if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
         )
     )
+
+    if not target_methods and relevant_decisions:
+        # Fallback: search decisions too (only if purpose alone found nothing)
+        combined = (purpose + " " + relevant_decisions).lower()
+        for pat in variant_patterns:
+            for m in _re.finditer(pat, combined):
+                name = m.group(1) or (m.group(2) if m.lastindex >= 2 else None)
+                if name and not name.startswith("_"):
+                    target_methods.append(name)
+        method_refs = _re.findall(r"(\w+)_stream\b", combined)
+        target_methods.extend(method_refs)
+        method_refs = _re.findall(r"stream_(\w+)\b", combined)
+        target_methods.extend(method_refs)
+        target_methods = list(
+            dict.fromkeys(
+                m
+                for m in target_methods
+                if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
+            )
+        )
 
     if not target_methods:
         return ""
