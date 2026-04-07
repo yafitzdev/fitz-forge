@@ -664,6 +664,89 @@ def _decompose_multi_handler_artifacts(
     return result
 
 
+def _extract_pipeline_constraint(reference_body: str) -> str:
+    """Extract the internal call chain from a reference method (F21 fix).
+
+    When creating a parallel variant (streaming, async, batch), the model
+    must replicate all intermediate pipeline steps — not shortcut to a
+    low-level primitive. This function extracts `self._xxx.method()` and
+    `self._xxx()` calls from the reference body and formats them as an
+    explicit constraint.
+
+    Returns empty string if fewer than 3 pipeline steps found (simple
+    methods don't need this constraint).
+    """
+    import ast as _ast
+
+    try:
+        # Wrap in class to handle indented methods
+        wrapped = f"class _Wrapper:\n{reference_body}"
+        tree = _ast.parse(wrapped)
+    except SyntaxError:
+        try:
+            tree = _ast.parse(reference_body)
+        except SyntaxError:
+            return ""
+
+    # Extract self._xxx.method(...) and self._xxx(...) calls sorted by line number
+    raw_calls: list[tuple[int, str]] = []  # (lineno, call_str)
+
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Call):
+            continue
+
+        call_str = ""
+        func = node.func
+        lineno = getattr(node, "lineno", 0)
+
+        # self._xxx.method(...)
+        if (
+            isinstance(func, _ast.Attribute)
+            and isinstance(func.value, _ast.Attribute)
+            and isinstance(func.value.value, _ast.Name)
+            and func.value.value.id == "self"
+            and func.value.attr.startswith("_")
+        ):
+            call_str = f"self.{func.value.attr}.{func.attr}()"
+
+        # self._xxx(...)
+        elif (
+            isinstance(func, _ast.Attribute)
+            and isinstance(func.value, _ast.Name)
+            and func.value.id == "self"
+            and func.attr.startswith("_")
+            and not func.attr.startswith("__")
+        ):
+            call_str = f"self.{func.attr}()"
+
+        if call_str:
+            raw_calls.append((lineno, call_str))
+
+    # Dedupe preserving first occurrence, sorted by line number
+    raw_calls.sort(key=lambda x: x[0])
+    calls: list[str] = []
+    seen: set[str] = set()
+    for _, call_str in raw_calls:
+        if call_str not in seen:
+            seen.add(call_str)
+            calls.append(call_str)
+
+    if len(calls) < 3:
+        return ""  # Simple methods don't need pipeline constraints
+
+    lines = ["## REQUIRED PIPELINE STEPS (do NOT skip any)"]
+    lines.append(
+        "Your variant MUST call these internal methods in the same order "
+        "as the reference. Only the final output step may change "
+        "(e.g., yield tokens instead of returning a complete result). "
+        "Do NOT shortcut by calling a lower-level primitive directly."
+    )
+    for i, call in enumerate(calls, 1):
+        lines.append(f"{i}. {call}")
+
+    return "\n".join(lines)
+
+
 def _extract_reference_method(
     disk_source: str,
     purpose: str,
