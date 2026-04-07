@@ -129,6 +129,7 @@ Every LLM call in the pipeline that can or has produced failures:
 6. Per-function artifact decomposition eliminates cross-handler confusion but requires matching both URL paths and function name patterns
 7. Fixing isolated patterns (F25, F21) doesn't improve overall scores when F10 fabrication dominates — fabricated methods in non-engine artifacts account for 22% of all artifacts
 8. Surgical rewrite outputs must NOT be injected into F3 signature chain — private method names leak and cause cascading fabrications
+9. **Scorer drift is real**: Sonnet-as-Judge scores drift -2.5pts between sessions on the SAME plans (run 73 plan 1: 38→36, plan 4: 44→41). Always rescore baseline plans alongside new runs for valid comparison. The nominal baseline of ~41 may rescore to ~38 in a later session.
 
 ---
 
