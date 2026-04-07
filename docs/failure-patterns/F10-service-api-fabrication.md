@@ -119,6 +119,20 @@ The model KNOWS it's fabricating (writes comments like "this violates rules but 
 
 The import graph couldn't follow relative imports (`from .fitz_service import FitzService`), so the call graph had no edges between routes → service → engine. The decomposition couldn't trace the dependency chain and sometimes skipped the service layer. Fixed by resolving relative imports in `_extract_full_imports`.
 
+### Current state (run 81, 2026-04-07)
+
+**The F10 deterministic corrector was REVERTED** during the bisect (commit `19514282`). The decision filter caused -5.7pts and ALL code from after commit E was reverted — including the corrector. The corrector was bundled in the revert.
+
+**Run 81 (5 plans, 27 artifacts):**
+- 6/27 (22%) have F10 fabrications: `_route_and_retrieve()`, `context_assembler.build()`, `_stream_generate()`, `_stream_verify()`, `is_partial`, `get_engine()`
+- These are NOT the old `service.query_stream()` patterns — they're NEW fabrications in engine.py and other artifacts
+- `check_artifact` AST validation does NOT catch `self._xxx.method()` chained calls — only `self.method()` direct calls
+- The F25 `_generate_single_artifact_checked` retry fires on violations but misses chained-call fabrications
+
+**What needs to happen:**
+1. Extend `check_artifact` to validate `self._xxx.method()` chained calls (resolve `_xxx` type from init attrs → check method on that type)
+2. This was partially implemented in the reverted corrector but the REPLACEMENT logic was wrong (fuzzy match picked wrong methods). Detection + retry is the right approach.
+
 ### Key lessons
 1. **Harness methodology**: Frozen-state testing misses upstream variance. The harness must vary ALL upstream stages.
 2. **Attention budget**: Prompt-level instructions can't survive 11K tokens of generation. Reducing context is more effective than adding rules.

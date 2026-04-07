@@ -98,7 +98,7 @@ Every LLM call in the pipeline that can or has produced failures:
 | F7 | Artifact fabrication | was ~62% | **isolated: 62%→2%. full pipeline: 0 pts** (other failures dominate) | Prompt reorder | ✅ | 100 (2×50) | 62% fail | **2% fail** | ✅ |
 | F8 | depends_on int coercion | 6% of decomps | est. ~1 pt (parse failure) | Pydantic validator | ✅ | 100 (2×50) | 6% (3/50) | **0%** (0/50) | ✅ |
 | F9 | Source compression blindness | 100% of large-file artifacts | ~10 pts (alignment+implementability) | Ref injection + param fields + callable | ✅ | 200 (4×50) | stubs (4% fab) | **0% fab, 13K real impls** | ✅ |
-| F10 | Service API fabrication | 22% plans, 6% artifacts (run 72) | ~8 pts (floor plan driver) | Deterministic corrector + import fix | ✅ | 600 harness + 19 pipeline | 54% plans (run 68) | **22% plans, 11% harness** (run 72) | 🟡 |
+| F10 | Service API fabrication + chained call fabrication | 22% artifacts (run 81) | ~8 pts (floor plan driver) | **REVERTED** — corrector reverted in bisect. check_artifact misses self._xxx.method() | ✅ | 600 harness + 19 pipeline + 5 run 81 | 54% (run 68) | **22% artifacts (run 81)** — corrector gone, new fabrication types | ❌ |
 | F11 | Wrong object for correct method | 20% of plans (2/10) | ~2 pts | Upstream fix (F9 ref injection) | ✅ | 50 | 0% (0/50) | **0%** (F9 prevents) | ✅ |
 | F12 | Artifact filename corruption | 20% of plans (2/10) | ~10 pts (kills file accuracy) | Deterministic cleanup | ❌ | 0 | 20% | **0%** (deterministic) | ✅ |
 | F13 | Upstream reasoning failures | 30% of plans (3/10) | ~10 pts (floor plan driver) | Best-of-3 scope consensus | ❌ | 0 | 30% (run 64) | **floor 37 (run 67)** | 🟡 |
@@ -118,7 +118,7 @@ Every LLM call in the pipeline that can or has produced failures:
 
 **Key insight: more LLM calls + pick the best = proactive fix for model quality limits.** Instead of post-processing bad output, generate multiple candidates and let the scorer filter. Best-of-3 with scope consensus was the single biggest score improvement (+2.8 pts, run 66→67). This principle applies at every stage — the model WILL produce good output some percentage of the time; the job is to select it.
 
-**Current state (run 79, 2026-04-07):** F25 fix (per-function artifact decomposition) eliminated wrong field access in route artifacts (83%→0%). But overall scores are unchanged at ~38.8 avg (baseline ~41, within noise). The regression from run 77 (31.8, inflated index) was fixed by using dual indexes — fitz_sage's for LLM context, fitz_forge's for validation. The remaining score bottleneck is upstream reasoning quality: consistency (5.4) and implementability (5.2) are dominated by F13 (reasoning failures) and F21 (stub confusion), not artifact-level field errors.
+**Current state (run 81, 2026-04-07):** Run 81 scored 34.0 avg (5 plans). F25 wrong fields reduced (83%→11% in run 81). F3/surgical leak fixed (0 build_abstain_message fabrications, was 7 in run 80). F21 surgical rewrite active (engine.py pipeline quality improved). But overall score still below baseline (~41). Run 81 artifact analysis: 22% F10 fabrications, 11% F2/F25 wrong fields, 7% syntax errors, 59% clean. **The score bottleneck is F10 (fabricated methods/attributes) — these were considered "fixed" but are recurring in new forms.** The existing `_repair_fabricated_refs` and `check_artifact` only validate `self.xxx()` calls, NOT chained `self._xxx.method()` calls. New fabrications: `_route_and_retrieve()`, `context_assembler.build()`, `_stream_generate()`, `_stream_verify()`, `is_partial`, `get_engine()`.
 
 **Key lessons:**
 1. More LLM calls + pick the best = proactive fix for model quality limits (best-of-3, +2.8 pts)
@@ -127,6 +127,8 @@ Every LLM call in the pipeline that can or has produced failures:
 4. Explore-then-focus: let the model think broadly first, then refine with focused input
 5. Changing the structural index content (even within budget) can cause regressions — the LLM is sensitive to what gets truncated
 6. Per-function artifact decomposition eliminates cross-handler confusion but requires matching both URL paths and function name patterns
+7. Fixing isolated patterns (F25, F21) doesn't improve overall scores when F10 fabrication dominates — fabricated methods in non-engine artifacts account for 22% of all artifacts
+8. Surgical rewrite outputs must NOT be injected into F3 signature chain — private method names leak and cause cascading fabrications
 
 ---
 
