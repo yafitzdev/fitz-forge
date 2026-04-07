@@ -2212,12 +2212,16 @@ class SynthesisStage(PipelineStage):
             )
             if artifact:
                 artifacts.append(artifact)
-                # Extract method signatures for subsequent artifacts
-                sigs = _extract_method_signatures(
-                    artifact.get("content", ""),
-                    filename,
-                )
-                prior_signatures.extend(sigs)
+                # Extract method signatures for subsequent artifacts.
+                # Skip for surgical rewrites — they copy the full reference
+                # method which contains private method calls that would
+                # leak into subsequent prompts and cause F10 fabrications.
+                if not artifact.get("_surgical"):
+                    sigs = _extract_method_signatures(
+                        artifact.get("content", ""),
+                        filename,
+                    )
+                    prior_signatures.extend(sigs)
 
         elapsed = time.monotonic() - t0
         logger.info(
@@ -2658,6 +2662,7 @@ class SynthesisStage(PipelineStage):
                 "filename": data.get("filename", filename),
                 "content": content,
                 "purpose": data.get("purpose", purpose),
+                "_surgical": True,
             }
 
         except Exception as e:
