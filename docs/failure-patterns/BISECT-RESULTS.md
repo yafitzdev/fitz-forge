@@ -148,11 +148,22 @@ Per-function artifact decomposition eliminated wrong field access in route artif
 - Run 79 (dual index, all fixes): **38.8 avg** — back to baseline range (~41 ±3)
 - Net score impact: **neutral** — F25 fixed a real bug but didn't improve the dimensions that dominate scoring
 
-### Current priorities
-- **Weakest dimensions** (run 79): consistency (5.4) and implementability (5.2)
-- Consistency failures: artifacts contradict stated design (e.g., calling blocking `generate()` instead of `generate_stream()`), duplicate decision IDs, wrong critical paths
-- Implementability failures: fabricated method calls (`self._build_chat_kwargs()`, `self._detection_orchestrator()` as callable), wrong calling conventions, missing sync-to-async bridges
-- These are **upstream reasoning quality issues** (F13, F21) — the model generates wrong architecture decisions that cascade into broken artifacts
-- Alignment failures: ~~wrong field names~~ (FIXED by F25), fabricated attributes still present
-- Cached class resolver (`ec34e778`) — still not re-evaluated
-- F10 corrector concept — dead end for scores
+### F21 surgical rewrite + F3 leak fix (2026-04-07, later)
+- Surgical rewrite: for engine.py artifacts with complex pipelines, bypass the normal 46K prompt and use a focused prompt with ONLY the reference method body + instructions (~17K). Eliminates pipeline shortcutting (35%→25% in harness).
+- F3 leak: surgical rewrite outputs were leaking private method names (`_build_abstain_message`) into subsequent artifacts via F3 signature injection. Fixed by skipping F3 for surgical outputs. Eliminated 7/37 fabrications in run 80.
+- Run 81 (5 plans): 34.0 avg. **New baseline.** All plans now attempt engine.py (surgical rewrite guarantees it).
+
+### Scorer validity finding (2026-04-07, end of session)
+The 6-dimension Sonnet scorer **rewards plan incompleteness**:
+- Run 67 (45.3 avg) had 33% of plans with only 1-2 tiny artifacts and 19% with NO engine.py. These scored high because there was barely any code to critique.
+- Run 81 (34.0 avg) has engine.py in EVERY plan. More complete plans = more surface area for issues = lower scores.
+- Scorer drift: rescoring run 73 plans today gave -2.5pts on average (38→36, 44→41).
+- The 6-dimension scorer is deprecated. New evaluation method being designed.
+
+### Current state (end of 2026-04-07 session)
+- **Run 81 is the baseline** (34.0 avg, 5 plans). All plans attempt all hard files.
+- F25 wrong fields: 83% → 0% (fixed)
+- F21 shortcutting: 35% → 25% in harness (partially fixed via surgical rewrite)
+- F10 chained-call fabrications: 22% of artifacts (corrector was REVERTED in bisect, not re-implemented)
+- F3 leak from surgical rewrite: fixed
+- **Next priority**: new deterministic evaluation system that rewards completeness and rates per-artifact implementation quality. 6-dimension scorer deprecated.
