@@ -73,6 +73,7 @@ Scored by Sonnet-as-Judge on 6 dimensions (each 1-10, total /60). High variance 
 | 77a-e | 04-06 | + F25 per-function decomposition (inflated index — regression) | 12-15 | — | 6.2 | 7.2 | 5.0 | 4.8 | 4.4 | 7.2 | **31.8 avg** | 5 plans. 0/7 wrong_field violations (0%). **BUT -9pt regression** — fitz_forge indexer inflated structural index 119K→172K, drowning LLM context. |
 | 78a-e | 04-07 | + dual index (LLM=fitz_sage 119K, validation=fitz_forge untruncated) | — | — | — | — | — | — | — | — | **not scored** | 5 plans. 2/6 wrong_field. Decomposition regex didn't match function-name patterns (query_stream vs /query/stream). |
 | **79a-e** | **04-07** | **+ func-name decomposition + purpose-first reference extraction** | **12-15** | **—** | **7.6** | **6.8** | **5.4** | **5.6** | **5.2** | **8.2** | **38.8 avg** | **5 plans. F25 wrong fields eliminated on decomposed plans. Scores back to baseline range (~41 ±3). Regression from inflated index fixed. Remaining score gap is upstream reasoning quality (F13, F21), not artifact field errors.** |
+| **80a-h** | **04-07** | **+ F21 surgical rewrite for complex pipeline methods** | **12-16** | **—** | **7.6** | **5.6** | **4.8** | **5.6** | **4.4** | **7.8** | **35.8 avg** | **6/8 plans (2 Pydantic failures). Range 29-41. Engine.py 7/7 pipeline steps (vs 6/7 without surgical). Score variance from non-engine artifacts, not surgical rewrite. F21 harness: 35%→25%.** |
 
 ---
 
