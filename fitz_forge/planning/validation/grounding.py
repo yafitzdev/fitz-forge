@@ -186,6 +186,88 @@ class StructuralIndexLookup:
     def suggest_function(self, name: str) -> list[str]:
         return difflib.get_close_matches(name, self._all_function_names, n=3, cutoff=0.6)
 
+    def augment_from_source_dir(self, source_dir: str) -> int:
+        """Scan a source directory and add classes/functions not already in the index.
+
+        This fills the gap between the retrieval-selected structural index
+        (which may cover ~30 files) and the full codebase.  Returns the number
+        of new classes added.
+
+        Used by the V2 scorer so that ``check_artifact`` validates against
+        the full codebase, not just the retrieval subset.
+        """
+        from pathlib import Path as _P
+
+        root = _P(source_dir)
+        if not root.is_dir():
+            return 0
+
+        added = 0
+        for py_file in root.rglob("*.py"):
+            rel = str(py_file.relative_to(root)).replace("\\", "/")
+            if ".venv" in rel or "__pycache__" in rel:
+                continue
+            try:
+                text = py_file.read_bytes()[:200_000].decode("utf-8", errors="replace")
+                tree = ast.parse(text)
+            except (SyntaxError, OSError):
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    name = node.name
+                    methods: dict[str, IndexedMethod] = {}
+                    for child in ast.iter_child_nodes(node):
+                        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            mname = child.name
+                            if mname.startswith("__"):
+                                continue
+                            ret = None
+                            if child.returns:
+                                try:
+                                    ret = ast.unparse(child.returns)
+                                except Exception:
+                                    pass
+                            methods[mname] = IndexedMethod(mname, ret)
+
+                    if name in self._all_class_names:
+                        # Class already in index — merge any missing methods.
+                        # The structural index may have truncated the method
+                        # list; the full scan has them all.
+                        for existing_cls in self.classes.get(name, []):
+                            for mname, minfo in methods.items():
+                                if mname not in existing_cls.methods:
+                                    existing_cls.methods[mname] = minfo
+                                    self._all_method_names.add(mname)
+                    else:
+                        cls = IndexedClass(name, rel, [], methods, [])
+                        self.classes.setdefault(name, []).append(cls)
+                        self._all_class_names.add(name)
+                        for mname in methods:
+                            self._all_method_names.add(mname)
+                        added += 1
+
+                elif isinstance(node, ast.FunctionDef) and isinstance(
+                    node, ast.FunctionDef
+                ):
+                    # Only top-level functions (depth check via col_offset)
+                    if getattr(node, "col_offset", 1) == 0:
+                        name = node.name
+                        if name in self._all_function_names:
+                            continue
+                        params = [a.arg for a in node.args.args]
+                        ret = None
+                        if node.returns:
+                            try:
+                                ret = ast.unparse(node.returns)
+                            except Exception:
+                                pass
+                        func = IndexedFunction(name, rel, params, ret)
+                        self.functions.setdefault(name, []).append(func)
+                        self._all_function_names.add(name)
+
+        return added
+
 
 # ---------------------------------------------------------------------------
 # Violation dataclass
@@ -239,6 +321,63 @@ _SKIP_NAMES = frozenset(
         "FileNotFoundError",
         "ImportError",
         "IndexError",
+        "ConnectionError",
+        "TimeoutError",
+        "PermissionError",
+        # Common stdlib classes
+        "ThreadPoolExecutor",
+        "ProcessPoolExecutor",
+        "Lock",
+        "Event",
+        "Thread",
+        "Queue",
+        "defaultdict",
+        "Counter",
+        "OrderedDict",
+        "deque",
+        "datetime",
+        "timedelta",
+        "timezone",
+        "Decimal",
+        "Enum",
+        "IntEnum",
+        "ABC",
+        "abstractmethod",
+        "contextmanager",
+        "asynccontextmanager",
+        "wraps",
+        "partial",
+        "reduce",
+        "lru_cache",
+        "cached_property",
+        "TypeVar",
+        "ParamSpec",
+        "Protocol",
+        "Generic",
+        "ClassVar",
+        "Final",
+        "Literal",
+        "Annotated",
+        "NamedTuple",
+        "TypedDict",
+        "cast",
+        "overload",
+        "dataclass_transform",
+        # Common builtins not yet listed
+        "callable",
+        "reversed",
+        "property",
+        "staticmethod",
+        "classmethod",
+        "super",
+        "vars",
+        "dir",
+        "globals",
+        "locals",
+        "exec",
+        "eval",
+        "compile",
+        "breakpoint",
         "print",
         "len",
         "range",

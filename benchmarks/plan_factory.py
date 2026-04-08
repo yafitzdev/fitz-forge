@@ -546,6 +546,9 @@ def decomposed(
     score_plans: bool = typer.Option(
         False, "--score", help="Prepare scoring prompts after generation",
     ),
+    score_v2: bool = typer.Option(
+        False, "--score-v2", help="Run Scorer V2 (deterministic + taxonomy prompts)",
+    ),
     parallel_runs: int = typer.Option(
         1, "--parallel-runs", "-p",
         help="Run N plans concurrently (requires LM Studio --parallel N)",
@@ -594,6 +597,10 @@ def decomposed(
         structural_index = context.get("synthesized", "")
         _prepare_scoring(str(out_dir), source_dir, query, structural_index)
 
+    if score_v2:
+        structural_index = context.get("synthesized", "")
+        _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir)
+
 
 # ------------------------------------------------------------------
 # Sonnet-as-Judge scoring (prompt preparation)
@@ -640,6 +647,84 @@ def prepare_scoring(
         raise typer.Exit(1)
 
     _prepare_scoring(results_dir, source_dir, query, structural_index)
+
+
+# ------------------------------------------------------------------
+# Scorer V2 (deterministic + taxonomy)
+# ------------------------------------------------------------------
+
+def _prepare_scoring_v2(
+    results_dir: str,
+    query: str,
+    structural_index: str,
+    source_dir: str = "",
+) -> None:
+    """Run Scorer V2: deterministic checks + taxonomy prompts."""
+    from .eval_v2 import score_batch_deterministic, format_batch_report, _find_plan_files
+    from .eval_v2_deterministic import run_deterministic_checks
+    from .eval_v2_taxonomy import build_taxonomy_prompt, load_taxonomy
+
+    plan_dir = Path(results_dir)
+    taxonomy_path = Path(__file__).parent / "streaming_taxonomy.json"
+
+    tax_files = None
+    if taxonomy_path.exists():
+        taxonomy_def = load_taxonomy(taxonomy_path)
+        tax_files = taxonomy_def.required_files or None
+
+    # Run deterministic scoring
+    batch = score_batch_deterministic(
+        plan_dir, structural_index, query, tax_files, source_dir
+    )
+
+    # Generate taxonomy prompts
+    if taxonomy_path.exists():
+        for pf in _find_plan_files(plan_dir):
+            plan_data = json.loads(pf.read_text(encoding="utf-8"))
+            plan_json = json.dumps(plan_data, indent=2, default=str)
+            det_report = run_deterministic_checks(
+                plan_data, structural_index, task_requires_streaming=True,
+                taxonomy_files=tax_files, source_dir=source_dir,
+            )
+            prompt = build_taxonomy_prompt(
+                plan_json, det_report, taxonomy_def, structural_index
+            )
+            num = pf.stem.replace("plan_", "")
+            prompt_path = plan_dir / f"score_v2_prompt_{num}.md"
+            prompt_path.write_text(prompt, encoding="utf-8")
+            logger.info(f"Wrote {prompt_path.name} ({len(prompt)} chars)")
+
+    # Write reports
+    report = format_batch_report(batch)
+    (plan_dir / "SCORE_V2_SUMMARY.md").write_text(report, encoding="utf-8")
+    (plan_dir / "scores_v2.json").write_text(
+        json.dumps(batch.model_dump(mode="json"), indent=2, default=str),
+        encoding="utf-8",
+    )
+    logger.info(f"Scorer V2: {batch.plans_scored} plans, avg {batch.deterministic_average}/100")
+
+
+@app.command("prepare-scoring-v2")
+def prepare_scoring_v2(
+    results_dir: str = typer.Option(..., help="Directory containing plan_*.json files"),
+    context_file: str = typer.Option(..., help="ideal_context.json for structural index"),
+    query: str = typer.Option(
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
+        help="The task query these plans address",
+    ),
+):
+    """Run Scorer V2 on existing plans.
+
+    Runs deterministic checks instantly and writes taxonomy prompts
+    for Sonnet classification.
+    """
+    context = json.loads(Path(context_file).read_text())
+    structural_index = context.get("synthesized", "")
+    if not structural_index:
+        logger.error("No 'synthesized' field in context file")
+        raise typer.Exit(1)
+
+    _prepare_scoring_v2(results_dir, query, structural_index)
 
 
 if __name__ == "__main__":

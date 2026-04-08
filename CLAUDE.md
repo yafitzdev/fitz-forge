@@ -6,7 +6,9 @@
 4. **No legacy code** - No backwards compat, no shims. Delete completely when removing.
 5. **Codebase agnostic** - No fitz_ai-specific assumptions in tools/. All codebase-specific logic must be in the MCP or CLI layers.
 6. **No threshold tuning** - If we run into a problem, fix the underlying issue instead of tuning thresholds. For example, if the LLM fails to extract a field, fix the prompt or extraction method instead of adding a "confidence threshold" that lets it return an empty value.
-
+7. **No implementation without consulting me first** - If you think a change is needed, or if you're not sure about something, first propose the change and discuss it with me before implementing. Small changes are fine to implement directly, but for anything non-trivial, let's align on the approach first. This is especially important for changes that affect the LLM prompts, pipeline structure, or job handling logic. We want to avoid unnecessary work and ensure we're making the right improvements.
+8. **Ask yourself periodically** - "Do I need to update any documentation?". 
+9. **Benchmarking** - When you run the benchmark, consult benchmarks/BENCHMARK.md for instructions. Also make sure to always check the benchmark result after the first run, to validate that it's working correctly. If you see any anomalies in the scores, investigate before proceeding with further changes.
 
 ## What This Is
 

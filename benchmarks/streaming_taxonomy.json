@@ -1,0 +1,167 @@
+{
+  "task_name": "streaming",
+  "task_description": "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
+  "required_files": {
+    "engine.py": "required",
+    "routes/query.py": "required",
+    "synthesizer.py": "recommended",
+    "schemas.py": "optional",
+    "sdk/fitz.py": "optional",
+    "services/__init__.py": "optional"
+  },
+  "architecture_taxonomy": {
+    "name": "architecture",
+    "entries": [
+      {
+        "id": "A1",
+        "pattern": "Full pipeline + generate_stream",
+        "quality": "BEST",
+        "score": 100,
+        "description": "answer_stream() replicates all pipeline steps, calls generate_stream() at the end which wraps chat_stream(). All RAG context preserved."
+      },
+      {
+        "id": "A2",
+        "pattern": "Full pipeline + direct chat_stream",
+        "quality": "GOOD",
+        "score": 75,
+        "description": "answer_stream() replicates pipeline, calls self._chat.chat_stream() at the final step instead of going through synthesizer. Loses synthesis logic but keeps RAG."
+      },
+      {
+        "id": "A3",
+        "pattern": "Provider shortcut",
+        "quality": "POOR",
+        "score": 30,
+        "description": "Calls chat_stream() directly, skipping the entire pipeline. No RAG, no context, no guardrails."
+      },
+      {
+        "id": "A4",
+        "pattern": "Blocking + split",
+        "quality": "BAD",
+        "score": 10,
+        "description": "Calls answer() then splits answer.text into fake tokens. Not real streaming."
+      },
+      {
+        "id": "A5",
+        "pattern": "NotImplementedError",
+        "quality": "FAIL",
+        "score": 0,
+        "description": "Gives up or raises NotImplementedError."
+      }
+    ]
+  },
+  "file_taxonomies": {
+    "engine.py": {
+      "name": "engine.py",
+      "entries": [
+        {
+          "id": "E1",
+          "pattern": "Full pipeline, yield, correct return type",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Full pipeline replication with yield statements and correct return type (Iterator/Generator)."
+        },
+        {
+          "id": "E2",
+          "pattern": "Full pipeline, yield, wrong return type",
+          "quality": "PARTIAL",
+          "score": 60,
+          "description": "Full pipeline with yield but returns Answer object instead of Iterator."
+        },
+        {
+          "id": "E3",
+          "pattern": "Partial pipeline, yield",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Missing some pipeline steps (e.g., guardrails, retrieval) but has yield."
+        },
+        {
+          "id": "E4",
+          "pattern": "No pipeline, direct chat_stream",
+          "quality": "POOR",
+          "score": 25,
+          "description": "No pipeline replication, calls chat_stream directly."
+        },
+        {
+          "id": "E5",
+          "pattern": "No yield (blocking)",
+          "quality": "BAD",
+          "score": 10,
+          "description": "Returns Answer object, no yield — blocking, not streaming."
+        },
+        {
+          "id": "E6",
+          "pattern": "NotImplementedError / absent",
+          "quality": "FAIL",
+          "score": 0,
+          "description": "Raises NotImplementedError or file not present in plan."
+        }
+      ]
+    },
+    "routes/query.py": {
+      "name": "routes/query.py",
+      "entries": [
+        {
+          "id": "R1",
+          "pattern": "StreamingResponse + async generator, correct fields",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Uses StreamingResponse with async generator wrapper, references correct request model fields."
+        },
+        {
+          "id": "R2",
+          "pattern": "StreamingResponse, wrong field names",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "StreamingResponse present but uses fabricated request fields (F2/F25 pattern)."
+        },
+        {
+          "id": "R3",
+          "pattern": "StreamingResponse, fabricated service methods",
+          "quality": "POOR",
+          "score": 25,
+          "description": "StreamingResponse present but calls non-existent service layer methods."
+        },
+        {
+          "id": "R4",
+          "pattern": "Not streaming (JSON response)",
+          "quality": "BAD",
+          "score": 10,
+          "description": "Returns a regular JSON response, not a streaming response."
+        },
+        {
+          "id": "R5",
+          "pattern": "sys.stdout.flush",
+          "quality": "BAD",
+          "score": 5,
+          "description": "Uses sys.stdout.flush for streaming — wrong approach for web API."
+        }
+      ]
+    },
+    "synthesizer.py": {
+      "name": "synthesizer.py",
+      "entries": [
+        {
+          "id": "S1",
+          "pattern": "generate_stream() wrapping chat_stream(), correct interface",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Implements generate_stream() that wraps the underlying chat provider's streaming interface."
+        },
+        {
+          "id": "S2",
+          "pattern": "Present but raises NotImplementedError",
+          "quality": "PARTIAL",
+          "score": 30,
+          "description": "File present with streaming method stub that raises NotImplementedError."
+        },
+        {
+          "id": "S3",
+          "pattern": "Absent from plan",
+          "quality": "ABSENT",
+          "score": 0,
+          "description": "Synthesizer not included in plan artifacts."
+        }
+      ]
+    }
+  }
+}

@@ -780,6 +780,12 @@ def _extract_reference_method(
         r"(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)",
         r"(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)",
         r"(\w+)\(\)\s+(?:but|except|with)\s+stream",
+        # "convert generate() into" / "convert the synchronous generate()"
+        r"convert\s+(?:the\s+)?(?:synchronous\s+)?(?:`?(\w+)`?\(?\)?)\s+(?:into|to)\b",
+        # "rename X to Y" / "rename X() to Y()"
+        r"rename\s+(?:method\s+)?(?:`?(\w+)`?\(?\)?)\s+(?:to|as)\b",
+        # "replace X() with" / "modify X()"
+        r"(?:replace|modify|update|change|refactor)\s+(?:`?(\w+)`?\(?\)?)",
     ]
     target_methods: list[str] = []
     for pat in variant_patterns:
@@ -2239,6 +2245,35 @@ class SynthesisStage(PipelineStage):
                 reasoning,
                 prior_outputs,
             )
+
+        # V2-F5 fix: deduplicate artifacts by filename.
+        # Per-function decomposition (F25) can produce multiple artifacts for
+        # the same file (e.g., one per route handler). Keep the longest when
+        # content differs, drop exact duplicates.
+        seen: dict[str, dict] = {}  # normalized filename -> best artifact
+        for art in artifacts:
+            fn = art.get("filename", "").replace("\\", "/").strip("/")
+            if fn not in seen:
+                seen[fn] = art
+            else:
+                existing = seen[fn]
+                if art.get("content", "") == existing.get("content", ""):
+                    continue  # exact duplicate — skip
+                # Different content for same file — keep the longer one
+                if len(art.get("content", "")) > len(existing.get("content", "")):
+                    seen[fn] = art
+                    logger.info(
+                        f"Stage 'synthesis': dedup {fn} — kept longer "
+                        f"({len(art.get('content', ''))} > "
+                        f"{len(existing.get('content', ''))} chars)"
+                    )
+
+        if len(seen) < len(artifacts):
+            logger.info(
+                f"Stage 'synthesis': dedup {len(artifacts)} -> "
+                f"{len(seen)} artifacts"
+            )
+        artifacts = list(seen.values())
 
         return artifacts
 
