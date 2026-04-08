@@ -241,41 +241,73 @@ class DecisionDecompositionStage(PipelineStage):
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("decomposing")
 
-            # Best-of-2: generate two decompositions, pick the better one.
-            # Also provides resilience against parse failures.
+            # Best-of-N with quality threshold: generate 2 candidates, pick
+            # the best.  If the best doesn't clear the threshold, generate
+            # more (up to max_candidates total).  Only pays extra LLM cost
+            # when the first batch produces low-quality decompositions.
+            _MIN_CANDIDATES = 2
+            _MAX_CANDIDATES = 4
+            _QUALITY_THRESHOLD = 80.0  # out of ~115 max
+
             candidates: list[tuple[float, dict, str, dict]] = []
             last_error: Exception | None = None
-            for i in range(2):
-                try:
-                    t0 = time.monotonic()
-                    raw = await client.generate(
-                        messages=messages,
-                        temperature=0.3,
-                        max_tokens=16384,
-                    )
-                    t1 = time.monotonic()
-                    logger.info(
-                        f"Stage '{self.name}': candidate {i + 1} took "
-                        f"{t1 - t0:.1f}s ({len(raw)} chars)"
-                    )
-                    parsed = self.parse_output(raw)
-                    score, breakdown = self._score_decomposition(
-                        parsed,
-                        prior_outputs,
-                    )
-                    candidates.append((score, parsed, raw, breakdown))
-                    logger.info(
-                        f"Stage '{self.name}': candidate {i + 1} "
-                        f"score={score:.1f} "
-                        f"({len(parsed.get('decisions', []))} decisions) "
-                        f"{breakdown}"
-                    )
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Stage '{self.name}': candidate {i + 1} failed: {e}")
+            candidate_num = 0
+
+            while candidate_num < _MAX_CANDIDATES:
+                # Generate a batch (2 for the first round, 1 at a time after)
+                batch_size = _MIN_CANDIDATES if candidate_num == 0 else 1
+                for _ in range(batch_size):
+                    candidate_num += 1
+                    try:
+                        t0 = time.monotonic()
+                        raw = await client.generate(
+                            messages=messages,
+                            temperature=0.3,
+                            max_tokens=16384,
+                        )
+                        t1 = time.monotonic()
+                        logger.info(
+                            f"Stage '{self.name}': candidate {candidate_num} took "
+                            f"{t1 - t0:.1f}s ({len(raw)} chars)"
+                        )
+                        parsed = self.parse_output(raw)
+                        score, breakdown = self._score_decomposition(
+                            parsed,
+                            prior_outputs,
+                        )
+                        candidates.append((score, parsed, raw, breakdown))
+                        logger.info(
+                            f"Stage '{self.name}': candidate {candidate_num} "
+                            f"score={score:.1f} "
+                            f"({len(parsed.get('decisions', []))} decisions) "
+                            f"{breakdown}"
+                        )
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(
+                            f"Stage '{self.name}': candidate {candidate_num} failed: {e}"
+                        )
+
+                if not candidates:
+                    if candidate_num >= _MAX_CANDIDATES:
+                        break
+                    continue
+
+                # Check if best candidate clears threshold
+                candidates.sort(key=lambda c: c[0], reverse=True)
+                if candidates[0][0] >= _QUALITY_THRESHOLD:
+                    break
+                if candidate_num >= _MAX_CANDIDATES:
+                    break
+                logger.info(
+                    f"Stage '{self.name}': best score {candidates[0][0]:.1f} "
+                    f"< threshold {_QUALITY_THRESHOLD}, generating more candidates"
+                )
 
             if not candidates:
-                raise last_error or RuntimeError("Both decomposition candidates failed")
+                raise last_error or RuntimeError(
+                    f"All {candidate_num} decomposition candidates failed"
+                )
 
             # Pick highest scoring candidate
             candidates.sort(key=lambda c: c[0], reverse=True)
@@ -285,7 +317,8 @@ class DecisionDecompositionStage(PipelineStage):
                 margin = candidates[0][0] - candidates[1][0]
                 logger.info(
                     f"Stage '{self.name}': selected candidate "
-                    f"(score={best_score:.1f}, margin={margin:.1f})"
+                    f"(score={best_score:.1f}, margin={margin:.1f}, "
+                    f"{len(candidates)} candidates evaluated)"
                 )
 
             decisions = parsed.get("decisions", [])
