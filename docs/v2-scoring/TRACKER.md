@@ -29,7 +29,8 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | 82 | 04-07 | + class cache (reverted) | 10 | 75.3 | 68-92 | 18 | 19 | 4 | Class cache neutral-to-negative. Reverted. |
 | 83 | 04-07 | + surgical synthesizer.py | 10 | 86.5 | 76-100 | 1 | 11 | 6 | First 100/100 plan. Surgical synth regex fix. |
 | 84 | 04-08 | + artifact dedup (V2-F5 fix) | 7 | 88.3 | 75-98 | 14 | 6 | 0 | V2-F5 fixed. 14 fabs = real invented classes (F8a-c). |
-| **85** | **04-08** | **+ F8a raw-string streaming constraint** | **9** | **72.6** | **20-86** | **1** | **10** | **0** | **Fab 14->1. But 3/9 missing engine.py (V2-F7). 1 plan 0 artifacts (20/100 outlier).** |
+| 85 | 04-08 | + F8a raw-string constraint (reverted) | 9 | 72.6 | 20-86 | 1 | 10 | 0 | Fab 14->1, but 4/9 missing engine.py. Prompt hack caused regression. **Reverted.** |
+| 86 | 04-08 | + V2-F7 injection (reverted) | 9 | 80.7 | 66-92 | 4 | 15 | 0 | Injection fires but artifacts fail. Still missing files. **Reverted.** |
 
 ---
 
@@ -44,11 +45,14 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | V2-F5 | Duplicate artifacts | 0/7 | — | Deterministic dedup | **Fixed** (run 84) |
 | V2-F6 | Cross-artifact method mismatch | 1/7 | -7 pts | F3 signatures | Open |
 | V2-F7 | Missing required file | 2/7 | -7 pts | Completeness check | Open |
-| V2-F8a | Fabricated streaming chunk types | 0/9 | — | Prompt: raw-string streaming constraint | **Fixed** (run 85) |
+| V2-F8a | Fabricated streaming chunk types | 3/7 | -15 to -50 pts | Prompt fix reverted — caused engine.py regression | Open |
 | V2-F8b | Fabricated provider subclasses | 1/7 | -25 pts | Decision: check existing provider methods | **NEW** |
 | V2-F8c | Fabricated request DTOs | 1/7 | -25 pts | Low priority | **NEW** |
 
-**Priority:** V2-F7 (missing engine.py, 3/9) > V2-F1 (parse, 3/9) > V2-F6 (mismatch, varies) > V2-F8b/c (rare)
+**Current state: run 84 code is the baseline (88.3 avg, dedup only).**
+**Lesson: prompt hacks on 30B models are unpredictable. Scorer improvements are safe. Pipeline interventions need structural fixes, not extra prompt rules.**
+
+**Priority:** V2-F8a (fabrication, needs structural fix not prompt) > V2-F7 (missing files, needs structural fix) > V2-F1 (parse) > V2-F6 (mismatch)
 
 ---
 
