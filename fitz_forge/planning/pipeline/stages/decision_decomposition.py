@@ -241,20 +241,35 @@ class DecisionDecompositionStage(PipelineStage):
             messages = self.build_prompt(job_description, prior_outputs)
             await self._report_substep("decomposing")
 
-            # Best-of-N with quality threshold: generate 2 candidates, pick
-            # the best.  If the best doesn't clear the threshold, generate
-            # more (up to max_candidates total).  Only pays extra LLM cost
-            # when the first batch produces low-quality decompositions.
+            # Best-of-N with per-criterion quality gates: generate 2
+            # candidates, pick the best.  If it fails ANY gate, generate
+            # more (up to 4 total).  Each criterion must independently
+            # clear its minimum — a high score in one can't compensate
+            # for a failing score in another.
             _MIN_CANDIDATES = 2
             _MAX_CANDIDATES = 4
-            _QUALITY_THRESHOLD = 80.0  # out of ~115 max
+            _CRITERION_GATES: dict[str, float] = {
+                "count": 5.0,           # must have reasonable decision count
+                "graph_cov": 10.0,      # must cover some call-graph files
+                "specificity": 15.0,    # must reference specific files/classes
+                "deps": 10.0,           # dependency refs must be valid
+                "ref_complete": 10.0,   # mentioned classes must have their files
+            }
+
+            def _passes_gates(breakdown: dict[str, float]) -> tuple[bool, list[str]]:
+                """Check if all criteria meet their minimums."""
+                failures = []
+                for criterion, minimum in _CRITERION_GATES.items():
+                    val = breakdown.get(criterion, 0.0)
+                    if val < minimum:
+                        failures.append(f"{criterion}={val:.1f}<{minimum}")
+                return len(failures) == 0, failures
 
             candidates: list[tuple[float, dict, str, dict]] = []
             last_error: Exception | None = None
             candidate_num = 0
 
             while candidate_num < _MAX_CANDIDATES:
-                # Generate a batch (2 for the first round, 1 at a time after)
                 batch_size = _MIN_CANDIDATES if candidate_num == 0 else 1
                 for _ in range(batch_size):
                     candidate_num += 1
@@ -293,15 +308,16 @@ class DecisionDecompositionStage(PipelineStage):
                         break
                     continue
 
-                # Check if best candidate clears threshold
+                # Check if best candidate passes ALL gates
                 candidates.sort(key=lambda c: c[0], reverse=True)
-                if candidates[0][0] >= _QUALITY_THRESHOLD:
+                passed, failures = _passes_gates(candidates[0][3])
+                if passed:
                     break
                 if candidate_num >= _MAX_CANDIDATES:
                     break
                 logger.info(
-                    f"Stage '{self.name}': best score {candidates[0][0]:.1f} "
-                    f"< threshold {_QUALITY_THRESHOLD}, generating more candidates"
+                    f"Stage '{self.name}': best candidate fails gates: "
+                    f"{', '.join(failures)} — generating more"
                 )
 
             if not candidates:
