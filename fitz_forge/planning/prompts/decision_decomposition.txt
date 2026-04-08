@@ -13,7 +13,7 @@ Break this task into 5-15 atomic decisions. Each decision is a QUESTION, not an 
 For each decision, specify:
 - **id**: Short unique identifier (d1, d2, d3, ...)
 - **question**: The specific question to answer. MUST name at least one concrete file, class, or method from the manifest (e.g., "What method on `ClassName` in `module.py`..." not "How should we handle..."). Vague questions waste resolution budget.
-- **relevant_files**: 1-3 file paths from the call graph or manifest needed to answer this question.
+- **relevant_files**: 1-3 file paths from the call graph or manifest needed to answer this question. CRITICAL: if your question mentions a class or type by name, you MUST include the file where that class is DEFINED (check the manifest's `classes:` lines), not just the file where it's used. The resolver can only see the files you list here — if the definition file is missing, it will guess wrong.
 - **depends_on**: IDs of decisions whose answers constrain this one. Most decisions should depend on at least one earlier decision. Decision d1 has no dependencies.
 - **category**: One of: interface, pattern, integration, scope, technical
 
