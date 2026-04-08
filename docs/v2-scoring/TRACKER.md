@@ -31,7 +31,8 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | 84 | 04-08 | + artifact dedup (V2-F5 fix) | 7 | 88.3 | 75-98 | 14 | 6 | 0 | V2-F5 fixed. 14 fabs = real invented classes (F8a-c). |
 | 85 | 04-08 | + F8a raw-string constraint (reverted) | 9 | 72.6 | 20-86 | 1 | 10 | 0 | Fab 14->1, but 4/9 missing engine.py. Prompt hack caused regression. **Reverted.** |
 | 86 | 04-08 | + V2-F7 injection (reverted) | 9 | 80.7 | 66-92 | 4 | 15 | 0 | Injection fires but artifacts fail. Still missing files. **Reverted.** |
-| **87** | **04-08** | **+ decomp scorer ref_complete + per-criterion gates + prompt fix** | **—** | **—** | **—** | **—** | **—** | **—** | **Decomp test: 10/10 pass all gates. ref_complete 15/15 on 8/10. Running full benchmark.** |
+| 87 | 04-08 | + decomp scorer (graph_cov gate too strict) | 7 | 79.2 | 65-93 | 9 | 7 | 0 | graph_cov gate impossible to clear, burned 4 candidates/plan for nothing. |
+| **88** | **04-08** | **+ decomp scorer (fixed gates)** | **7** | **82.9** | **67-100** | **2** | **11** | **0** | **0 missing files. Fab 14->2. Another 100/100. Parse failures = remaining bottleneck.** |
 
 ---
 
