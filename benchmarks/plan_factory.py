@@ -45,11 +45,32 @@ class _NullCheckpointManager:
 
 
 def _ts() -> str:
-    return time.strftime("%Y%m%d_%H%M%S")
+    return time.strftime("%Y-%m-%d_%H-%M-%S")
+
+
+def _next_run_number() -> int:
+    """Find the next run number by scanning existing result directories."""
+    results_root = Path(__file__).parent / "results"
+    if not results_root.is_dir():
+        return 1
+    max_num = 0
+    for d in results_root.iterdir():
+        if not d.is_dir():
+            continue
+        name = d.name
+        # Match pattern: YYYY-MM-DD_HH-MM-SS_run_NNN
+        if "_run_" in name:
+            try:
+                num = int(name.rsplit("_run_", 1)[1])
+                max_num = max(max_num, num)
+            except (ValueError, IndexError):
+                pass
+    return max_num + 1
 
 
 def _results_dir(label: str) -> Path:
-    d = Path(__file__).parent / "results" / f"{label}_{_ts()}"
+    run_num = _next_run_number()
+    d = Path(__file__).parent / "results" / f"{_ts()}_run_{run_num:03d}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -91,6 +91,35 @@ def _is_truncated(self, raw: str) -> bool:
     return False
 ```
 
+### 5. Full LLM call provenance
+
+Every `generate()` call writes a JSON trace with input messages + output string. This enables:
+- Replaying any benchmark from any checkpoint
+- Debugging fabrication root causes without re-running the pipeline
+- Comparing prompts across runs to understand regressions
+
+```python
+async def generate(self, **kwargs) -> str:
+    raw = await self._inner.generate(**kwargs)
+    
+    if self._trace_dir:
+        self._call_count += 1
+        trace = {
+            "call_number": self._call_count,
+            "messages": kwargs.get("messages", []),
+            "output": raw,
+            "max_tokens": kwargs.get("max_tokens"),
+            "temperature": kwargs.get("temperature"),
+            "elapsed_s": elapsed,
+        }
+        path = self._trace_dir / f"{self._call_count:03d}_{stage_name}.json"
+        path.write_text(json.dumps(trace, indent=2), encoding="utf-8")
+    
+    return raw
+```
+
+Trace files go into: `results/YYYY-MM-DD_HH-MM-SS_run_NNN/plan_01/001_decomp_candidate_1.json`
+
 ## Implementation
 
 1. Add `SanitizedLLMClient` wrapper in `fitz_forge/llm/sanitized.py`
@@ -98,6 +127,7 @@ def _is_truncated(self, raw: str) -> bool:
 3. Remove hardcoded `max_tokens` from all 15+ call sites
 4. Add `context_length` to client config (already exists)
 5. Truncation retry: max 1 retry with 2x budget
+6. Provenance tracing: write JSON for every generate() call when trace_dir is set
 
 ## Affected call sites
 
