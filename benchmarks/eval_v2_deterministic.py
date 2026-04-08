@@ -164,6 +164,35 @@ _CLASS_SKIP = frozenset({
 })
 
 
+def _strip_comments(content: str) -> str:
+    """Remove Python comments and docstrings from content for regex scanning."""
+    lines = []
+    in_docstring = False
+    docstring_char = ""
+    for line in content.split("\n"):
+        stripped = line.strip()
+        # Track docstrings
+        if not in_docstring:
+            if stripped.startswith('"""') or stripped.startswith("'''"):
+                docstring_char = stripped[:3]
+                if stripped.count(docstring_char) >= 2 and len(stripped) > 3:
+                    continue  # single-line docstring
+                in_docstring = True
+                continue
+        else:
+            if docstring_char in stripped:
+                in_docstring = False
+            continue
+        # Strip inline comments
+        if "#" in line:
+            # Naive but sufficient: split on # not inside strings
+            code_part = line.split("#")[0]
+            lines.append(code_part)
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def _regex_fabrication_scan(
     content: str,
     lookup: StructuralIndexLookup,
@@ -174,16 +203,33 @@ def _regex_fabrication_scan(
     Less precise than AST-based detection but catches obvious fabrications
     in unparseable code rather than reporting 0.
     """
+    # Strip comments first — capitalized words in comments (e.g.,
+    # "# Step 2: Batch(Analysis)") are not fabricated classes.
+    code_only = _strip_comments(content)
+
     fab_self = 0
     fab_class = 0
 
+    # Build set of locally defined names (functions and classes in the artifact)
+    local_defs: set[str] = set()
+    for line in code_only.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("def ") or stripped.startswith("async def "):
+            # Extract function name
+            name = stripped.split("def ", 1)[1].split("(")[0].strip()
+            local_defs.add(name)
+        elif stripped.startswith("class "):
+            name = stripped.split("class ", 1)[1].split("(")[0].split(":")[0].strip()
+            local_defs.add(name)
+
     # Check self.method() calls
-    for m in _SELF_METHOD_RE.finditer(content):
+    for m in _SELF_METHOD_RE.finditer(code_only):
         method_name = m.group(1)
         if method_name.startswith("__"):
             continue
+        if method_name in local_defs:
+            continue  # defined in this artifact
         if not lookup.method_exists_anywhere(method_name):
-            # Check if it's a common pattern (property access, not a real call)
             if method_name not in ("get", "set", "items", "keys", "values",
                                     "append", "extend", "update", "pop",
                                     "format", "join", "split", "strip",
@@ -192,10 +238,12 @@ def _regex_fabrication_scan(
                 fab_self += 1
 
     # Check ClassName() constructors
-    for m in _CLASS_CTOR_RE.finditer(content):
+    for m in _CLASS_CTOR_RE.finditer(code_only):
         class_name = m.group(1)
         if class_name in _CLASS_SKIP:
             continue
+        if class_name in local_defs:
+            continue  # defined in this artifact
         if not lookup.class_exists(class_name):
             fab_class += 1
 

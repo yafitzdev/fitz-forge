@@ -482,8 +482,9 @@ def check_artifact(
 
     violations: list[Violation] = []
 
-    # Collect classes defined IN this artifact (so self.X checks use the right class)
+    # Collect classes and functions defined IN this artifact
     artifact_classes: dict[str, set[str]] = {}  # class_name -> set of method names
+    artifact_functions: set[str] = set()  # top-level function names
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             methods = set()
@@ -491,6 +492,8 @@ def check_artifact(
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     methods.add(child.name)
             artifact_classes[node.name] = methods
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            artifact_functions.add(node.name)
 
     # Determine the target class (the class in the target file being modified)
     # by matching artifact filename to structural index
@@ -538,7 +541,7 @@ def check_artifact(
 
         _check_node(
             node, filename, lookup, artifact_classes, target_classes,
-            violations, var_type_map,
+            violations, var_type_map, artifact_functions,
         )
 
     return violations
@@ -552,6 +555,7 @@ def _check_node(
     target_classes: list[IndexedClass],
     violations: list[Violation],
     var_type_map: dict[str, str] | None = None,
+    artifact_functions: set[str] | None = None,
 ) -> None:
     line = getattr(node, "lineno", 0)
 
@@ -611,6 +615,8 @@ def _check_node(
                     )
         else:
             # Looks like a function call — check existence and arity
+            if artifact_functions and func_name in artifact_functions:
+                return  # defined locally in this artifact
             if not lookup.function_exists(func_name):
                 # Could be an imported function not in the index
                 # Only flag if it looks like a codebase function (not stdlib)
