@@ -188,6 +188,47 @@ class DecisionDecompositionStage(PipelineStage):
         else:
             breakdown["deps"] = 5.0
 
+        # Reference completeness: if a decision question mentions a class
+        # name that exists in the structural index, the file containing
+        # that class should be in relevant_files. Missing it means the
+        # resolver won't see the definition and will guess wrong.
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        index_text = agent_ctx.get("full_structural_index", "")
+        if not index_text:
+            index_text = prior_outputs.get("_gathered_context", "")
+        if index_text:
+            from fitz_forge.planning.validation.grounding import (
+                StructuralIndexLookup,
+            )
+
+            lookup = StructuralIndexLookup(index_text)
+            class_re = re.compile(r"`?([A-Z][a-zA-Z0-9]+(?:[A-Z][a-z]\w*)+)`?")
+            total_refs = 0
+            complete_refs = 0
+            for d in decisions:
+                question = d.get("question", "")
+                rf = {f.replace("\\", "/") for f in d.get("relevant_files", [])}
+                for m in class_re.finditer(question):
+                    class_name = m.group(1)
+                    cls = lookup.find_class(class_name)
+                    if not cls:
+                        continue
+                    total_refs += 1
+                    # Check if cls.file is covered by relevant_files
+                    if any(
+                        cls.file in f or f in cls.file
+                        or os.path.basename(cls.file) == os.path.basename(f)
+                        for f in rf
+                    ):
+                        complete_refs += 1
+            if total_refs > 0:
+                ratio = complete_refs / total_refs
+                breakdown["ref_complete"] = ratio * 15.0
+            else:
+                breakdown["ref_complete"] = 15.0
+        else:
+            breakdown["ref_complete"] = 10.0
+
         return sum(breakdown.values()), breakdown
 
     async def execute(
