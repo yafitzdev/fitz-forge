@@ -493,9 +493,23 @@ def _extract_method_calls(content: str) -> list[tuple[str, str]]:
 
 def check_cross_artifact_consistency(
     artifacts: list[dict],
+    artifact_checks: list[ArtifactCheck] | None = None,
 ) -> list[ConsistencyResult]:
-    """Check consistency across artifacts."""
+    """Check consistency across artifacts.
+
+    If artifact_checks is provided, unparseable artifacts are excluded
+    from method-name agreement checks.  An unparseable artifact reports
+    no methods, so any caller would fail — but that's a parse failure,
+    not a consistency error.  Don't double-count.
+    """
     results: list[ConsistencyResult] = []
+
+    # Track which files are unparseable (skip them as targets)
+    unparseable: set[str] = set()
+    if artifact_checks:
+        for ac in artifact_checks:
+            if not ac.parseable:
+                unparseable.add(ac.filename)
 
     # Build maps: what methods each artifact defines and calls
     defined_methods: dict[str, dict[str, str | None]] = {}  # filename -> {method: ret_type}
@@ -527,6 +541,10 @@ def check_cross_artifact_consistency(
                 # Only flag if the object name matches another artifact's class/module.
                 for target_file, target_methods in defined_methods.items():
                     if target_file == caller_file:
+                        continue
+                    # Skip unparseable targets — they report no methods
+                    # but that's a parse failure, not a consistency error
+                    if target_file in unparseable:
                         continue
                     # Check if object name relates to target file
                     # Strip leading underscores for comparison (self._synthesizer -> synthesizer)
@@ -693,7 +711,9 @@ def run_deterministic_checks(
     )
 
     # 3. Cross-artifact consistency
-    consistency_checks = check_cross_artifact_consistency(artifact_dicts)
+    consistency_checks = check_cross_artifact_consistency(
+        artifact_dicts, artifact_checks
+    )
 
     # Score calculation
     completeness_score = round(completeness.score * 30, 1)
