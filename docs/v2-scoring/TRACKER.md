@@ -31,6 +31,7 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | 84 | 04-08 | + artifact dedup (V2-F5 fix) | 7 | 88.3 | 75-98 | 14 | 6 | 0 | V2-F5 fixed. 14 fabs = real invented classes (F8a-c). |
 | 85 | 04-08 | + F8a raw-string constraint (reverted) | 9 | 72.6 | 20-86 | 1 | 10 | 0 | Fab 14->1, but 4/9 missing engine.py. Prompt hack caused regression. **Reverted.** |
 | 86 | 04-08 | + V2-F7 injection (reverted) | 9 | 80.7 | 66-92 | 4 | 15 | 0 | Injection fires but artifacts fail. Still missing files. **Reverted.** |
+| **87** | **04-08** | **+ decomp scorer ref_complete + per-criterion gates + prompt fix** | **—** | **—** | **—** | **—** | **—** | **—** | **Decomp test: 10/10 pass all gates. ref_complete 15/15 on 8/10. Running full benchmark.** |
 
 ---
 
@@ -49,10 +50,16 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | V2-F8b | Fabricated provider subclasses | 1/7 | -25 pts | Decision: check existing provider methods | **NEW** |
 | V2-F8c | Fabricated request DTOs | 1/7 | -25 pts | Low priority | **NEW** |
 
-**Current state: run 84 code is the baseline (88.3 avg, dedup only).**
-**Lesson: prompt hacks on 30B models are unpredictable. Scorer improvements are safe. Pipeline interventions need structural fixes, not extra prompt rules.**
+**Current state: run 84 code + decomp scorer improvements. F8a/V2-F7 prompt hacks reverted.**
 
-**Priority:** V2-F8a (fabrication, needs structural fix not prompt) > V2-F7 (missing files, needs structural fix) > V2-F1 (parse) > V2-F6 (mismatch)
+**Structural fixes applied (no prompt hacks):**
+- Decomposition scorer: ref_complete criterion (15pts) — penalizes when mentioned classes' definition files are missing from relevant_files
+- Per-criterion quality gates — each criterion must clear its minimum independently, retry up to 4 candidates
+- Decomposition prompt: "include the file where the class is DEFINED" (generic, not task-specific)
+
+**Lesson: prompt hacks on 30B models are unpredictable. Scorer/selection improvements are safe. Fix the selection mechanism, not the output.**
+
+**Priority:** V2-F8a (fabrication, needs structural fix) > V2-F1 (parse) > V2-F6 (mismatch)
 
 ---
 
