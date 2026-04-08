@@ -2647,11 +2647,6 @@ class SynthesisStage(PipelineStage):
             f"in the same order — these do retrieval, validation, "
             f"enrichment, etc. that must not be skipped\n"
             f"3. Do NOT skip steps or call lower-level primitives directly\n"
-            f"4. This codebase streams raw strings: chat_stream() returns "
-            f"Iterator[str], NOT typed chunk objects. Your streaming method "
-            f"must yield plain str tokens. Do NOT create StreamChunk, "
-            f"ChatDelta, or any other custom streaming type — yield str only\n"
-            f"5. Return type must be Iterator[str] or Generator[str, None, None]\n"
             f"{change_hint}\n"
             f"Return ONLY valid JSON matching this schema:\n{schema}\n"
         )
@@ -2914,9 +2909,6 @@ class SynthesisStage(PipelineStage):
             "- When adding a parallel method, match the original "
             "method's parameters exactly\n"
             "- Do NOT fabricate method names — if unsure, omit the call\n"
-            "- For streaming: this codebase streams raw str tokens via "
-            "Iterator[str]. Do NOT create custom chunk/delta types "
-            "(StreamChunk, ChatDelta, etc.) — yield plain strings only\n"
         )
 
         # Build grounding block — goes FIRST after purpose to avoid
