@@ -33,33 +33,11 @@ class ArtifactError:
     suggestion: str  # what to fix
 
 
-def _fix_docstring_quotes(content: str) -> str:
-    """Fix docstring quote mangling from JSON extraction.
-
-    When LLM output containing triple-quoted strings is serialized
-    as a JSON string value, the quotes get mangled:
-    - '\"\"\"' becomes '\"\"' (one quote eaten)
-    - Closing '\"\"\"' stripped entirely (unterminated)
-    """
-    # Fix ""text"" -> \"\"\"text\"\"\" (double-quote docstrings)
-    content = re.sub(r'""([^"]+)""', r'"""\1"""', content)
-
-    # Fix unterminated triple-quoted strings: count """ occurrences,
-    # if odd, append closing """
-    triple_count = content.count('"""')
-    if triple_count % 2 != 0:
-        content = content.rstrip() + '\n"""'
-
-    return content
-
-
 def _try_parse(content: str) -> ast.Module | None:
-    """Try parsing with recovery: raw -> quote fix -> dedent -> class wrap."""
+    """Try parsing with recovery: raw -> dedent -> class wrap."""
     for attempt in [
         content,
-        _fix_docstring_quotes(content),
         textwrap.dedent(content),
-        textwrap.dedent(_fix_docstring_quotes(content)),
         "class _:\n    " + content.replace("\n", "\n    "),
     ]:
         try:
