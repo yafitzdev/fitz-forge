@@ -9,6 +9,7 @@ Optionally uses pre-gathered codebase context for more targeted questions.
 import logging
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, extract_json
 from fitz_forge.planning.prompts import load_prompt
 
@@ -45,7 +46,7 @@ async def get_clarifying_questions(
             {"role": "user", "content": prompt},
         ]
 
-        raw = await client.generate(messages=messages)
+        raw = await generate(client, messages=messages)
         questions = extract_json(raw)
 
         if not isinstance(questions, list):

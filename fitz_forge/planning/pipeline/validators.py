@@ -13,6 +13,7 @@ import logging
 import re
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, extract_json
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ async def ensure_min_adrs(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        raw = await client.generate(messages=messages)
+        raw = await generate(client, messages=messages)
         data = extract_json(raw)
         new_adrs = data if isinstance(data, list) else data.get("adrs", [])
         if new_adrs:
@@ -271,7 +272,7 @@ async def ensure_concrete_verification(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        raw = await client.generate(messages=messages)
+        raw = await generate(client, messages=messages)
         data = extract_json(raw)
         applied = 0
         for phase in vague_phases:
@@ -578,7 +579,7 @@ async def ensure_correct_artifacts(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        raw = await client.generate(messages=messages)
+        raw = await generate(client, messages=messages)
         corrections = extract_json(raw)
         if isinstance(corrections, list):
             fix_map = {

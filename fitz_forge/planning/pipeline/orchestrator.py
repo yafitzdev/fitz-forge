@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
 from fitz_forge.planning.pipeline.stages.base import (
     SYSTEM_PROMPT,
@@ -459,7 +460,7 @@ class PlanningPipeline:
         ]
         try:
             t0 = time.monotonic()
-            response = await client.generate(messages=messages)
+            response = await generate(client, messages=messages)
             t1 = time.monotonic()
             logger.info(f"Implementation check took {t1 - t0:.1f}s ({len(response)} chars)")
             result = extract_json(response)
@@ -596,7 +597,7 @@ class PlanningPipeline:
 
         try:
             t0 = time.monotonic()
-            response = await client.generate(messages=messages)
+            response = await generate(client, messages=messages)
             t1 = time.monotonic()
             logger.info(f"Coherence check took {t1 - t0:.1f}s ({len(response)} chars)")
 

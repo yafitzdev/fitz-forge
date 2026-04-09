@@ -14,6 +14,7 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.call_graph import CallGraph
 from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
@@ -235,8 +236,8 @@ class DecisionResolutionStage(PipelineStage):
         messages = self._make_messages(prompt)
 
         try:
-            raw = await client.generate(
-                messages=messages,
+            raw = await generate(
+                client, messages=messages,
                 temperature=0,
                 max_tokens=1024,
             )
@@ -326,8 +327,8 @@ class DecisionResolutionStage(PipelineStage):
             )
 
             try:
-                retry_raw = await client.generate(
-                    messages=messages,
+                retry_raw = await generate(
+                    client, messages=messages,
                     temperature=0,
                     max_tokens=4096,
                 )
@@ -427,8 +428,8 @@ class DecisionResolutionStage(PipelineStage):
                 )
 
                 t0 = time.monotonic()
-                raw = await client.generate(
-                    messages=messages,
+                raw = await generate(
+                    client, messages=messages,
                     temperature=0,
                     max_tokens=4096,
                 )

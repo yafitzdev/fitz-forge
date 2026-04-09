@@ -55,3 +55,11 @@ Per-field extraction: 1 reasoning + 1 self-critique + N small JSON extractions p
 
 Post-pipeline: cross-stage coherence check → confidence scoring (section-specific criteria, 1-10 scale) → optional API review pause → render markdown → write file.
 
+### LLM Call Quality Layer
+
+All LLM calls go through `fitz_forge/llm/generate.py:generate()` — never call `client.generate()` directly. This function provides:
+- **Budget capping**: `max_tokens = min(requested, context_size - prompt_tokens - 512)`
+- **Output sanitization**: quadruple docstrings, unicode artifacts
+- **Truncation detection + retry**: unclosed code fences, bracket imbalance, unclosed JSON strings
+- **Provenance tracing**: `configure_tracing(trace_dir)` enables JSON traces per call
+

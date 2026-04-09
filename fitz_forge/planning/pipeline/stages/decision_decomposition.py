@@ -14,6 +14,7 @@ import time
 from difflib import SequenceMatcher
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
     StageResult,
@@ -277,8 +278,8 @@ class DecisionDecompositionStage(PipelineStage):
                     candidate_num += 1
                     try:
                         t0 = time.monotonic()
-                        raw = await client.generate(
-                            messages=messages,
+                        raw = await generate(
+                            client, messages=messages,
                             temperature=0.3,
                             max_tokens=16384,
                         )
@@ -381,8 +382,8 @@ class DecisionDecompositionStage(PipelineStage):
                     coverage_hint=coverage_hint,
                 )
                 t0 = time.monotonic()
-                retry_raw = await client.generate(
-                    messages=retry_messages,
+                retry_raw = await generate(
+                    client, messages=retry_messages,
                     temperature=0,
                     max_tokens=16384,
                 )

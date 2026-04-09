@@ -122,7 +122,7 @@ async def test_full_pipeline_execution(store: SQLiteJobStore):
 
     call_count = [0]
 
-    async def mock_generate(messages, model=None):
+    async def mock_generate(messages, model=None, **kwargs):
         idx = call_count[0]
         call_count[0] += 1
         if idx < len(stage_responses):

@@ -18,6 +18,7 @@ import re
 import time
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import (
     SYSTEM_PROMPT,
     PipelineStage,
@@ -752,112 +753,82 @@ def _extract_reference_method(
     purpose: str,
     relevant_decisions: str,
 ) -> str:
-    """Extract the body of an existing method that the new artifact variants.
+    """Extract the body of an existing method that the new artifact modifies.
 
     When creating answer_stream() (streaming variant of answer()), the model
     needs to see answer()'s actual implementation to know how to chain
     _query_rewriter, _retrieval_router, _reader, etc. Without this, it
     fabricates internal API calls (F9).
 
-    Heuristic: look for method names referenced in purpose/decisions that
-    exist in the source, pick the longest public method as the reference.
+    Strategy: parse the source file for all method names, then check which
+    ones are mentioned in the purpose/decisions text. Pick the longest
+    matching method as the reference.
     """
     import ast as _ast
-
-    # Search purpose first (may contain explicit reference from F25
-    # decomposition like "streaming variant of chat()"). Only include
-    # decisions as fallback — decisions mention ALL file functions and
-    # would cause the wrong match when multiple handlers exist.
-    combined = purpose.lower()
-
-    # Detect variant patterns: "streaming version of X", "parallel to X",
-    # "same as X but", "mirrors X", "variant of X"
     import re as _re
-
-    variant_patterns = [
-        r"(?:streaming|stream|async|parallel)\s+(?:version|variant|equivalent)\s+of\s+(\w+)",
-        r"(?:variant|version)\s+of\s+(\w+)",
-        r"(?:mirrors?|same\s+as|like|follows?)\s+(?:`?(\w+)`?\(?\)?)",
-        r"(?:stream|async)\w*\s+(?:method|version)\s+.*?(?:of|for)\s+(?:`?(\w+)`?\(?\)?)",
-        r"(\w+)\(\)\s+(?:but|except|with)\s+stream",
-        # "convert generate() into" / "convert the synchronous generate()"
-        r"convert\s+(?:the\s+)?(?:synchronous\s+)?(?:`?(\w+)`?\(?\)?)\s+(?:into|to)\b",
-        # "rename X to Y" / "rename X() to Y()"
-        r"rename\s+(?:method\s+)?(?:`?(\w+)`?\(?\)?)\s+(?:to|as)\b",
-        # "replace X() with" / "modify X()"
-        r"(?:replace|modify|update|change|refactor)\s+(?:`?(\w+)`?\(?\)?)",
-    ]
-    target_methods: list[str] = []
-    for pat in variant_patterns:
-        for m in _re.finditer(pat, combined):
-            name = m.group(1) or (m.group(2) if m.lastindex >= 2 else None)
-            if name and not name.startswith("_"):
-                target_methods.append(name)
-
-    # Also check for common patterns: "answer_stream" implies "answer" is the ref
-    method_refs = _re.findall(r"(\w+)_stream\b", combined)
-    target_methods.extend(method_refs)
-    method_refs = _re.findall(r"stream_(\w+)\b", combined)
-    target_methods.extend(method_refs)
-
-    # Deduplicate, filter out noise
-    target_methods = list(
-        dict.fromkeys(
-            m
-            for m in target_methods
-            if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
-        )
-    )
-
-    if not target_methods and relevant_decisions:
-        # Fallback: search decisions too (only if purpose alone found nothing)
-        combined = (purpose + " " + relevant_decisions).lower()
-        for pat in variant_patterns:
-            for m in _re.finditer(pat, combined):
-                name = m.group(1) or (m.group(2) if m.lastindex >= 2 else None)
-                if name and not name.startswith("_"):
-                    target_methods.append(name)
-        method_refs = _re.findall(r"(\w+)_stream\b", combined)
-        target_methods.extend(method_refs)
-        method_refs = _re.findall(r"stream_(\w+)\b", combined)
-        target_methods.extend(method_refs)
-        target_methods = list(
-            dict.fromkeys(
-                m
-                for m in target_methods
-                if m not in ("self", "the", "a", "an", "this", "add", "new", "method")
-            )
-        )
-
-    if not target_methods:
-        return ""
 
     try:
         tree = _ast.parse(disk_source)
     except SyntaxError:
         return ""
 
-    # Find matching method bodies
+    # Collect all methods from the source file (including private)
     lines = disk_source.split("\n")
+    source_methods: dict[str, tuple[int, int]] = {}  # name -> (start, end)
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            start = node.lineno - 1
+            end = node.end_lineno if hasattr(node, "end_lineno") else start + 1
+            source_methods[node.name] = (start, end)
+
+    if not source_methods:
+        return ""
+
+    # Find which source methods are mentioned in the purpose text.
+    # Check purpose first; fall back to decisions if nothing found.
+    _NOISE = {"self", "the", "a", "an", "this", "add", "new", "method",
+              "to", "of", "for", "with", "from", "into", "and", "or"}
+    target_methods: list[str] = []
+
+    for text in [purpose, relevant_decisions or ""]:
+        if target_methods and text == (relevant_decisions or ""):
+            break  # purpose alone found matches, skip decisions
+        text_lower = text.lower()
+        for method_name in source_methods:
+            if method_name in _NOISE:
+                continue
+            # Match method name as word (with optional parens/backticks)
+            if _re.search(
+                r"(?:^|[\s`(])_?" + _re.escape(method_name) + r"(?:\(\))?(?:$|[\s`),.])",
+                text_lower,
+            ):
+                target_methods.append(method_name)
+
+        # Also check for stream suffix patterns:
+        # "answer_stream" implies "answer" is the ref
+        for m in _re.findall(r"(\w+)_stream\b", text_lower):
+            if m in source_methods and m not in _NOISE:
+                target_methods.append(m)
+        for m in _re.findall(r"stream_(\w+)\b", text_lower):
+            if m in source_methods and m not in _NOISE:
+                target_methods.append(m)
+
+    # Deduplicate preserving order
+    target_methods = list(dict.fromkeys(target_methods))
+
+    if not target_methods:
+        return ""
+
+    # Pick the longest matching method body
     best_body = ""
     best_name = ""
 
-    for node in _ast.walk(tree):
-        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            continue
-        if node.name.startswith("_"):
-            continue
-        if node.name not in target_methods:
-            continue
-
-        # Extract the full method body from source lines
-        start = node.lineno - 1  # 0-indexed
-        end = node.end_lineno if hasattr(node, "end_lineno") else start + 1
+    for method_name in target_methods:
+        start, end = source_methods[method_name]
         body = "\n".join(lines[start:end])
-
         if len(body) > len(best_body):
             best_body = body
-            best_name = node.name
+            best_name = method_name
 
     if best_body:
         # Cap at 16K chars to avoid blowing prompt budget
@@ -2660,8 +2631,8 @@ class SynthesisStage(PipelineStage):
 
         try:
             t0 = time.monotonic()
-            raw = await client.generate(
-                messages=messages,
+            raw = await generate(
+                client, messages=messages,
                 max_tokens=8192,
             )
             elapsed = time.monotonic() - t0
@@ -2967,8 +2938,8 @@ class SynthesisStage(PipelineStage):
 
         try:
             t0 = time.monotonic()
-            raw = await client.generate(
-                messages=messages,
+            raw = await generate(
+                client, messages=messages,
                 max_tokens=4096,
             )
             elapsed = time.monotonic() - t0
@@ -3631,8 +3602,8 @@ class SynthesisStage(PipelineStage):
             for i in range(3):
                 try:
                     t0 = time.monotonic()
-                    r = await client.generate(
-                        messages=messages,
+                    r = await generate(
+                        client, messages=messages,
                         temperature=0.7,
                     )
                     t1 = time.monotonic()
@@ -3722,8 +3693,8 @@ class SynthesisStage(PipelineStage):
                     prior_outputs["_gathered_context"] = orig_context
 
                     t0_ref = time.monotonic()
-                    refined = await client.generate(
-                        messages=refined_messages,
+                    refined = await generate(
+                        client, messages=refined_messages,
                         temperature=0.7,
                     )
                     t1_ref = time.monotonic()
@@ -3760,8 +3731,8 @@ class SynthesisStage(PipelineStage):
             )
             rr_messages = self._make_messages(rr_prompt)
             t0_rr = time.monotonic()
-            roadmap_risk_reasoning = await client.generate(
-                messages=rr_messages,
+            roadmap_risk_reasoning = await generate(
+                client, messages=rr_messages,
                 temperature=0.7,
             )
             t1_rr = time.monotonic()

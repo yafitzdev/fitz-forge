@@ -120,31 +120,32 @@ async def generate(self, **kwargs) -> str:
 
 Trace files go into: `results/YYYY-MM-DD_HH-MM-SS_run_NNN/plan_01/001_decomp_candidate_1.json`
 
-## Implementation
+## Implementation — DONE (run 89)
 
-1. Add `SanitizedLLMClient` wrapper in `fitz_forge/llm/sanitized.py`
-2. Apply in `create_llm_client()` factory — all callers get it automatically
-3. Remove hardcoded `max_tokens` from all 15+ call sites
-4. Add `context_length` to client config (already exists)
-5. Truncation retry: max 1 retry with 2x budget
-6. Provenance tracing: write JSON for every generate() call when trace_dir is set
+**Approach changed from wrapper to standalone function** (see discussion below).
 
-## Affected call sites
+Implemented as `fitz_forge/llm/generate.py` — a single `generate()` function that all 36 call sites use instead of `client.generate()` directly.
 
-| Stage | File | Calls | Current max_tokens |
-|-------|------|-------|-------------------|
-| Decision decomposition | decision_decomposition.py | 2 (best-of-2) | 16384 |
-| Decision resolution | decision_resolution.py | 1 per decision | 16384 |
-| Synthesis reasoning | synthesis.py | 3 (best-of-3) | 16384 |
-| Surgical artifact | synthesis.py | 1 per file | 8192 |
-| Normal artifact | synthesis.py | 1 per file | 4096 |
-| Self-critique | base.py | 1 | 16384 |
-| Coherence check | synthesis.py | 1 | 16384 |
-| Confidence scoring | synthesis.py | 1 | 4096 |
-| Implementation check | orchestrator.py | 1 | 4096 |
+1. `generate()` function in `fitz_forge/llm/generate.py` — single entry point
+2. All 36 call sites across 10 files migrated to use it
+3. Existing `max_tokens` values preserved as intentional upper bounds (budget cap only fires when they exceed available context)
+4. `configure_tracing(trace_dir)` enables per-call JSON provenance tracing
+5. Truncation retry: max 1 retry with same budget
 
-The normal artifact call (4096) is the most constrained and causes the most truncation.
+**Why standalone function instead of wrapper:** The wrapper approach (SanitizedLLMClient) requires proxying all client properties (`context_size`, `fast_model`, `drain_call_metrics()`, etc.) — fragile and breaks silently when the client interface changes. The standalone function is explicit, easy to test, and adding new pre/post processing is just adding lines to one function. The 36 call-site changes were a one-time cost; wrapper maintenance would be ongoing.
+
+## Results (run 89, 10 plans)
+
+| Metric | Run 88 (pre-layer) | Run 89 (post-layer) |
+|--------|-------------------|---------------------|
+| Avg | 84.6 | **86.8** (+2.2) |
+| Range | 67-100 | 73.8-95.0 |
+| Fabrications | 14 | **8** (-43%) |
+| Parse failures | 11 | 16 |
+| Completeness | 30/30 | 30/30 |
+
+Truncation retry fired 6 times across 10 plans. 1 successful retry (produced longer valid output), 5 retried but still truncated (kept original). Budget capping did not fire (LM Studio context 65K, no call exceeded budget).
 
 ## Priority
 
-High — truncation is the #1 remaining quality issue after fabrication and completeness were solved. Run 88: 11 parse failures, 6 from truncation. Fixing max_tokens alone would likely eliminate most of these.
+Implemented. Remaining issue: truncation retries have low success rate (1/6). The retry uses the same budget — a "continue" prompt approach might work better but adds complexity.

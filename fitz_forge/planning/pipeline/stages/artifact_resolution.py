@@ -21,6 +21,7 @@ import logging
 import time
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import extract_json
 
 logger = logging.getLogger(__name__)
@@ -174,7 +175,8 @@ async def resolve_artifacts(
 
         t0 = time.monotonic()
         try:
-            raw = await client.generate(
+            raw = await generate(
+                client,
                 messages=[
                     {"role": "system", "content": _SYSTEM},
                     {"role": "user", "content": prompt},

@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any
 
+from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
     StageResult,
@@ -264,7 +265,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': contract verification took {time.monotonic() - t0:.1f}s"
             )
@@ -290,7 +291,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': data flow verification took {time.monotonic() - t0:.1f}s"
             )
@@ -316,7 +317,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': pattern verification took {time.monotonic() - t0:.1f}s"
             )
@@ -342,7 +343,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': type boundary audit took {time.monotonic() - t0:.1f}s"
             )
@@ -370,7 +371,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': sketch verification took {time.monotonic() - t0:.1f}s"
             )
@@ -402,7 +403,7 @@ class ArchitectureDesignStage(PipelineStage):
         messages = self._make_messages(prompt)
         try:
             t0 = time.monotonic()
-            result = await client.generate(messages=messages, temperature=0, max_tokens=4096)
+            result = await generate(client, messages=messages, temperature=0, max_tokens=4096)
             logger.info(
                 f"Stage '{self.name}': assumption verification took {time.monotonic() - t0:.1f}s"
             )

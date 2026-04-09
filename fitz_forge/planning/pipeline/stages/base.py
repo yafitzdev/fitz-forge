@@ -16,6 +16,8 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from fitz_forge.llm.generate import generate
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
@@ -355,7 +357,7 @@ class PipelineStage(ABC):
         """
         await self._report_substep("reasoning")
         t0 = time.monotonic()
-        reasoning = await client.generate(messages=reasoning_messages)
+        reasoning = await generate(client, messages=reasoning_messages)
         t1 = time.monotonic()
         logger.info(f"Stage '{self.name}': two-pass reasoning took {t1 - t0:.1f}s")
 
@@ -377,8 +379,8 @@ class PipelineStage(ABC):
             },
         ]
         t2 = time.monotonic()
-        json_output = await client.generate(
-            messages=extract_messages,
+        json_output = await generate(
+            client, messages=extract_messages,
             max_tokens=4096,
         )
         t3 = time.monotonic()
@@ -412,7 +414,7 @@ class PipelineStage(ABC):
         }
 
         t0 = time.monotonic()
-        raw = await client.generate(messages=single_pass_messages)
+        raw = await generate(client, messages=single_pass_messages)
         t1 = time.monotonic()
         logger.info(f"Stage '{self.name}': single-pass took {t1 - t0:.1f}s")
 
@@ -492,8 +494,8 @@ class PipelineStage(ABC):
         ]
         try:
             t0 = time.monotonic()
-            raw = await client.generate(
-                messages=extract_messages,
+            raw = await generate(
+                client, messages=extract_messages,
                 max_tokens=4096,
             )
             t1 = time.monotonic()
@@ -511,8 +513,8 @@ class PipelineStage(ABC):
                         f"empty '{retry_if_empty}', retrying once"
                     )
                     t0 = time.monotonic()
-                    raw = await client.generate(
-                        messages=extract_messages,
+                    raw = await generate(
+                        client, messages=extract_messages,
                         max_tokens=4096,
                     )
                     t1 = time.monotonic()
@@ -586,7 +588,7 @@ class PipelineStage(ABC):
 
         try:
             t0 = time.monotonic()
-            refined = await client.generate(messages=critique_messages)
+            refined = await generate(client, messages=critique_messages)
             t1 = time.monotonic()
             logger.info(
                 f"Stage '{self.name}': self-critique took {t1 - t0:.1f}s "
@@ -654,7 +656,7 @@ class PipelineStage(ABC):
 
         try:
             t0 = time.monotonic()
-            refined = await client.generate(messages=messages)
+            refined = await generate(client, messages=messages)
             t1 = time.monotonic()
             logger.info(
                 f"Stage '{self.name}': devil's advocate took {t1 - t0:.1f}s "
@@ -821,8 +823,8 @@ class PipelineStage(ABC):
             },
         ]
         try:
-            return await client.generate(
-                messages=messages,
+            return await generate(
+                client, messages=messages,
                 temperature=0,
                 max_tokens=4096,
             )
@@ -920,7 +922,7 @@ class PipelineStage(ABC):
                 logger.info(
                     f"Stage '{self.name}': no generate_with_tools, falling back to plain generate"
                 )
-            return await client.generate(messages=messages)
+            return await generate(client, messages=messages)
 
         logger.info(
             f"Stage '{self.name}': tool reasoning start — "
@@ -1087,7 +1089,7 @@ class PipelineStage(ABC):
             f"Total: {len(tool_reads)} pool + {len(disk_reads)} disk reads, "
             f"{total_time:.1f}s"
         )
-        return await client.generate(messages=messages)
+        return await generate(client, messages=messages)
 
     def _get_implementation_check(self, prior_outputs: dict[str, Any]) -> str:
         """Format the implementation check result for injection into prompts.
@@ -1144,7 +1146,7 @@ class PipelineStage(ABC):
 
             # Call LLM
             logger.info(f"Stage '{self.name}': Calling LLM")
-            raw_output = await client.generate(messages=messages)
+            raw_output = await generate(client, messages=messages)
 
             logger.info(f"Stage '{self.name}': Received {len(raw_output)} chars from LLM")
 

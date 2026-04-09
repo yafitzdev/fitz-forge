@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from fitz_forge.llm.generate import generate
+
 logger = logging.getLogger(__name__)
 
 
@@ -964,7 +966,7 @@ async def repair_violations(
         ]
 
         try:
-            raw = await client.generate(messages=messages, temperature=0, max_tokens=2048)
+            raw = await generate(client, messages=messages, temperature=0, max_tokens=2048)
             data = extract_json(raw)
             replacements = data.get("replacements", [])
         except Exception as e:
@@ -1071,7 +1073,7 @@ async def validate_grounding(
                 },
                 {"role": "user", "content": prompt},
             ]
-            raw = await client.generate(messages=messages, max_tokens=4096)
+            raw = await generate(client, messages=messages, max_tokens=4096)
             # Try to parse as JSON
             from fitz_forge.planning.pipeline.stages.base import extract_json
 

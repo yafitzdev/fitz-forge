@@ -47,7 +47,7 @@ class MockLLMClient:
         self.responses = responses or {}
         self.call_count = 0
 
-    async def generate(self, messages: list[dict], model: str | None = None) -> str:
+    async def generate(self, messages: list[dict], model: str | None = None, **kwargs) -> str:
         """
         Mock generate method.
 

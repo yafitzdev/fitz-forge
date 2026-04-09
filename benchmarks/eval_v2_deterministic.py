@@ -470,11 +470,25 @@ _RETURN_TYPE_RE = re.compile(
 
 
 def _extract_method_definitions(content: str) -> dict[str, str | None]:
-    """Extract defined method names and their return types from artifact content."""
+    """Extract defined method names and their return types from artifact content.
+
+    Uses the same parse recovery as _try_parse(): raw → dedent → class wrap.
+    Without this, indented surgical rewrite artifacts (method bodies with
+    4-space indent) silently return no methods, causing false consistency
+    failures (V2-F6a).
+    """
     methods: dict[str, str | None] = {}
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
+    for attempt in [
+        content,
+        textwrap.dedent(content),
+        "class _:\n    " + content.replace("\n", "\n    "),
+    ]:
+        try:
+            tree = ast.parse(attempt)
+            break
+        except SyntaxError:
+            continue
+    else:
         return methods
 
     for node in ast.walk(tree):
@@ -494,6 +508,7 @@ def _extract_method_calls(content: str) -> list[tuple[str, str]]:
 def check_cross_artifact_consistency(
     artifacts: list[dict],
     artifact_checks: list[ArtifactCheck] | None = None,
+    structural_index: str = "",
 ) -> list[ConsistencyResult]:
     """Check consistency across artifacts.
 
@@ -501,8 +516,19 @@ def check_cross_artifact_consistency(
     from method-name agreement checks.  An unparseable artifact reports
     no methods, so any caller would fail — but that's a parse failure,
     not a consistency error.  Don't double-count.
+
+    If structural_index is provided, method calls to methods that exist
+    in the real codebase are skipped — they're not consistency errors,
+    they're calls to existing code that the artifact doesn't redefine.
     """
     results: list[ConsistencyResult] = []
+
+    # Build set of methods known in the real codebase (V2-F6a fix)
+    codebase_methods: set[str] = set()
+    if structural_index:
+        from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+        lookup = StructuralIndexLookup(structural_index)
+        codebase_methods = lookup._all_method_names | lookup._all_function_names
 
     # Track which files are unparseable (skip them as targets)
     unparseable: set[str] = set()
@@ -529,15 +555,21 @@ def check_cross_artifact_consistency(
 
     for caller_file, calls in called_methods.items():
         for obj_name, method_name in calls:
-            # Skip common builtins/stdlib
-            if method_name.startswith("__") or obj_name in (
+            # Skip common builtins/stdlib and private methods.
+            # Private methods (_foo) are internal implementation details,
+            # not part of the cross-artifact interface contract.
+            if method_name.startswith("_") or obj_name in (
                 "self", "json", "os", "re", "logging", "logger", "asyncio",
                 "str", "list", "dict", "set", "Path",
             ):
                 continue
             # Check if any artifact defines this method
             if method_name not in all_defined:
-                # Could be from the existing codebase — not necessarily a consistency error.
+                # Skip methods that exist in the real codebase — surgical
+                # rewrites copy existing code that calls real methods.
+                # These aren't consistency errors.
+                if method_name in codebase_methods:
+                    continue
                 # Only flag if the object name matches another artifact's class/module.
                 for target_file, target_methods in defined_methods.items():
                     if target_file == caller_file:
@@ -712,7 +744,7 @@ def run_deterministic_checks(
 
     # 3. Cross-artifact consistency
     consistency_checks = check_cross_artifact_consistency(
-        artifact_dicts, artifact_checks
+        artifact_dicts, artifact_checks, structural_index
     )
 
     # Score calculation
