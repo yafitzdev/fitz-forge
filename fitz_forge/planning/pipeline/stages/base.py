@@ -380,7 +380,8 @@ class PipelineStage(ABC):
         ]
         t2 = time.monotonic()
         json_output = await generate(
-            client, messages=extract_messages,
+            client,
+            messages=extract_messages,
             max_tokens=4096,
         )
         t3 = time.monotonic()
@@ -495,7 +496,8 @@ class PipelineStage(ABC):
         try:
             t0 = time.monotonic()
             raw = await generate(
-                client, messages=extract_messages,
+                client,
+                messages=extract_messages,
                 max_tokens=4096,
             )
             t1 = time.monotonic()
@@ -514,7 +516,8 @@ class PipelineStage(ABC):
                     )
                     t0 = time.monotonic()
                     raw = await generate(
-                        client, messages=extract_messages,
+                        client,
+                        messages=extract_messages,
                         max_tokens=4096,
                     )
                     t1 = time.monotonic()
@@ -824,7 +827,8 @@ class PipelineStage(ABC):
         ]
         try:
             return await generate(
-                client, messages=messages,
+                client,
+                messages=messages,
                 temperature=0,
                 max_tokens=4096,
             )

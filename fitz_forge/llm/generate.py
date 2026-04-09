@@ -165,8 +165,7 @@ async def generate(
     if max_tokens is not None and effective_max < max_tokens:
         prompt_est = _estimate_prompt_tokens(messages)
         logger.info(
-            "generate: capped max_tokens %d -> %d "
-            "(context=%s, prompt~%d tok)",
+            "generate: capped max_tokens %d -> %d (context=%s, prompt~%d tok)",
             max_tokens,
             effective_max,
             getattr(client, "context_size", "?"),

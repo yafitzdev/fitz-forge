@@ -603,34 +603,28 @@ def _decompose_multi_handler_artifacts(
         relevant_text = ""
         for r in resolutions:
             res_text = (
-                r.get("decision", "")
-                + " "
-                + " ".join(r.get("constraints_for_downstream", []))
+                r.get("decision", "") + " " + " ".join(r.get("constraints_for_downstream", []))
             )
-            if filename in res_text or any(
-                fn in res_text for fn in route_handlers.values()
-            ):
+            if filename in res_text or any(fn in res_text for fn in route_handlers.values()):
                 relevant_text += " " + res_text
 
         # Extract new streaming/variant endpoint paths from decisions
         # Patterns like: /query/stream, /chat/stream, query_stream, chat_stream
         path_endpoints = _re.findall(
-            r"/(\w+)/(stream|ws|async|sse)\b", relevant_text.lower(),
+            r"/(\w+)/(stream|ws|async|sse)\b",
+            relevant_text.lower(),
         )
         # Also match function-name patterns: query_stream, chat_stream
         func_endpoints = _re.findall(
-            r"\b(\w+)_(stream|streaming|ws|async|sse)\b", relevant_text.lower(),
+            r"\b(\w+)_(stream|streaming|ws|async|sse)\b",
+            relevant_text.lower(),
         )
         # Filter func_endpoints to only those matching existing route handlers
         handler_names = set(route_handlers.values())
         func_endpoints = [
-            (base, suffix)
-            for base, suffix in func_endpoints
-            if base in handler_names
+            (base, suffix) for base, suffix in func_endpoints if base in handler_names
         ]
-        new_endpoints: list[tuple[str, str]] = list(dict.fromkeys(
-            path_endpoints + func_endpoints
-        ))
+        new_endpoints: list[tuple[str, str]] = list(dict.fromkeys(path_endpoints + func_endpoints))
 
         if len(new_endpoints) < 2:
             # Only one new endpoint — no need to decompose
@@ -647,16 +641,10 @@ def _decompose_multi_handler_artifacts(
                 continue
 
             new_path = f"/{base_path_segment}/{variant_suffix}"
-            sub_purpose = (
-                f"add {new_path} endpoint "
-                f"(streaming variant of {base_func}())"
-            )
+            sub_purpose = f"add {new_path} endpoint (streaming variant of {base_func}())"
             result.append((filename, sub_purpose))
             decomposed = True
-            logger.info(
-                f"F25 decompose: {filename} -> {new_path} "
-                f"(ref: {base_func}())"
-            )
+            logger.info(f"F25 decompose: {filename} -> {new_path} (ref: {base_func}())")
 
         if not decomposed:
             # Couldn't match — keep original
@@ -786,8 +774,24 @@ def _extract_reference_method(
 
     # Find which source methods are mentioned in the purpose text.
     # Check purpose first; fall back to decisions if nothing found.
-    _NOISE = {"self", "the", "a", "an", "this", "add", "new", "method",
-              "to", "of", "for", "with", "from", "into", "and", "or"}
+    _NOISE = {
+        "self",
+        "the",
+        "a",
+        "an",
+        "this",
+        "add",
+        "new",
+        "method",
+        "to",
+        "of",
+        "for",
+        "with",
+        "from",
+        "into",
+        "and",
+        "or",
+    }
     target_methods: list[str] = []
 
     for text in [purpose, relevant_decisions or ""]:
@@ -1710,15 +1714,16 @@ class SynthesisStage(PipelineStage):
             return ""
 
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
         lookup = StructuralIndexLookup(full_index)
 
         # Find class names mentioned in decision text
         import re as _re
+
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
         decision_text = " ".join(
-            r.get("decision", "") + " " + r.get("reasoning", "")
-            for r in resolutions
+            r.get("decision", "") + " " + r.get("reasoning", "") for r in resolutions
         )
 
         # Extract CamelCase class names
@@ -1749,10 +1754,14 @@ class SynthesisStage(PipelineStage):
     def _extract_referenced_files(reasoning: str) -> set[str]:
         """Extract file paths mentioned in reasoning text."""
         import re as _re
+
         # Match patterns like fitz_sage/foo/bar.py or api/routes/query.py
-        paths = set(_re.findall(
-            r"\b((?:[\w-]+/)+[\w-]+\.py)\b", reasoning,
-        ))
+        paths = set(
+            _re.findall(
+                r"\b((?:[\w-]+/)+[\w-]+\.py)\b",
+                reasoning,
+            )
+        )
         return paths
 
     @staticmethod
@@ -1776,10 +1785,7 @@ class SynthesisStage(PipelineStage):
                 # Extract path from header
                 header_path = line[3:].strip()
                 # Check if any referenced file matches this section
-                keep = any(
-                    ref in header_path or header_path in ref
-                    for ref in referenced_files
-                )
+                keep = any(ref in header_path or header_path in ref for ref in referenced_files)
             elif line.startswith("## ") and "/" not in line:
                 # Non-file section (e.g. "## Structural Overview") — keep
                 keep = True
@@ -2145,7 +2151,10 @@ class SynthesisStage(PipelineStage):
         # artifacts when the source file has multiple route handlers and
         # the decisions reference multiple new endpoints for that file.
         artifact_specs = _decompose_multi_handler_artifacts(
-            artifact_specs, resolutions, source_dir, file_contents,
+            artifact_specs,
+            resolutions,
+            source_dir,
+            file_contents,
         )
 
         # Build compact decision summary for injection
@@ -2240,10 +2249,7 @@ class SynthesisStage(PipelineStage):
                     )
 
         if len(seen) < len(artifacts):
-            logger.info(
-                f"Stage 'synthesis': dedup {len(artifacts)} -> "
-                f"{len(seen)} artifacts"
-            )
+            logger.info(f"Stage 'synthesis': dedup {len(artifacts)} -> {len(seen)} artifacts")
         artifacts = list(seen.values())
 
         return artifacts
@@ -2578,7 +2584,6 @@ class SynthesisStage(PipelineStage):
         # Identify the return/yield point in the reference — the line
         # that produces the final output and should be changed.
         import ast as _ast
-        import re as _re
 
         output_line = ""
         try:
@@ -2633,7 +2638,8 @@ class SynthesisStage(PipelineStage):
             t0 = time.monotonic()
             safe = filename.replace("/", "_").replace("\\", "_")
             raw = await generate(
-                client, messages=messages,
+                client,
+                messages=messages,
                 max_tokens=8192,
                 label=f"artifact_surgical_{safe}",
             )
@@ -2647,10 +2653,12 @@ class SynthesisStage(PipelineStage):
                 trace.mkdir(parents=True, exist_ok=True)
                 safe = filename.replace("/", "_").replace("\\", "_")
                 (trace / f"{safe}_surgical_prompt.txt").write_text(
-                    prompt, encoding="utf-8",
+                    prompt,
+                    encoding="utf-8",
                 )
                 (trace / f"{safe}_surgical_response.txt").write_text(
-                    raw, encoding="utf-8",
+                    raw,
+                    encoding="utf-8",
                 )
 
             data = extract_json(raw)
@@ -2674,10 +2682,7 @@ class SynthesisStage(PipelineStage):
             }
 
         except Exception as e:
-            logger.warning(
-                f"Stage 'synthesis': surgical rewrite for "
-                f"{filename} failed: {e}"
-            )
+            logger.warning(f"Stage 'synthesis': surgical rewrite for {filename} failed: {e}")
             return None
 
     async def _generate_single_artifact(
@@ -2780,7 +2785,10 @@ class SynthesisStage(PipelineStage):
             pipeline_steps = _extract_pipeline_constraint(reference_body)
             if pipeline_steps:  # has 3+ pipeline steps
                 result = await self._surgical_rewrite_artifact(
-                    client, filename, purpose, reference_body,
+                    client,
+                    filename,
+                    purpose,
+                    reference_body,
                 )
                 if result:
                     logger.info(
@@ -2942,7 +2950,8 @@ class SynthesisStage(PipelineStage):
             t0 = time.monotonic()
             safe = filename.replace("/", "_").replace("\\", "_")
             raw = await generate(
-                client, messages=messages,
+                client,
+                messages=messages,
                 max_tokens=4096,
                 label=f"artifact_{safe}",
             )
@@ -2956,10 +2965,12 @@ class SynthesisStage(PipelineStage):
                 trace.mkdir(parents=True, exist_ok=True)
                 safe = filename.replace("/", "_").replace("\\", "_")
                 (trace / f"{safe}_prompt.txt").write_text(
-                    prompt, encoding="utf-8",
+                    prompt,
+                    encoding="utf-8",
                 )
                 (trace / f"{safe}_response.txt").write_text(
-                    raw, encoding="utf-8",
+                    raw,
+                    encoding="utf-8",
                 )
 
             data = extract_json(raw)
@@ -3035,8 +3046,14 @@ class SynthesisStage(PipelineStage):
 
         for attempt in range(1 + max_retries):
             artifact = await self._generate_single_artifact(
-                client, filename, purpose, source, relevant_decisions,
-                reasoning, prior_outputs, prior_artifact_sigs,
+                client,
+                filename,
+                purpose,
+                source,
+                relevant_decisions,
+                reasoning,
+                prior_outputs,
+                prior_artifact_sigs,
             )
             if not artifact or not lookup:
                 return artifact
@@ -3047,8 +3064,7 @@ class SynthesisStage(PipelineStage):
                 return artifact
 
             desc = ", ".join(
-                f"{v.kind}: {v.symbol}" if v.symbol else v.kind
-                for v in violations[:5]
+                f"{v.kind}: {v.symbol}" if v.symbol else v.kind for v in violations[:5]
             )
             if attempt < max_retries:
                 logger.warning(
@@ -3463,8 +3479,8 @@ class SynthesisStage(PipelineStage):
 
         Zero LLM cost — purely deterministic.
         """
-        from difflib import SequenceMatcher
         import re as _re
+        from difflib import SequenceMatcher
 
         if len(resolutions) <= 3:
             return resolutions
@@ -3536,21 +3552,21 @@ class SynthesisStage(PipelineStage):
                 for c in r.get("constraints_for_downstream", []):
                     is_dup = False
                     for existing in all_constraints:
-                        if SequenceMatcher(
-                            None, c.lower(), existing.lower()
-                        ).ratio() >= 0.75:
+                        if SequenceMatcher(None, c.lower(), existing.lower()).ratio() >= 0.75:
                             is_dup = True
                             break
                     if not is_dup:
                         all_constraints.append(c)
 
             merged_id = "+".join(all_ids)
-            result.append({
-                "decision_id": merged_id,
-                "decision": leader.get("decision", ""),
-                "evidence": all_evidence,
-                "constraints_for_downstream": all_constraints,
-            })
+            result.append(
+                {
+                    "decision_id": merged_id,
+                    "decision": leader.get("decision", ""),
+                    "evidence": all_evidence,
+                    "constraints_for_downstream": all_constraints,
+                }
+            )
 
         n_merged = len(resolutions) - len(result)
         if n_merged > 0:
@@ -3607,7 +3623,8 @@ class SynthesisStage(PipelineStage):
                 try:
                     t0 = time.monotonic()
                     r = await generate(
-                        client, messages=messages,
+                        client,
+                        messages=messages,
                         temperature=0.7,
                         label=f"synthesis_reasoning_{i + 1}",
                     )
@@ -3680,7 +3697,8 @@ class SynthesisStage(PipelineStage):
             referenced_files = self._extract_referenced_files(design_reasoning)
             if referenced_files:
                 trimmed_context = self._trim_context_to_files(
-                    krag_context, referenced_files,
+                    krag_context,
+                    referenced_files,
                 )
                 if len(trimmed_context) < len(krag_context) * 0.85:
                     # Only refine if we actually trimmed significantly
@@ -3693,13 +3711,15 @@ class SynthesisStage(PipelineStage):
                     orig_context = prior_outputs.get("_gathered_context", "")
                     prior_outputs["_gathered_context"] = trimmed_context
                     refined_messages = self.build_prompt(
-                        job_description, prior_outputs,
+                        job_description,
+                        prior_outputs,
                     )
                     prior_outputs["_gathered_context"] = orig_context
 
                     t0_ref = time.monotonic()
                     refined = await generate(
-                        client, messages=refined_messages,
+                        client,
+                        messages=refined_messages,
                         temperature=0.7,
                     )
                     t1_ref = time.monotonic()
@@ -3710,7 +3730,8 @@ class SynthesisStage(PipelineStage):
 
                     # Use refined reasoning if it scores well
                     ref_score, ref_breakdown = self._score_reasoning(
-                        refined, resolutions,
+                        refined,
+                        resolutions,
                     )
                     orig_score = candidates[0][0]
                     if ref_score >= orig_score * 0.9:
@@ -3737,7 +3758,8 @@ class SynthesisStage(PipelineStage):
             rr_messages = self._make_messages(rr_prompt)
             t0_rr = time.monotonic()
             roadmap_risk_reasoning = await generate(
-                client, messages=rr_messages,
+                client,
+                messages=rr_messages,
                 temperature=0.7,
             )
             t1_rr = time.monotonic()

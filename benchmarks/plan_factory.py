@@ -95,19 +95,20 @@ def _results_dir(label: str) -> Path:
 # Retrieval benchmark
 # ------------------------------------------------------------------
 
+
 async def _run_retrieval_once(
     source_dir: str,
     query: str,
     run_id: int,
 ) -> dict:
     """Run a single retrieval and return metadata."""
+    from fitz_sage.code import CodeRetriever
+
     from fitz_forge.config import load_config
     from fitz_forge.llm.factory import create_llm_client
     from fitz_forge.planning.agent.gatherer import (
-        AgentContextGatherer,
         _make_chat_factory,
     )
-    from fitz_sage.code import CodeRetriever
 
     config = load_config()
     client = create_llm_client(config)
@@ -211,15 +212,15 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
 
     # Timing
     times = [r["elapsed_s"] for r in results]
-    lines.append(f"## Timing")
+    lines.append("## Timing")
     lines.append(f"- Min: {min(times):.1f}s")
     lines.append(f"- Max: {max(times):.1f}s")
-    lines.append(f"- Avg: {sum(times)/len(times):.1f}s\n")
+    lines.append(f"- Avg: {sum(times) / len(times):.1f}s\n")
 
     # File count consistency
     totals = [r["total_files"] for r in results]
     scans = [len(r["scan_hits"]) for r in results]
-    lines.append(f"## File Counts")
+    lines.append("## File Counts")
     lines.append(f"- Total files: {min(totals)}-{max(totals)}")
     lines.append(f"- Scan hits: {min(scans)}-{max(scans)}\n")
 
@@ -230,8 +231,8 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
             hit_freq[f] = hit_freq.get(f, 0) + 1
 
     lines.append(f"## Scan Hit Frequency (across {len(results)} runs)")
-    lines.append(f"| File | Hits | % |")
-    lines.append(f"|------|------|---|")
+    lines.append("| File | Hits | % |")
+    lines.append("|------|------|---|")
     for path, count in sorted(hit_freq.items(), key=lambda x: -x[1]):
         pct = 100 * count / len(results)
         lines.append(f"| {path} | {count}/{len(results)} | {pct:.0f}% |")
@@ -242,9 +243,9 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
         for f in r["all_files"]:
             all_freq[f] = all_freq.get(f, 0) + 1
 
-    lines.append(f"\n## All Selected Files Frequency")
-    lines.append(f"| File | Hits | % | Signal |")
-    lines.append(f"|------|------|---|--------|")
+    lines.append("\n## All Selected Files Frequency")
+    lines.append("| File | Hits | % | Signal |")
+    lines.append("|------|------|---|--------|")
     # Determine most common signal per file
     signal_map: dict[str, str] = {}
     for r in results:
@@ -269,9 +270,9 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
         "fitz_sage/engines/fitz_krag/query_analyzer.py",
         "fitz_sage/retrieval/detection/registry.py",
     ]
-    lines.append(f"\n## Critical File Discovery")
-    lines.append(f"| File | Found | % |")
-    lines.append(f"|------|-------|---|")
+    lines.append("\n## Critical File Discovery")
+    lines.append("| File | Found | % |")
+    lines.append("|------|-------|---|")
     for cf in critical_files:
         found = all_freq.get(cf, 0)
         pct = 100 * found / len(results)
@@ -285,6 +286,7 @@ def _print_retrieval_summary(results: list[dict], out_dir: Path) -> None:
 # ------------------------------------------------------------------
 # Reasoning benchmark
 # ------------------------------------------------------------------
+
 
 async def _run_reasoning_once(
     source_dir: str,
@@ -329,7 +331,8 @@ async def _run_reasoning_once(
         RoadmapRiskStage(split_reasoning=split_reasoning),
     ]
     pipeline = PlanningPipeline(
-        stages=stages, checkpoint_manager=_NullCheckpointManager(),
+        stages=stages,
+        checkpoint_manager=_NullCheckpointManager(),
     )
     job_id = f"bench_{run_id:03d}"
 
@@ -359,10 +362,7 @@ async def _run_reasoning_once(
     plan_text = ""
     if result.success:
         # Save raw outputs as JSON (avoids PlanOutput/PlanRenderer coupling)
-        plan_data = {
-            k: v for k, v in result.outputs.items()
-            if not k.startswith("_")
-        }
+        plan_data = {k: v for k, v in result.outputs.items() if not k.startswith("_")}
         plan_text = json.dumps(plan_data, indent=2, default=str)
         plan_file = out_dir / f"plan_{run_id:02d}.json"
         plan_file.write_text(plan_text)
@@ -414,7 +414,11 @@ def reasoning(
         for i in range(runs):
             logger.info(f"--- Reasoning run {i + 1}/{runs} ---")
             result = await _run_reasoning_once(
-                source_dir, query, context, i + 1, out_dir,
+                source_dir,
+                query,
+                context,
+                i + 1,
+                out_dir,
                 split_reasoning=split,
                 max_seed_files=max_seeds,
             )
@@ -441,23 +445,21 @@ def _print_reasoning_summary(results: list[dict], out_dir: Path) -> None:
     # Timing
     times = [r["elapsed_s"] for r in results if r["success"]]
     if times:
-        lines.append(f"## Timing")
+        lines.append("## Timing")
         lines.append(f"- Min: {min(times):.0f}s")
         lines.append(f"- Max: {max(times):.0f}s")
-        lines.append(f"- Avg: {sum(times)/len(times):.0f}s\n")
+        lines.append(f"- Avg: {sum(times) / len(times):.0f}s\n")
 
     # Success rate
     successes = sum(1 for r in results if r["success"])
     lines.append(f"## Success: {successes}/{len(results)}\n")
 
     # Architecture decisions
-    lines.append(f"## Architecture Decisions")
-    lines.append(f"| Run | Recommended | Time | Size |")
-    lines.append(f"|-----|-------------|------|------|")
+    lines.append("## Architecture Decisions")
+    lines.append("| Run | Recommended | Time | Size |")
+    lines.append("|-----|-------------|------|------|")
     for r in results:
-        lines.append(
-            f"| {r['run']} | {r['recommended']} | {r['elapsed_s']}s | {r['plan_size']}B |"
-        )
+        lines.append(f"| {r['run']} | {r['recommended']} | {r['elapsed_s']}s | {r['plan_size']}B |")
 
     # Decision frequency
     decisions: dict[str, int] = {}
@@ -465,9 +467,9 @@ def _print_reasoning_summary(results: list[dict], out_dir: Path) -> None:
         if r["success"]:
             decisions[r["recommended"]] = decisions.get(r["recommended"], 0) + 1
 
-    lines.append(f"\n## Decision Frequency")
-    lines.append(f"| Approach | Count | % |")
-    lines.append(f"|----------|-------|---|")
+    lines.append("\n## Decision Frequency")
+    lines.append("| Approach | Count | % |")
+    lines.append("|----------|-------|---|")
     for approach, count in sorted(decisions.items(), key=lambda x: -x[1]):
         pct = 100 * count / len(results)
         lines.append(f"| {approach} | {count} | {pct:.0f}% |")
@@ -479,9 +481,9 @@ def _print_reasoning_summary(results: list[dict], out_dir: Path) -> None:
             stage_keys.update(r["stage_timings"].keys())
 
     if stage_keys:
-        lines.append(f"\n## Avg Stage Timings")
-        lines.append(f"| Stage | Avg | Min | Max |")
-        lines.append(f"|-------|-----|-----|-----|")
+        lines.append("\n## Avg Stage Timings")
+        lines.append("| Stage | Avg | Min | Max |")
+        lines.append("|-------|-----|-----|-----|")
         for key in sorted(stage_keys):
             vals = [
                 r["stage_timings"][key]
@@ -490,7 +492,7 @@ def _print_reasoning_summary(results: list[dict], out_dir: Path) -> None:
             ]
             if vals:
                 lines.append(
-                    f"| {key} | {sum(vals)/len(vals):.0f}s | {min(vals):.0f}s | {max(vals):.0f}s |"
+                    f"| {key} | {sum(vals) / len(vals):.0f}s | {min(vals):.0f}s | {max(vals):.0f}s |"
                 )
 
     summary = "\n".join(lines)
@@ -550,10 +552,7 @@ async def _run_decomposed_once(
 
     plan_text = ""
     if result.success:
-        plan_data = {
-            k: v for k, v in result.outputs.items()
-            if not k.startswith("_")
-        }
+        plan_data = {k: v for k, v in result.outputs.items() if not k.startswith("_")}
         plan_text = json.dumps(plan_data, indent=2, default=str)
         plan_file = out_dir / f"plan_{run_id:02d}.json"
         plan_file.write_text(plan_text)
@@ -569,9 +568,7 @@ async def _run_decomposed_once(
         "plan_size": len(plan_text),
         "stage_timings": result.stage_timings,
         "error": result.error,
-        "num_decisions": len(
-            result.outputs.get("decision_decomposition", {}).get("decisions", [])
-        ),
+        "num_decisions": len(result.outputs.get("decision_decomposition", {}).get("decisions", [])),
     }
 
 
@@ -585,13 +582,19 @@ def decomposed(
         help="Job description / query",
     ),
     score_plans: bool = typer.Option(
-        False, "--score", help="Prepare scoring prompts after generation",
+        False,
+        "--score",
+        help="Prepare scoring prompts after generation",
     ),
     score_v2: bool = typer.Option(
-        False, "--score-v2", help="Run Scorer V2 (deterministic + taxonomy prompts)",
+        False,
+        "--score-v2",
+        help="Run Scorer V2 (deterministic + taxonomy prompts)",
     ),
     parallel_runs: int = typer.Option(
-        1, "--parallel-runs", "-p",
+        1,
+        "--parallel-runs",
+        "-p",
         help="Run N plans concurrently (requires LM Studio --parallel N)",
     ),
 ):
@@ -600,14 +603,20 @@ def decomposed(
     out_dir = _results_dir("decomposed")
     logger.info(f"Running {runs} decomposed benchmarks -> {out_dir}")
     if parallel_runs > 1:
-        logger.info(f"Parallel runs: {parallel_runs} (ensure LM Studio loaded with --parallel {parallel_runs})")
+        logger.info(
+            f"Parallel runs: {parallel_runs} (ensure LM Studio loaded with --parallel {parallel_runs})"
+        )
 
     all_results = []
 
     async def _run_one(i: int) -> dict:
         logger.info(f"--- Decomposed run {i + 1}/{runs} ---")
         result = await _run_decomposed_once(
-            source_dir, query, context, i + 1, out_dir,
+            source_dir,
+            query,
+            context,
+            i + 1,
+            out_dir,
         )
         run_file = out_dir / f"run_{i + 1:02d}.json"
         run_file.write_text(json.dumps(result, indent=2))
@@ -623,12 +632,8 @@ def decomposed(
             batch_end = min(batch_start + parallel_runs, runs)
             batch_indices = list(range(batch_start, batch_end))
             if len(batch_indices) > 1:
-                logger.info(
-                    f"Starting batch: runs {[i + 1 for i in batch_indices]}"
-                )
-            results = await asyncio.gather(
-                *[_run_one(i) for i in batch_indices]
-            )
+                logger.info(f"Starting batch: runs {[i + 1 for i in batch_indices]}")
+            results = await asyncio.gather(*[_run_one(i) for i in batch_indices])
             all_results.extend(results)
 
     asyncio.run(_run_all())
@@ -647,6 +652,7 @@ def decomposed(
 # Sonnet-as-Judge scoring (prompt preparation)
 # ------------------------------------------------------------------
 
+
 def _prepare_scoring(
     results_dir: str,
     source_dir: str,
@@ -658,11 +664,13 @@ def _prepare_scoring(
 
     plan_dir = Path(results_dir)
     prompts = prepare_batch(
-        plan_dir, query, structural_index, Path(source_dir),
+        plan_dir,
+        query,
+        structural_index,
+        Path(source_dir),
     )
     logger.info(
-        f"Wrote {len(prompts)} scoring prompts to {plan_dir}. "
-        f"Score them via Claude Code subagents."
+        f"Wrote {len(prompts)} scoring prompts to {plan_dir}. Score them via Claude Code subagents."
     )
 
 
@@ -694,6 +702,7 @@ def prepare_scoring(
 # Scorer V2 (deterministic + taxonomy)
 # ------------------------------------------------------------------
 
+
 def _prepare_scoring_v2(
     results_dir: str,
     query: str,
@@ -701,7 +710,7 @@ def _prepare_scoring_v2(
     source_dir: str = "",
 ) -> None:
     """Run Scorer V2: deterministic checks + taxonomy prompts."""
-    from .eval_v2 import score_batch_deterministic, format_batch_report, _find_plan_files
+    from .eval_v2 import _find_plan_files, format_batch_report, score_batch_deterministic
     from .eval_v2_deterministic import run_deterministic_checks
     from .eval_v2_taxonomy import build_taxonomy_prompt, load_taxonomy
 
@@ -714,9 +723,7 @@ def _prepare_scoring_v2(
         tax_files = taxonomy_def.required_files or None
 
     # Run deterministic scoring
-    batch = score_batch_deterministic(
-        plan_dir, structural_index, query, tax_files, source_dir
-    )
+    batch = score_batch_deterministic(plan_dir, structural_index, query, tax_files, source_dir)
 
     # Generate taxonomy prompts
     if taxonomy_path.exists():
@@ -724,12 +731,13 @@ def _prepare_scoring_v2(
             plan_data = json.loads(pf.read_text(encoding="utf-8"))
             plan_json = json.dumps(plan_data, indent=2, default=str)
             det_report = run_deterministic_checks(
-                plan_data, structural_index, task_requires_streaming=True,
-                taxonomy_files=tax_files, source_dir=source_dir,
+                plan_data,
+                structural_index,
+                task_requires_streaming=True,
+                taxonomy_files=tax_files,
+                source_dir=source_dir,
             )
-            prompt = build_taxonomy_prompt(
-                plan_json, det_report, taxonomy_def, structural_index
-            )
+            prompt = build_taxonomy_prompt(plan_json, det_report, taxonomy_def, structural_index)
             num = pf.stem.replace("plan_", "")
             prompt_path = plan_dir / f"score_v2_prompt_{num}.md"
             prompt_path.write_text(prompt, encoding="utf-8")
@@ -881,10 +889,7 @@ async def _run_replay_once(
 
     plan_text = ""
     if result.success:
-        plan_data = {
-            k: v for k, v in result.outputs.items()
-            if not k.startswith("_")
-        }
+        plan_data = {k: v for k, v in result.outputs.items() if not k.startswith("_")}
         plan_text = json.dumps(plan_data, indent=2, default=str)
         plan_file = out_dir / "plan_replay.json"
         plan_file.write_text(plan_text)
@@ -909,7 +914,8 @@ async def _run_replay_once(
 @app.command("replay")
 def replay_cmd(
     snapshot: str = typer.Option(
-        ..., help="Path to snapshot JSON (e.g. traces_03/snapshot_after_decision_decomposition.json)",
+        ...,
+        help="Path to snapshot JSON (e.g. traces_03/snapshot_after_decision_decomposition.json)",
     ),
     source_dir: str = typer.Option(..., "--source-dir", help="Target codebase"),
     context_file: str = typer.Option(..., help="ideal_context.json"),
@@ -940,9 +946,7 @@ def replay_cmd(
     context = json.loads(Path(context_file).read_text())
     out_dir = snapshot_path.parent.parent  # traces_XX is inside the results dir
 
-    result = asyncio.run(
-        _run_replay_once(source_dir, query, context, snapshot_path, out_dir)
-    )
+    result = asyncio.run(_run_replay_once(source_dir, query, context, snapshot_path, out_dir))
 
     print(json.dumps(result, indent=2))
 

@@ -145,23 +145,83 @@ def _count_violations_by_kind(violations: list[Violation], kind: str) -> int:
 _SELF_METHOD_RE = re.compile(r"self\.([a-zA-Z_]\w*)\s*\(")
 _CLASS_CTOR_RE = re.compile(r"\b([A-Z][a-zA-Z0-9_]*)\s*\(")
 # Names that look like classes but aren't (builtins, typing, common frameworks)
-_CLASS_SKIP = frozenset({
-    "True", "False", "None", "Any", "Optional", "Union", "List", "Dict",
-    "Set", "Tuple", "Type", "Callable", "Iterator", "Generator",
-    "AsyncGenerator", "AsyncIterator", "Sequence", "Mapping", "Iterable",
-    "BaseModel", "Field", "ConfigDict", "Path", "StreamingResponse",
-    "EventSourceResponse", "JSONResponse", "HTTPException", "Response",
-    "APIRouter", "Request", "Depends", "BackgroundTasks", "Body",
-    "Header", "Cookie", "Form", "File", "UploadFile",
-    "ThreadPoolExecutor", "ProcessPoolExecutor", "Lock", "Event",
-    "Thread", "Queue", "Enum", "IntEnum", "ABC",
-    "TypeVar", "ParamSpec", "Protocol", "Generic", "ClassVar",
-    "Final", "Literal", "Annotated", "NamedTuple", "TypedDict",
-    "Exception", "ValueError", "TypeError", "KeyError", "RuntimeError",
-    "AttributeError", "NotImplementedError", "StopIteration",
-    "OSError", "IOError", "FileNotFoundError", "ImportError", "IndexError",
-    "ConnectionError", "TimeoutError", "PermissionError",
-})
+_CLASS_SKIP = frozenset(
+    {
+        "True",
+        "False",
+        "None",
+        "Any",
+        "Optional",
+        "Union",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Type",
+        "Callable",
+        "Iterator",
+        "Generator",
+        "AsyncGenerator",
+        "AsyncIterator",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "BaseModel",
+        "Field",
+        "ConfigDict",
+        "Path",
+        "StreamingResponse",
+        "EventSourceResponse",
+        "JSONResponse",
+        "HTTPException",
+        "Response",
+        "APIRouter",
+        "Request",
+        "Depends",
+        "BackgroundTasks",
+        "Body",
+        "Header",
+        "Cookie",
+        "Form",
+        "File",
+        "UploadFile",
+        "ThreadPoolExecutor",
+        "ProcessPoolExecutor",
+        "Lock",
+        "Event",
+        "Thread",
+        "Queue",
+        "Enum",
+        "IntEnum",
+        "ABC",
+        "TypeVar",
+        "ParamSpec",
+        "Protocol",
+        "Generic",
+        "ClassVar",
+        "Final",
+        "Literal",
+        "Annotated",
+        "NamedTuple",
+        "TypedDict",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "RuntimeError",
+        "AttributeError",
+        "NotImplementedError",
+        "StopIteration",
+        "OSError",
+        "IOError",
+        "FileNotFoundError",
+        "ImportError",
+        "IndexError",
+        "ConnectionError",
+        "TimeoutError",
+        "PermissionError",
+    }
+)
 
 
 def _strip_comments(content: str) -> str:
@@ -230,11 +290,28 @@ def _regex_fabrication_scan(
         if method_name in local_defs:
             continue  # defined in this artifact
         if not lookup.method_exists_anywhere(method_name):
-            if method_name not in ("get", "set", "items", "keys", "values",
-                                    "append", "extend", "update", "pop",
-                                    "format", "join", "split", "strip",
-                                    "encode", "decode", "lower", "upper",
-                                    "startswith", "endswith", "replace"):
+            if method_name not in (
+                "get",
+                "set",
+                "items",
+                "keys",
+                "values",
+                "append",
+                "extend",
+                "update",
+                "pop",
+                "format",
+                "join",
+                "split",
+                "strip",
+                "encode",
+                "decode",
+                "lower",
+                "upper",
+                "startswith",
+                "endswith",
+                "replace",
+            ):
                 fab_self += 1
 
     # Check ClassName() constructors
@@ -308,9 +385,7 @@ def check_single_artifact(
     # If we recovered the content, re-run grounding checks on the
     # parseable version so fabrication detection actually works
     if recovered_content is not None:
-        violations = check_artifact(
-            {"filename": filename, "content": recovered_content}, lookup
-        )
+        violations = check_artifact({"filename": filename, "content": recovered_content}, lookup)
     else:
         violations = check_artifact(artifact, lookup)
 
@@ -318,9 +393,7 @@ def check_single_artifact(
     has_correct_return_type = None
 
     # Check for yield (only relevant for streaming-related files)
-    is_streaming_file = any(
-        filename.endswith(ind) for ind in _STREAMING_INDICATORS
-    )
+    is_streaming_file = any(filename.endswith(ind) for ind in _STREAMING_INDICATORS)
     if task_requires_streaming and is_streaming_file and tree is not None:
         has_yield = bool(_YIELD_RE.search(content))
 
@@ -349,7 +422,8 @@ def check_single_artifact(
     fab_field = _count_violations_by_kind(violations, "wrong_field")
     fab_class = _count_violations_by_kind(violations, "missing_class")
     fab_chained = sum(
-        1 for v in violations
+        1
+        for v in violations
         if v.kind == "missing_method" and "." in v.symbol and v.symbol.count(".") >= 2
     )
     fab_self -= fab_chained  # Don't double-count
@@ -407,7 +481,9 @@ def check_single_artifact(
 
     # Compute score
     total_weight = sum(w for _, _, w in weighted_checks)
-    score = sum(v * w for _, v, w in weighted_checks) / total_weight * 100 if total_weight > 0 else 0.0
+    score = (
+        sum(v * w for _, v, w in weighted_checks) / total_weight * 100 if total_weight > 0 else 0.0
+    )
 
     checks_passed = sum(1 for _, v, _ in weighted_checks if v >= 1.0)
     checks_total = len(weighted_checks)
@@ -448,10 +524,7 @@ def check_all_artifacts_v2(
         added = lookup.augment_from_source_dir(source_dir)
         if added:
             logger.info(f"Augmented index with {added} classes from {source_dir}")
-    return [
-        check_single_artifact(a, lookup, task_requires_streaming)
-        for a in artifacts
-    ]
+    return [check_single_artifact(a, lookup, task_requires_streaming) for a in artifacts]
 
 
 # ---------------------------------------------------------------------------
@@ -459,14 +532,10 @@ def check_all_artifacts_v2(
 # ---------------------------------------------------------------------------
 
 # Pattern: method call like service.answer_stream() or engine.query_stream()
-_METHOD_CALL_RE = re.compile(
-    r"(?:self\.)?(\w+)\.(\w+)\s*\("
-)
+_METHOD_CALL_RE = re.compile(r"(?:self\.)?(\w+)\.(\w+)\s*\(")
 
 # Pattern: return type annotation like -> Iterator[str]
-_RETURN_TYPE_RE = re.compile(
-    r"->\s*([A-Za-z_][\w\[\], ]*)"
-)
+_RETURN_TYPE_RE = re.compile(r"->\s*([A-Za-z_][\w\[\], ]*)")
 
 
 def _extract_method_definitions(content: str) -> dict[str, str | None]:
@@ -527,6 +596,7 @@ def check_cross_artifact_consistency(
     codebase_methods: set[str] = set()
     if structural_index:
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+
         lookup = StructuralIndexLookup(structural_index)
         codebase_methods = lookup._all_method_names | lookup._all_function_names
 
@@ -559,8 +629,18 @@ def check_cross_artifact_consistency(
             # Private methods (_foo) are internal implementation details,
             # not part of the cross-artifact interface contract.
             if method_name.startswith("_") or obj_name in (
-                "self", "json", "os", "re", "logging", "logger", "asyncio",
-                "str", "list", "dict", "set", "Path",
+                "self",
+                "json",
+                "os",
+                "re",
+                "logging",
+                "logger",
+                "asyncio",
+                "str",
+                "list",
+                "dict",
+                "set",
+                "Path",
             ):
                 continue
             # Check if any artifact defines this method
@@ -585,20 +665,22 @@ def check_cross_artifact_consistency(
                     if obj_clean.lower() == target_basename.lower():
                         # This artifact seems to reference the target — method should exist
                         available = sorted(target_methods.keys())
-                        results.append(ConsistencyResult(
-                            check="method_name_agreement",
-                            passed=False,
-                            detail=(
-                                f"{caller_file} calls {obj_name}.{method_name}() but "
-                                f"{target_file} defines: {', '.join(available) if available else '(no methods)'}"
-                            ),
-                        ))
+                        results.append(
+                            ConsistencyResult(
+                                check="method_name_agreement",
+                                passed=False,
+                                detail=(
+                                    f"{caller_file} calls {obj_name}.{method_name}() but "
+                                    f"{target_file} defines: {', '.join(available) if available else '(no methods)'}"
+                                ),
+                            )
+                        )
 
     # Check 2: Type agreement across artifacts
     # If one artifact returns Iterator[str], callers should handle Iterator[str]
     # (not AsyncGenerator or plain str)
     streaming_return_types: dict[str, str] = {}  # method_name -> return_type
-    for fn, methods in defined_methods.items():
+    for _fn, methods in defined_methods.items():
         for method_name, ret_type in methods.items():
             if ret_type and "stream" in method_name.lower():
                 streaming_return_types[method_name] = ret_type
@@ -613,7 +695,9 @@ def check_cross_artifact_consistency(
 
     # Also check for type conflicts on similar method names
     # e.g., answer_stream in engine vs query_stream in service
-    stream_base_types: dict[str, list[tuple[str, str, str]]] = {}  # "stream" -> [(file, method, type)]
+    stream_base_types: dict[
+        str, list[tuple[str, str, str]]
+    ] = {}  # "stream" -> [(file, method, type)]
     for fn, methods in defined_methods.items():
         for method_name, ret_type in methods.items():
             if ret_type and "stream" in method_name.lower():
@@ -642,58 +726,67 @@ def check_cross_artifact_consistency(
                 else:
                     normalized.add(t)
             if len(normalized) > 1:
-                results.append(ConsistencyResult(
-                    check="type_agreement",
-                    passed=False,
-                    detail=(
-                        f"Streaming methods have incompatible return types: "
-                        + ", ".join(
-                            f"{fn}:{method} -> {ret}" for fn, method, ret in entries
-                        )
-                    ),
-                ))
+                results.append(
+                    ConsistencyResult(
+                        check="type_agreement",
+                        passed=False,
+                        detail=(
+                            "Streaming methods have incompatible return types: "
+                            + ", ".join(f"{fn}:{method} -> {ret}" for fn, method, ret in entries)
+                        ),
+                    )
+                )
             else:
-                results.append(ConsistencyResult(
-                    check="type_agreement",
-                    passed=True,
-                    detail="Streaming return types are compatible",
-                ))
+                results.append(
+                    ConsistencyResult(
+                        check="type_agreement",
+                        passed=True,
+                        detail="Streaming return types are compatible",
+                    )
+                )
 
     # Check 3: No duplicate artifacts (same file, same content)
     seen: dict[str, str] = {}  # filename -> content hash
     for art in artifacts:
         fn = _normalize_artifact_filename(art.get("filename", ""))
         content = art.get("content", "").strip()
-        content_key = f"{fn}:{hash(content)}"
         if fn in seen and seen[fn] == hash(content):
-            results.append(ConsistencyResult(
-                check="no_duplicates",
-                passed=False,
-                detail=f"Duplicate artifact: {fn} appears with identical content",
-            ))
+            results.append(
+                ConsistencyResult(
+                    check="no_duplicates",
+                    passed=False,
+                    detail=f"Duplicate artifact: {fn} appears with identical content",
+                )
+            )
         elif fn in seen:
-            results.append(ConsistencyResult(
-                check="no_duplicates",
-                passed=False,
-                detail=f"Duplicate artifact: {fn} appears with DIFFERENT content (ambiguous)",
-            ))
+            results.append(
+                ConsistencyResult(
+                    check="no_duplicates",
+                    passed=False,
+                    detail=f"Duplicate artifact: {fn} appears with DIFFERENT content (ambiguous)",
+                )
+            )
         seen[fn] = hash(content)
 
     # If no duplicate check was added, add a passing one
     if not any(c.check == "no_duplicates" for c in results):
-        results.append(ConsistencyResult(
-            check="no_duplicates",
-            passed=True,
-            detail="No duplicate artifacts",
-        ))
+        results.append(
+            ConsistencyResult(
+                check="no_duplicates",
+                passed=True,
+                detail="No duplicate artifacts",
+            )
+        )
 
     # If no type agreement check was added, add a passing one
     if not any(c.check == "type_agreement" for c in results):
-        results.append(ConsistencyResult(
-            check="type_agreement",
-            passed=True,
-            detail="No streaming type conflicts detected",
-        ))
+        results.append(
+            ConsistencyResult(
+                check="type_agreement",
+                passed=True,
+                detail="No streaming type conflicts detected",
+            )
+        )
 
     return results
 
@@ -730,8 +823,7 @@ def run_deterministic_checks(
     # Get artifacts
     artifacts = plan_data.get("design", {}).get("artifacts", [])
     artifact_dicts = [
-        {"filename": a.get("filename", ""), "content": a.get("content", "")}
-        for a in artifacts
+        {"filename": a.get("filename", ""), "content": a.get("content", "")} for a in artifacts
     ]
 
     # 1. Completeness
@@ -757,9 +849,7 @@ def run_deterministic_checks(
         # Minimum weight of 10 lines so tiny artifacts aren't ignored.
         weights = [max(10, a.content_lines) for a in artifact_checks]
         total_weight = sum(weights)
-        artifact_mean = sum(
-            a.score * w for a, w in zip(artifact_checks, weights)
-        ) / total_weight
+        artifact_mean = sum(a.score * w for a, w in zip(artifact_checks, weights)) / total_weight
     else:
         artifact_mean = 0.0
     artifact_quality_score = round(artifact_mean * 0.5, 1)
@@ -771,9 +861,7 @@ def run_deterministic_checks(
         consistency_ratio = 1.0
     consistency_score = round(consistency_ratio * 20, 1)
 
-    deterministic_score = round(
-        completeness_score + artifact_quality_score + consistency_score, 1
-    )
+    deterministic_score = round(completeness_score + artifact_quality_score + consistency_score, 1)
 
     return DeterministicReport(
         completeness=completeness,

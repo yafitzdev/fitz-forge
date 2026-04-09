@@ -53,10 +53,7 @@ _PLAN_RE = re.compile(r"^plan_\d+\.json$")
 
 def _find_plan_files(plan_dir: Path) -> list[Path]:
     """Find canonical plan files (plan_NN.json only)."""
-    return sorted(
-        p for p in plan_dir.glob("plan_*.json")
-        if _PLAN_RE.match(p.name)
-    )
+    return sorted(p for p in plan_dir.glob("plan_*.json") if _PLAN_RE.match(p.name))
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +72,11 @@ def score_plan_deterministic(
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
 
     det_report = run_deterministic_checks(
-        plan_data, structural_index, task_requires_streaming=True,
-        taxonomy_files=taxonomy_files, source_dir=source_dir,
+        plan_data,
+        structural_index,
+        task_requires_streaming=True,
+        taxonomy_files=taxonomy_files,
+        source_dir=source_dir,
     )
 
     return PlanScoreV2(
@@ -102,7 +102,9 @@ def score_plan_full(
     taxonomy_def = load_taxonomy(taxonomy_path)
 
     det_report = run_deterministic_checks(
-        plan_data, structural_index, task_requires_streaming=True,
+        plan_data,
+        structural_index,
+        task_requires_streaming=True,
         taxonomy_files=taxonomy_def.required_files or None,
     )
 
@@ -143,9 +145,7 @@ def score_batch_deterministic(
 
     scores = []
     for pf in plan_files:
-        score = score_plan_deterministic(
-            pf, structural_index, query, taxonomy_files, source_dir
-        )
+        score = score_plan_deterministic(pf, structural_index, query, taxonomy_files, source_dir)
         scores.append(score)
 
     det_scores = [s.deterministic_score for s in scores]
@@ -195,8 +195,12 @@ def format_deterministic_report(score: PlanScoreV2) -> str:
 
     # Per-artifact
     lines.append("\n## Per-Artifact Checks")
-    lines.append("| File | Score | Parseable | Fab Self | Fab Chain | Fab Field | Fab Class | Yield | RetType | NotImpl | stdout |")
-    lines.append("|------|-------|-----------|----------|-----------|-----------|-----------|-------|---------|---------|--------|")
+    lines.append(
+        "| File | Score | Parseable | Fab Self | Fab Chain | Fab Field | Fab Class | Yield | RetType | NotImpl | stdout |"
+    )
+    lines.append(
+        "|------|-------|-----------|----------|-----------|-----------|-----------|-------|---------|---------|--------|"
+    )
     for ac in det.artifact_checks:
         yield_str = str(ac.has_yield) if ac.has_yield is not None else "-"
         ret_str = str(ac.has_correct_return_type) if ac.has_correct_return_type is not None else "-"
@@ -221,12 +225,15 @@ def format_batch_report(batch: BatchScoreV2) -> str:
     lines = [f"# Scorer V2 Batch ({batch.plans_scored} plans)\n"]
 
     lines.append("## Summary")
-    lines.append(f"- Deterministic avg: {batch.deterministic_average}/100 "
-                 f"(range: {batch.deterministic_min}-{batch.deterministic_max})")
+    lines.append(
+        f"- Deterministic avg: {batch.deterministic_average}/100 "
+        f"(range: {batch.deterministic_min}-{batch.deterministic_max})"
+    )
     if batch.taxonomy_average is not None:
         lines.append(f"- Taxonomy avg: {batch.taxonomy_average}/100")
-    lines.append(f"- Final avg: {batch.final_average}/100 "
-                 f"(range: {batch.final_min}-{batch.final_max})")
+    lines.append(
+        f"- Final avg: {batch.final_average}/100 (range: {batch.final_min}-{batch.final_max})"
+    )
 
     # Per-plan table
     lines.append("\n## Per-Plan Scores")
@@ -248,12 +255,17 @@ def format_batch_report(batch: BatchScoreV2) -> str:
     for s in batch.scores:
         all_missing.extend(s.deterministic.completeness.missing_required)
         for ac in s.deterministic.artifact_checks:
-            total_fab += ac.fabricated_self_methods + ac.fabricated_chained_methods + ac.fabricated_field_access
+            total_fab += (
+                ac.fabricated_self_methods
+                + ac.fabricated_chained_methods
+                + ac.fabricated_field_access
+            )
             if not ac.parseable:
                 total_parse_fail += 1
 
     if all_missing:
         from collections import Counter
+
         missing_counts = Counter(all_missing)
         lines.append("**Frequently missing required files:**")
         for f, count in missing_counts.most_common(5):
@@ -294,9 +306,7 @@ def cmd_deterministic(
         tax_def = load_taxonomy(tax_path)
         tax_files = tax_def.required_files or None
 
-    score = score_plan_deterministic(
-        Path(plan), structural_index, query, tax_files, source_dir
-    )
+    score = score_plan_deterministic(Path(plan), structural_index, query, tax_files, source_dir)
     report = format_deterministic_report(score)
     print(report, file=sys.stderr)
 
@@ -329,18 +339,12 @@ def cmd_taxonomy_prompt(
     plan_json = json.dumps(plan_data, indent=2, default=str)
 
     taxonomy_def = load_taxonomy(Path(taxonomy))
-    det_report = run_deterministic_checks(
-        plan_data, structural_index, task_requires_streaming=True
-    )
+    det_report = run_deterministic_checks(plan_data, structural_index, task_requires_streaming=True)
 
-    prompt = build_taxonomy_prompt(
-        plan_json, det_report, taxonomy_def, structural_index
-    )
+    prompt = build_taxonomy_prompt(plan_json, det_report, taxonomy_def, structural_index)
 
     # Write to file
-    out_path = Path(plan).with_name(
-        Path(plan).stem.replace("plan_", "score_v2_prompt_") + ".md"
-    )
+    out_path = Path(plan).with_name(Path(plan).stem.replace("plan_", "score_v2_prompt_") + ".md")
     out_path.write_text(prompt, encoding="utf-8")
     print(f"Wrote taxonomy prompt: {out_path} ({len(prompt)} chars)", file=sys.stderr)
 
@@ -367,9 +371,7 @@ def cmd_batch(
     tax_files = taxonomy_def.required_files or None
 
     # Run deterministic scoring
-    batch = score_batch_deterministic(
-        plan_dir, structural_index, query, tax_files, source_dir
-    )
+    batch = score_batch_deterministic(plan_dir, structural_index, query, tax_files, source_dir)
 
     # Generate taxonomy prompts for each plan
     for pf in _find_plan_files(plan_dir):
@@ -377,13 +379,14 @@ def cmd_batch(
         plan_json = json.dumps(plan_data, indent=2, default=str)
 
         det_report = run_deterministic_checks(
-            plan_data, structural_index, task_requires_streaming=True,
-            taxonomy_files=tax_files, source_dir=source_dir,
+            plan_data,
+            structural_index,
+            task_requires_streaming=True,
+            taxonomy_files=tax_files,
+            source_dir=source_dir,
         )
 
-        prompt = build_taxonomy_prompt(
-            plan_json, det_report, taxonomy_def, structural_index
-        )
+        prompt = build_taxonomy_prompt(plan_json, det_report, taxonomy_def, structural_index)
 
         num = pf.stem.replace("plan_", "")
         prompt_path = plan_dir / f"score_v2_prompt_{num}.md"

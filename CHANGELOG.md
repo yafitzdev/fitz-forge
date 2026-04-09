@@ -7,10 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.6.0] - 2026-04-09
+
+### 🎉 Highlights
+
+**V2 Deterministic Scorer** — Replaced Sonnet-as-Judge (V1) with a zero-cost deterministic scorer. Completeness (0-30) from taxonomy, artifact quality (0-50) via AST + regex fabrication detection, consistency (0-20) via cross-artifact method/type agreement. Same plan always gets the same score. Source-augmented structural index validates against the full codebase.
+
+**LLM Call Quality Layer** — Single `generate()` function (`fitz_forge/llm/generate.py`) wraps all 36 LLM call sites. Context-aware max_tokens capping (budget = context_size - prompt_tokens - 512), output sanitization, truncation detection + retry. Fabrications down 43% vs baseline.
+
+**Full LLM Provenance + Stage Replay** — Every `generate()` call writes a JSON trace (messages, output, timing). Stage snapshots saved after each pipeline stage. New `replay` command loads a snapshot and re-runs only the remaining stages — test pipeline changes without re-running the full 10-minute pipeline.
+
+**Scorer Accuracy: avg 90.0/100** — Three scorer fixes eliminated false consistency failures: parse recovery in method extraction, codebase method awareness (skip calls to existing methods), private method exclusion. First perfect 100/100 plan. 4/10 plans score 95+.
 
 ### 🚀 Added
 
+- V2 deterministic scorer: `benchmarks/eval_v2_deterministic.py` with completeness, artifact quality, consistency checks
+- V2 taxonomy framework: `benchmarks/streaming_taxonomy.json` for task-specific file requirements
+- `fitz_forge/llm/generate.py` — standalone generate function with budget cap, sanitization, truncation retry, provenance tracing
+- `configure_tracing(trace_dir)` / `get_trace_dir()` for opt-in JSON provenance per generate() call
+- Stage snapshots: `snapshot_after_{stage_name}.json` saved to trace dir after each pipeline stage
+- `replay` command in plan_factory: load snapshot, skip completed stages, re-run rest with real LLM
+- `_SnapshotCheckpointManager` for feeding saved state to orchestrator resume logic
+- Labeled LLM calls: `decomp_candidate_N`, `resolve_dN`, `synthesis_reasoning_N`, `artifact_surgical_*`, `artifact_*`
+- Decomp scorer: `ref_complete` criterion (15pts) — penalizes missing definition files in decisions
+- Per-criterion quality gates: each decomposition criterion must clear its minimum, retry up to 4 candidates
+- Consistency cascade fix: unparseable artifacts excluded as targets
+- Source-dir augmentation: `augment_from_source_dir()` scans full codebase, merges methods into index classes
+- Size-weighted artifact quality: larger artifacts carry more weight in the mean
+- Regex fabrication fallback: detect fabrications on unparseable code via string scan
+- Artifact dedup: removes duplicate filenames post-generation, keeps longest content
+- 8 failure pattern docs (`docs/v2-scoring/V2-F1` through `V2-F8`) with 5-why analysis
+- Benchmark tracker: `docs/v2-scoring/TRACKER.md` with run history, scoring formula, changelogs
 - Per-artifact generation with deterministic scoring (`3b8ef270`)
 - Class interface injection + deterministic repair for artifacts (`3acf4940`)
 - Type-aware deterministic repair — AST-based init attr extraction prevents false positives (`7e079300`)
@@ -35,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🔄 Changed
 
+- All 36 `client.generate()` call sites migrated to standalone `generate()` function
+- Reference method detection broadened: matches any method name in purpose text against source file (no verb pattern required, includes private methods)
+- Consistency checker uses structural index to skip calls to existing codebase methods
+- Private method calls (`_foo`) excluded from consistency checks
+- `_extract_method_definitions` uses parse recovery (dedent/class wrap) matching artifact checker
 - Compact synthesis prompts with budget-aware reasoning truncation (`8804d1e3`)
 - Sectioned extraction — roadmap/risk stages consume design output (`58aa3591`)
 - Reasoning compression for artifact prompts replaces hard truncation (`bbc6cf9a`)
@@ -42,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Fixed
 
+- Scorer: false consistency failures from unparseable surgical artifacts (V2-F6a)
+- Scorer: false consistency failures from calls to existing codebase methods (V2-F6b)
+- Scorer: false consistency failures from private method calls
+- Pipeline: fabrication on tangential files (instrumentation.py) due to narrow reference method regex
 - Reorder artifact prompt — rules+grounding FIRST, reasoning last (`91856485`)
 - Remove artificial caps, add budget-aware reasoning truncation (`9c23a62b`)
 - Skip known init attrs in type-aware repair to prevent false positives (`b538c970`)
@@ -51,9 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📊 Stats
 
-- Benchmark avg: 45.3/60 (up from 43.4 at v0.5.0), best individual: 53/60
-- Score progression: 40.1 → 40.6 → 42.5 → 42.7 → 45.3
-- 970+ tests
+- **V2 Scorer: avg 90.0/100** (range 77.1-100.0), 4/10 plans at 95+, first 100/100 plan
+- Run progression: 77.6 → 86.5 → 88.3 → 84.6 → **90.0** (runs 81-89)
+- Fabrications: 18 → 1 → 14 → 14 → **8** (runs 82-89)
+- Completeness: 30/30 on all plans since run 88
+- V1 Scorer (legacy): 45.3/60, best individual 53/60
+- 960+ tests
 
 ---
 
@@ -347,7 +386,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 391 tests
 
-[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/yafitzdev/fitz-forge/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.3.0...v0.4.0

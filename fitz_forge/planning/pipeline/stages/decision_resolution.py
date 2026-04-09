@@ -237,7 +237,8 @@ class DecisionResolutionStage(PipelineStage):
 
         try:
             raw = await generate(
-                client, messages=messages,
+                client,
+                messages=messages,
                 temperature=0,
                 max_tokens=1024,
             )
@@ -328,7 +329,8 @@ class DecisionResolutionStage(PipelineStage):
 
             try:
                 retry_raw = await generate(
-                    client, messages=messages,
+                    client,
+                    messages=messages,
                     temperature=0,
                     max_tokens=4096,
                 )
@@ -429,7 +431,8 @@ class DecisionResolutionStage(PipelineStage):
 
                 t0 = time.monotonic()
                 raw = await generate(
-                    client, messages=messages,
+                    client,
+                    messages=messages,
                     temperature=0,
                     max_tokens=4096,
                     label=f"resolve_{d_id}",

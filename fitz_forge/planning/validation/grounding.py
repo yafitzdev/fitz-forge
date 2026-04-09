@@ -249,9 +249,7 @@ class StructuralIndexLookup:
                             self._all_method_names.add(mname)
                         added += 1
 
-                elif isinstance(node, ast.FunctionDef) and isinstance(
-                    node, ast.FunctionDef
-                ):
+                elif isinstance(node, ast.FunctionDef) and isinstance(node, ast.FunctionDef):
                     # Only top-level functions (depth check via col_offset)
                     if getattr(node, "col_offset", 1) == 0:
                         name = node.name
@@ -371,7 +369,6 @@ _SKIP_NAMES = frozenset(
         "property",
         "staticmethod",
         "classmethod",
-        "super",
         "vars",
         "dir",
         "globals",
@@ -542,8 +539,14 @@ def check_artifact(
                 break
 
         _check_node(
-            node, filename, lookup, artifact_classes, target_classes,
-            violations, var_type_map, artifact_functions,
+            node,
+            filename,
+            lookup,
+            artifact_classes,
+            target_classes,
+            violations,
+            var_type_map,
+            artifact_functions,
         )
 
     return violations
@@ -676,7 +679,10 @@ def _check_node(
                 if attr_name not in cls.methods and not attr_name.startswith("__"):
                     known = sorted(cls.methods.keys())
                     suggestions = difflib.get_close_matches(
-                        attr_name, known, n=3, cutoff=0.5,
+                        attr_name,
+                        known,
+                        n=3,
+                        cutoff=0.5,
                     )
                     violations.append(
                         Violation(
@@ -686,9 +692,7 @@ def _check_node(
                             "wrong_field",
                             f"'{attr_name}' not found on {type_name} "
                             f"(known: {', '.join(known[:10])})",
-                            f"Did you mean: {', '.join(suggestions)}"
-                            if suggestions
-                            else "",
+                            f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
                         )
                     )
 
@@ -899,7 +903,6 @@ def build_llm_grounding_prompt(
 # ---------------------------------------------------------------------------
 # Violation repair: targeted LLM fix using exact AST violation messages
 # ---------------------------------------------------------------------------
-
 
 
 async def repair_violations(

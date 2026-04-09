@@ -29,8 +29,6 @@ def _save_snapshot(stage_name: str, prior_outputs: dict) -> None:
     if trace_dir is None:
         return
 
-    from pathlib import Path
-
     # Keys to exclude (large, non-serializable, or reconstructible)
     _EXCLUDE = {"_file_contents", "_call_graph", "_file_index_entries"}
 
@@ -54,6 +52,8 @@ def _save_snapshot(stage_name: str, prior_outputs: dict) -> None:
         logger.info("Snapshot saved: %s (%d keys)", path.name, len(snapshot))
     except Exception as e:
         logger.warning("Snapshot save failed: %s", e)
+
+
 from fitz_forge.planning.pipeline.stages.base import (
     SYSTEM_PROMPT,
     PipelineStage,
