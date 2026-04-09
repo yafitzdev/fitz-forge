@@ -3,29 +3,43 @@
 
 Each strategy knows how to build a prompt and handle retries.
 The generator picks the right strategy based on context.
+
+All strategies output raw Python code — no JSON wrapping. The
+filename and purpose are already known (passed in via context),
+so there's no reason to ask the model to echo them back inside
+a JSON object. This eliminates the entire class of quote-mangling
+bugs from JSON extraction of embedded Python code.
 """
 
 import ast
-import json
 import logging
 from typing import Any, Protocol
 
 from fitz_forge.llm.generate import generate
-from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, extract_json
+from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT
 
 from .context import ArtifactContext
 from .validate import ArtifactError
 
 logger = logging.getLogger(__name__)
 
-_JSON_SCHEMA = json.dumps(
-    {
-        "filename": "path/to/file.py",
-        "content": "ONLY the new methods/classes to add — not the entire file",
-        "purpose": "why this artifact exists",
-    },
-    indent=2,
+_RAW_CODE_INSTRUCTION = (
+    "Return ONLY the Python code. No JSON wrapping. No markdown fences. No explanation. No prose."
 )
+
+
+def _strip_fences(raw: str) -> str:
+    """Strip markdown code fences if the model wraps its output."""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove opening fence (```python or ```)
+        lines = lines[1:]
+        # Remove closing fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+    return text
 
 
 class ArtifactStrategy(Protocol):
@@ -65,7 +79,6 @@ class SurgicalRewriteStrategy:
     name = "surgical"
 
     async def generate(self, client: Any, ctx: ArtifactContext) -> str:
-        # Find the output line (last return statement) in the reference
         change_hint = _extract_change_hint(ctx.reference_method)
 
         prompt = (
@@ -79,7 +92,7 @@ class SurgicalRewriteStrategy:
             f"enrichment, etc. that must not be skipped\n"
             f"3. Do NOT skip steps or call lower-level primitives directly\n"
             f"{change_hint}\n"
-            f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
         )
 
         safe = ctx.filename.replace("/", "_").replace("\\", "_")
@@ -89,8 +102,7 @@ class SurgicalRewriteStrategy:
             max_tokens=8192,
             label=f"artifact_surgical_{safe}",
         )
-        data = extract_json(raw)
-        return data.get("content", "")
+        return _strip_fences(raw)
 
     def build_retry_prompt(
         self,
@@ -104,8 +116,6 @@ class SurgicalRewriteStrategy:
             if e.check != "not_implemented"
         )
 
-        # Re-include the full surgical instructions + change hint so
-        # the model has enough context to produce a complete response.
         change_hint = _extract_change_hint(ctx.reference_method)
 
         prompt = (
@@ -122,7 +132,7 @@ class SurgicalRewriteStrategy:
             f"{error_text}\n\n"
             f"Your previous output:\n"
             f"```python\n{previous_content}\n```\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
         )
         return _make_messages(prompt)
 
@@ -145,8 +155,7 @@ class NewCodeStrategy:
             max_tokens=4096,
             label=f"artifact_{safe}",
         )
-        data = extract_json(raw)
-        return data.get("content", "")
+        return _strip_fences(raw)
 
     def _build_prompt(self, ctx: ArtifactContext) -> str:
         rules = (
@@ -201,12 +210,12 @@ class NewCodeStrategy:
         # Budget-aware reasoning truncation
         _TOKEN_BUDGET_CHARS = 32000 * 4
         fixed = (
-            f"Write a code artifact for: {ctx.filename}\n"
+            f"Write code for: {ctx.filename}\n"
             f"Purpose: {ctx.purpose}\n\n"
             f"{rules}\n{grounding}\n\n"
             f"## RELEVANT DECISIONS\n{ctx.decisions}\n\n"
             f"{source_section}\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
         )
         reasoning_budget = max(500, _TOKEN_BUDGET_CHARS - len(fixed) - 200)
 
@@ -215,14 +224,14 @@ class NewCodeStrategy:
         reasoning_final = _truncate_at_line(ctx.reasoning, reasoning_budget)
 
         return (
-            f"Write a code artifact for: {ctx.filename}\n"
+            f"Write code for: {ctx.filename}\n"
             f"Purpose: {ctx.purpose}\n\n"
             f"{rules}\n{grounding}\n\n"
             f"## RELEVANT DECISIONS\n{ctx.decisions}\n\n"
             f"{source_section}\n\n"
             f"## PLAN CONTEXT (background — lower priority than above)\n"
             f"{reasoning_final}\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
         )
 
     def build_retry_prompt(
@@ -237,8 +246,6 @@ class NewCodeStrategy:
             if e.check != "not_implemented"
         )
 
-        # Re-include the full prompt context so the model doesn't lose
-        # track of what it's generating.
         full_prompt = self._build_prompt(ctx)
         prompt = (
             f"{full_prompt}\n\n"
@@ -246,7 +253,7 @@ class NewCodeStrategy:
             f"{error_text}\n\n"
             f"Your previous output:\n"
             f"```python\n{previous_content}\n```\n\n"
-            f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
         )
         return _make_messages(prompt)
 

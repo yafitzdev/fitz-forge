@@ -11,13 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fitz_forge.llm.generate import generate
-from fitz_forge.planning.pipeline.stages.base import extract_json
 
 from .context import assemble_context
 from .strategy import (
     ArtifactStrategy,
     NewCodeStrategy,
     SurgicalRewriteStrategy,
+    _strip_fences,
 )
 from .validate import ArtifactError, _fix_docstring_quotes, validate
 
@@ -115,8 +115,7 @@ async def generate_artifact(
                     max_tokens=8192,
                     label=f"artifact_retry{attempt}_{safe}",
                 )
-                data = extract_json(raw)
-                content = data.get("content", "")
+                content = _strip_fences(raw)
         except Exception as e:
             logger.warning(
                 "artifact[%s]: attempt %d failed: %s",
