@@ -44,6 +44,22 @@ class _NullCheckpointManager:
         pass
 
 
+class _SnapshotCheckpointManager:
+    """Checkpoint manager that returns a pre-loaded snapshot for replay."""
+
+    def __init__(self, snapshot: dict):
+        self._snapshot = snapshot
+
+    async def save_stage(self, job_id: str, stage_name: str, output: dict) -> None:
+        pass
+
+    async def load_checkpoint(self, job_id: str) -> dict:
+        return dict(self._snapshot)
+
+    async def clear_checkpoint(self, job_id: str) -> None:
+        pass
+
+
 def _ts() -> str:
     return time.strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -492,6 +508,7 @@ async def _run_decomposed_once(
     """Run the decomposed planning pipeline with fixed retrieval files."""
     from fitz_forge.config import load_config
     from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.llm.generate import configure_tracing
     from fitz_forge.planning.agent import AgentContextGatherer
     from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline
 
@@ -504,8 +521,10 @@ async def _run_decomposed_once(
     pipeline = DecomposedPipeline(
         checkpoint_manager=_NullCheckpointManager(),
     )
-    # Enable artifact prompt tracing for replay
+    # Enable full LLM call provenance tracing
     trace_dir = out_dir / f"traces_{run_id:02d}"
+    configure_tracing(trace_dir)
+    # Also set per-stage trace_dir for legacy prompt/response text tracing
     for stage in pipeline._stages:
         if hasattr(stage, "trace_dir"):
             stage.trace_dir = str(trace_dir)
@@ -527,6 +546,7 @@ async def _run_decomposed_once(
         _bench_override_files=context.get("file_list"),
     )
     elapsed = time.monotonic() - t0
+    configure_tracing(None)  # disable tracing between runs
 
     plan_text = ""
     if result.success:
@@ -746,6 +766,189 @@ def prepare_scoring_v2(
         raise typer.Exit(1)
 
     _prepare_scoring_v2(results_dir, query, structural_index)
+
+
+async def _run_replay_once(
+    source_dir: str,
+    query: str,
+    context: dict,
+    snapshot_path: Path,
+    out_dir: Path,
+) -> dict:
+    """Replay a pipeline run from a saved snapshot.
+
+    Loads prior_outputs from the snapshot, injects them into a fresh
+    pipeline, and runs only the remaining stages with the real LLM.
+    """
+    from fitz_forge.config import load_config
+    from fitz_forge.llm.factory import create_llm_client
+    from fitz_forge.llm.generate import configure_tracing
+    from fitz_forge.planning.agent import AgentContextGatherer
+    from fitz_forge.planning.pipeline.orchestrator import DecomposedPipeline
+
+    config = load_config()
+    client = create_llm_client(config)
+
+    if hasattr(client, "health_check"):
+        await client.health_check()
+
+    # Load snapshot as prior_outputs
+    prior_outputs = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    # Reconstruct _source_dir (stripped from snapshot)
+    prior_outputs["_source_dir"] = source_dir
+
+    # Reconstruct _file_contents from override files
+    file_list = context.get("file_list")
+    if file_list:
+        file_contents = {}
+        for rel_path in file_list:
+            full = Path(source_dir) / rel_path
+            if full.exists():
+                try:
+                    file_contents[rel_path] = full.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+        if file_contents:
+            prior_outputs["_file_contents"] = file_contents
+
+    # Reconstruct call graph (non-serializable object stripped from snapshot)
+    if "_call_graph" not in prior_outputs and "_call_graph_text" in prior_outputs:
+        from fitz_forge.planning.agent.indexer import build_import_graph
+        from fitz_forge.planning.pipeline.call_graph import extract_call_graph
+
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        agent_files = agent_ctx.get("agent_files", {})
+        all_files = agent_files.get("all_files", []) or agent_files.get("included", [])
+        if source_dir and all_files:
+            forward_map_raw, _ = build_import_graph(source_dir, all_files)
+            forward_map = dict(forward_map_raw)
+        else:
+            forward_map = {}
+
+        structural_index = prior_outputs.get("_gathered_context", "")
+        included = agent_files.get("included", [])
+
+        call_graph = extract_call_graph(
+            task_description=query,
+            structural_index=structural_index,
+            forward_map=forward_map,
+            file_index_entries={},
+            max_depth=3,
+            seed_files=included,
+            source_dir=source_dir,
+        )
+        prior_outputs["_call_graph"] = call_graph
+        prior_outputs["_call_graph_text"] = call_graph.format_for_prompt()
+
+    # Figure out which stages are already done
+    completed = {k for k in prior_outputs if not k.startswith("_")}
+    all_stages = ["decision_decomposition", "decision_resolution", "synthesis"]
+    remaining = [s for s in all_stages if s not in completed]
+    logger.info(
+        f"Replay: loaded snapshot from {snapshot_path.name}, "
+        f"completed={sorted(completed)}, remaining={remaining}"
+    )
+
+    # Use snapshot checkpoint manager so resume=True loads our prior_outputs
+    pipeline = DecomposedPipeline(
+        checkpoint_manager=_SnapshotCheckpointManager(prior_outputs),
+    )
+
+    # Enable tracing for the replay run
+    trace_dir = out_dir / "traces_replay"
+    configure_tracing(trace_dir)
+    for stage in pipeline._stages:
+        if hasattr(stage, "trace_dir"):
+            stage.trace_dir = str(trace_dir)
+
+    agent = AgentContextGatherer(
+        config=config.agent,
+        source_dir=source_dir,
+    )
+
+    t0 = time.monotonic()
+    result = await pipeline.execute(
+        client=client,
+        job_id="replay",
+        job_description=query,
+        resume=True,
+        agent=agent,
+        _bench_override_files=context.get("file_list"),
+    )
+    elapsed = time.monotonic() - t0
+    configure_tracing(None)
+
+    plan_text = ""
+    if result.success:
+        plan_data = {
+            k: v for k, v in result.outputs.items()
+            if not k.startswith("_")
+        }
+        plan_text = json.dumps(plan_data, indent=2, default=str)
+        plan_file = out_dir / "plan_replay.json"
+        plan_file.write_text(plan_text)
+        logger.info(f"Replay: plan written to {plan_file}")
+
+    arch = result.outputs.get("architecture", {})
+    recommended = arch.get("recommended", "")
+
+    return {
+        "run": "replay",
+        "elapsed_s": round(elapsed, 1),
+        "recommended": recommended,
+        "success": result.success,
+        "error": result.error if not result.success else None,
+        "plan_size": len(plan_text),
+        "replayed_from": snapshot_path.name,
+        "stages_skipped": sorted(completed),
+        "stages_run": remaining,
+    }
+
+
+@app.command("replay")
+def replay_cmd(
+    snapshot: str = typer.Option(
+        ..., help="Path to snapshot JSON (e.g. traces_03/snapshot_after_decision_decomposition.json)",
+    ),
+    source_dir: str = typer.Option(..., "--source-dir", help="Target codebase"),
+    context_file: str = typer.Option(..., help="ideal_context.json"),
+    query: str = typer.Option(
+        "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
+        help="Task query",
+    ),
+    score_v2: bool = typer.Option(False, "--score-v2", help="Run V2 scorer after replay"),
+):
+    """Replay a pipeline run from a saved stage snapshot.
+
+    Loads the snapshot (prior_outputs from a previous run), skips the
+    completed stages, and re-runs only the remaining stages with the
+    real LLM. Use this to test pipeline changes without re-running
+    the full 10-minute pipeline.
+
+    Example:
+        python -m benchmarks.plan_factory replay \\
+          --snapshot benchmarks/results/.../traces_03/snapshot_after_decision_decomposition.json \\
+          --source-dir ../fitz-sage \\
+          --context-file benchmarks/ideal_context.json
+    """
+    snapshot_path = Path(snapshot)
+    if not snapshot_path.exists():
+        logger.error(f"Snapshot not found: {snapshot_path}")
+        raise typer.Exit(1)
+
+    context = json.loads(Path(context_file).read_text())
+    out_dir = snapshot_path.parent.parent  # traces_XX is inside the results dir
+
+    result = asyncio.run(
+        _run_replay_once(source_dir, query, context, snapshot_path, out_dir)
+    )
+
+    print(json.dumps(result, indent=2))
+
+    if score_v2 and result.get("success"):
+        structural_index = context.get("synthesized", "")
+        _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir)
 
 
 if __name__ == "__main__":

@@ -432,6 +432,7 @@ class DecisionResolutionStage(PipelineStage):
                     client, messages=messages,
                     temperature=0,
                     max_tokens=4096,
+                    label=f"resolve_{d_id}",
                 )
                 t1 = time.monotonic()
                 logger.info(

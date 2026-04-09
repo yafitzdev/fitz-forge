@@ -2631,9 +2631,11 @@ class SynthesisStage(PipelineStage):
 
         try:
             t0 = time.monotonic()
+            safe = filename.replace("/", "_").replace("\\", "_")
             raw = await generate(
                 client, messages=messages,
                 max_tokens=8192,
+                label=f"artifact_surgical_{safe}",
             )
             elapsed = time.monotonic() - t0
 
@@ -2938,9 +2940,11 @@ class SynthesisStage(PipelineStage):
 
         try:
             t0 = time.monotonic()
+            safe = filename.replace("/", "_").replace("\\", "_")
             raw = await generate(
                 client, messages=messages,
                 max_tokens=4096,
+                label=f"artifact_{safe}",
             )
             elapsed = time.monotonic() - t0
 
@@ -3605,6 +3609,7 @@ class SynthesisStage(PipelineStage):
                     r = await generate(
                         client, messages=messages,
                         temperature=0.7,
+                        label=f"synthesis_reasoning_{i + 1}",
                     )
                     t1 = time.monotonic()
                     logger.info(

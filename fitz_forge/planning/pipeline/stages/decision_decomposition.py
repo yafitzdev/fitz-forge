@@ -282,6 +282,7 @@ class DecisionDecompositionStage(PipelineStage):
                             client, messages=messages,
                             temperature=0.3,
                             max_tokens=16384,
+                            label=f"decomp_candidate_{candidate_num}",
                         )
                         t1 = time.monotonic()
                         logger.info(

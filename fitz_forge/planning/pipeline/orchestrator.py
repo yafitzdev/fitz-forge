@@ -14,8 +14,46 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from fitz_forge.llm.generate import generate
+from fitz_forge.llm.generate import generate, get_trace_dir
 from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
+
+
+def _save_snapshot(stage_name: str, prior_outputs: dict) -> None:
+    """Save a stage snapshot to the trace directory for replay.
+
+    Strips large internal keys (_file_contents, _call_graph object) to
+    keep snapshots under ~1MB. Keeps everything needed to resume the
+    pipeline from this point.
+    """
+    trace_dir = get_trace_dir()
+    if trace_dir is None:
+        return
+
+    from pathlib import Path
+
+    # Keys to exclude (large, non-serializable, or reconstructible)
+    _EXCLUDE = {"_file_contents", "_call_graph", "_file_index_entries"}
+
+    snapshot = {}
+    for k, v in prior_outputs.items():
+        if k in _EXCLUDE:
+            continue
+        try:
+            json.dumps(v, default=str)  # test serializable
+            snapshot[k] = v
+        except (TypeError, ValueError):
+            continue
+
+    path = trace_dir / f"snapshot_after_{stage_name}.json"
+    try:
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(snapshot, indent=2, default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("Snapshot saved: %s (%d keys)", path.name, len(snapshot))
+    except Exception as e:
+        logger.warning("Snapshot save failed: %s", e)
 from fitz_forge.planning.pipeline.stages.base import (
     SYSTEM_PROMPT,
     PipelineStage,
@@ -816,6 +854,8 @@ class DecomposedPipeline:
             prior_outputs["_call_graph_text"] = call_graph.format_for_prompt()
             stage_timings["call_graph"] = time.monotonic() - t_cg
 
+        _save_snapshot("_pre_stages", prior_outputs)
+
         # Execute stages sequentially
         _EXPECTED_SUBSTEPS = {
             "decision_decomposition": 2,
@@ -883,6 +923,8 @@ class DecomposedPipeline:
                 for sub_key in ("context", "architecture", "design", "roadmap", "risk"):
                     if sub_key in result.output:
                         prior_outputs[sub_key] = result.output[sub_key]
+
+            _save_snapshot(stage.name, prior_outputs)
 
             if progress_callback:
                 result_or_coro = progress_callback(

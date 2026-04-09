@@ -36,6 +36,11 @@ def configure_tracing(trace_dir: Path | str | None = None) -> None:
     _call_counter = 0
 
 
+def get_trace_dir() -> Path | None:
+    """Return the current trace directory, or None if tracing is disabled."""
+    return _trace_dir
+
+
 # --- Token estimation ---
 
 
