@@ -101,17 +101,27 @@ class SurgicalRewriteStrategy:
         error_text = "\n".join(
             f"- {e.check.upper()}: {e.message}\n  FIX: {e.suggestion}"
             for e in errors
-            if e.check != "not_implemented"  # soft fail, don't retry for this
+            if e.check != "not_implemented"
         )
 
+        # Re-include the full surgical instructions + change hint so
+        # the model has enough context to produce a complete response.
+        change_hint = _extract_change_hint(ctx.reference_method)
+
         prompt = (
-            f"Your previous artifact for {ctx.filename} had these errors:\n"
-            f"{error_text}\n\n"
-            f"Fix ONLY these errors. Keep everything else the same.\n\n"
-            f"## YOUR PREVIOUS OUTPUT\n"
-            f"```python\n{previous_content}\n```\n\n"
-            f"## REFERENCE METHOD (for context)\n"
+            f"Rewrite this existing method to: {ctx.purpose}\n\n"
+            f"## EXISTING METHOD (copy this structure exactly)\n"
             f"```python\n{ctx.reference_method}\n```\n\n"
+            f"## INSTRUCTIONS\n"
+            f"1. Copy the method above, renaming it appropriately\n"
+            f"2. Keep ALL internal pipeline steps (every self._xxx call) "
+            f"in the same order\n"
+            f"3. Do NOT skip steps or call lower-level primitives directly\n"
+            f"{change_hint}\n"
+            f"## ERRORS IN YOUR PREVIOUS ATTEMPT (fix these)\n"
+            f"{error_text}\n\n"
+            f"Your previous output:\n"
+            f"```python\n{previous_content}\n```\n\n"
             f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
         )
         return _make_messages(prompt)
@@ -227,11 +237,14 @@ class NewCodeStrategy:
             if e.check != "not_implemented"
         )
 
+        # Re-include the full prompt context so the model doesn't lose
+        # track of what it's generating.
+        full_prompt = self._build_prompt(ctx)
         prompt = (
-            f"Your previous artifact for {ctx.filename} had these errors:\n"
+            f"{full_prompt}\n\n"
+            f"## ERRORS IN YOUR PREVIOUS ATTEMPT (fix these)\n"
             f"{error_text}\n\n"
-            f"Fix ONLY these errors. Keep everything else the same.\n\n"
-            f"## YOUR PREVIOUS OUTPUT\n"
+            f"Your previous output:\n"
             f"```python\n{previous_content}\n```\n\n"
             f"Return ONLY valid JSON matching this schema:\n{_JSON_SCHEMA}\n"
         )

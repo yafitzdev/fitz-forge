@@ -434,6 +434,7 @@ _SKIP_NAMES = frozenset(
         "APIRouter",
         "Request",
         "StreamingResponse",
+        "EventSourceResponse",
         "Depends",
         "HTTPException",
         "BackgroundTasks",
