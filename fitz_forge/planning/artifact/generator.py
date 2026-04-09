@@ -19,7 +19,7 @@ from .strategy import (
     NewCodeStrategy,
     SurgicalRewriteStrategy,
 )
-from .validate import ArtifactError, validate
+from .validate import ArtifactError, _fix_docstring_quotes, validate
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,9 @@ async def generate_artifact(
                     strategy=strategy.name,
                 )
             continue
+
+        # Sanitize: fix docstring quote mangling from JSON extraction
+        content = _fix_docstring_quotes(content)
 
         # Validate
         errors = validate(content, ctx)
