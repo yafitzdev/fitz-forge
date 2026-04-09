@@ -2164,50 +2164,50 @@ class SynthesisStage(PipelineStage):
         prior_signatures: list[str] = []  # F3: accumulate method sigs
         t0 = time.monotonic()
 
-        for filename, purpose in artifact_specs:
-            # Find the real source code for this file
-            source = self._find_file_source(
-                filename,
-                file_contents,
-                source_dir,
-            )
+        # Use the artifact generation black box
+        from fitz_forge.planning.artifact import generate_artifact
 
+        # Get structural index for validation
+        agent_ctx_idx = prior_outputs.get("_agent_context", {})
+        structural_index = (
+            agent_ctx_idx.get("full_structural_index", "")
+            or prior_outputs.get("_gathered_context", "")
+        )
+
+        for filename, purpose in artifact_specs:
             # Filter decisions relevant to this file
             relevant_decisions = self._filter_decisions_for_file(
                 filename,
                 resolutions,
             )
 
-            # F3 fix: inject prior artifact signatures for cross-consistency
-            sig_context = ""
-            if prior_signatures:
-                sig_context = (
-                    "\n## SIGNATURES FROM OTHER ARTIFACTS (match these exactly)\n"
-                    + "\n".join(prior_signatures)
-                )
-
-            artifact = await self._generate_single_artifact_checked(
-                client,
-                filename,
-                purpose,
-                source,
-                relevant_decisions,
-                reasoning,
-                prior_outputs,
-                prior_artifact_sigs=sig_context,
+            result = await generate_artifact(
+                client=client,
+                filename=filename,
+                purpose=purpose,
+                source_dir=source_dir,
+                structural_index=structural_index,
+                decisions=relevant_decisions,
+                reasoning=reasoning,
+                prior_outputs=prior_outputs,
+                prior_sigs=prior_signatures if prior_signatures else None,
             )
-            if artifact:
-                artifacts.append(artifact)
-                # Extract method signatures for subsequent artifacts.
-                # Skip for surgical rewrites — they copy the full reference
-                # method which contains private method calls that would
-                # leak into subsequent prompts and cause F10 fabrications.
-                if not artifact.get("_surgical"):
-                    sigs = _extract_method_signatures(
-                        artifact.get("content", ""),
-                        filename,
-                    )
-                    prior_signatures.extend(sigs)
+
+            if result.success:
+                artifacts.append({
+                    "filename": result.filename,
+                    "content": result.content,
+                    "purpose": result.purpose,
+                })
+                # Accumulate signatures for downstream artifacts
+                prior_signatures.extend(result.signatures)
+            else:
+                logger.warning(
+                    "artifact[%s]: failed after %d attempts — %s",
+                    filename,
+                    result.attempts,
+                    result.failure_reason,
+                )
 
         elapsed = time.monotonic() - t0
         logger.info(
