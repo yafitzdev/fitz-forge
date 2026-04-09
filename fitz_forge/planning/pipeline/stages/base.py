@@ -221,6 +221,38 @@ def extract_json(raw_output: str) -> dict[str, Any]:
         if repaired is not None:
             return repaired
 
+    # Strategy 5: Regex extraction for artifact JSON with embedded code.
+    # When the "content" field contains Python code with triple-quoted
+    # docstrings, JSON parsing fails because """ confuses the quote
+    # tracker. Extract fields individually via regex.
+    content_match = re.search(
+        r'"content"\s*:\s*"(.*?)",\s*"purpose"',
+        raw_output,
+        re.DOTALL,
+    )
+    if not content_match:
+        # Try without trailing "purpose" — content might be the last field
+        content_match = re.search(
+            r'"content"\s*:\s*"(.*?)"\s*\}',
+            raw_output,
+            re.DOTALL,
+        )
+    if content_match:
+        content_raw = content_match.group(1)
+        # Unescape JSON string escapes
+        content_val = content_raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+
+        fn_match = re.search(r'"filename"\s*:\s*"([^"]*)"', raw_output)
+        purpose_match = re.search(r'"purpose"\s*:\s*"([^"]*)"', raw_output)
+
+        result = {
+            "filename": fn_match.group(1) if fn_match else "",
+            "content": content_val,
+            "purpose": purpose_match.group(1) if purpose_match else "",
+        }
+        if result["content"]:
+            return result
+
     preview = raw_output[:500].replace("\n", "\\n")
     raise ValueError(
         f"Could not extract valid JSON from output ({len(raw_output)} chars). Preview: {preview}"
