@@ -63,3 +63,12 @@ All LLM calls go through `fitz_forge/llm/generate.py:generate()` — never call 
 - **Truncation detection + retry**: unclosed code fences, bracket imbalance, unclosed JSON strings
 - **Provenance tracing**: `configure_tracing(trace_dir)` enables JSON traces per call
 
+### Artifact Generation Black Box
+
+All artifact generation goes through `fitz_forge/planning/artifact/generate_artifact()`. This is a black box: input goes in, validated artifact comes out. Internally:
+- **Input assembly** (`context.py`): gathers source, interfaces, reference methods deterministically
+- **Strategy selection**: `SurgicalRewriteStrategy` if reference method exists (default), `NewCodeStrategy` for genuinely new files
+- **Raw code output**: model outputs Python directly — no JSON wrapping, no quote mangling
+- **Validation** (`validate.py`): parseable, no fabrication, has yield (streaming), correct return type
+- **Retry with feedback**: up to 3 attempts, each retry includes specific error messages from validation
+

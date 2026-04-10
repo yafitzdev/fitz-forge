@@ -23,71 +23,28 @@
 
 ---
 
-## 2. Artifact Generation Black Box
+## 2. Artifact Generation Black Box — DONE
 
-**Status:** Designed, not implemented.
+**Status:** Implemented and tested. `fitz_forge/planning/artifact/`
 
-**Problem:** Current artifact generation is 500+ lines across 4 functions with 13 helpers, each addressing a specific failure pattern (F7, F9, F10, F21, F25). Fixes are whack-a-mole — each one adds complexity. Output validation happens in the scorer (after the fact), not in the pipeline (before returning).
+**Results:**
+- 100% success rate on isolated artifact tests (30/30)
+- Raw code output eliminates JSON quote mangling entirely
+- Surgical rewrite now fires for any file with a reference method
+- Validation catches fabrication, parse errors, missing yield, wrong return type
+- Retry with specific error feedback (up to 3 attempts)
 
-**Design:**
-
-```
-fitz_forge/planning/artifact/
-  __init__.py              # exports generate_artifact()
-  context.py               # ArtifactContext dataclass + assemble_context()
-  validate.py              # validate() -> list[ArtifactError]
-  strategy.py              # Protocol + SurgicalRewriteStrategy + NewCodeStrategy
-  generator.py             # generate_artifact() — the black box
-```
-
-**Interface:**
-```python
-async def generate_artifact(
-    client, filename, purpose, source_dir,
-    structural_index, decisions, reasoning,
-    prior_sigs=[], max_attempts=3,
-) -> ArtifactResult
-```
-
-**Architecture:**
-1. `assemble_context()` — gather all inputs deterministically (source, reference method, interfaces, schema fields)
-2. Pick strategy: `SurgicalRewriteStrategy` if reference method exists, `NewCodeStrategy` if genuinely new code
-3. `strategy.generate()` — LLM call (pluggable)
-4. `validate()` — AST parse, fabrication check, yield check, return type check
-5. If validation fails: `strategy.retry()` with specific error feedback injected
-6. Max 3 attempts, then return failure
-
-**Strategy protocol:**
-```python
-class ArtifactStrategy(Protocol):
-    name: str
-    async def generate(self, client, context: ArtifactContext) -> str
-    def build_retry_prompt(self, context, previous, errors) -> str
-```
-
-**Validation checks (all deterministic):**
-- Parseable (AST with recovery)
-- No fabricated methods (self._xxx calls vs structural index)
-- No fabricated classes (ClassName() vs index)
-- Has yield (streaming files only)
-- Correct return type (Iterator/Generator, not Answer)
-- Non-empty (has at least one def)
-- No NotImplementedError (soft fail)
-
-**Key changes from current code:**
-- Surgical rewrite is the DEFAULT for any file with a reference method (not gated by 3+ pipeline steps)
-- Retry stays on the same strategy with error feedback (no fallback to worse path)
-- Output validation runs the SAME checks as the scorer — if it passes validation, the scorer will agree
-- `_repair_fabricated_refs()` goes away — if output is wrong, retry with feedback instead of silent patching
-- Strategies are hot-swappable — can add DiffStrategy, TestDrivenStrategy etc. later
-
-**Effort:** Medium — refactor, not net-new logic. Most code exists but needs restructuring.
-
-**Depends on:** Nothing. Can be implemented independently.
+**Run 91 (first benchmark with black box):**
+- Parse failures: 16 → 1
+- Fabrications: 8 → 3 (+ post-run fix for dedent recovery in fabrication check)
+- 1 perfect 100/100 plan
 
 ---
 
-## Implementation Order
+## Remaining Issues (not yet addressed)
 
-1. **Artifact black box first** — this is the bigger win. Fixes the root cause of bad artifacts instead of detecting them after the fact. Will likely improve both deterministic AND taxonomy scores.
-2. **Taxonomy integration second** — once artifacts are better, wire in the automated Sonnet scoring to track the improvement.
+1. **V2-F7: Missing required file (1/6 plans)** — synthesis reasoning sometimes doesn't include engine.py in needed_artifacts. Upstream issue in synthesis extraction, not artifact generation.
+
+2. **V2-F6d: Method name mismatch (1/6 plans)** — model picks different names across artifacts (`_synthesizer.stream()` vs `generate_stream()`). Prior signature injection partially helps. Could be improved by having decision resolution commit to exact method names.
+
+3. **Taxonomy automation** — see item 1 above. Manual Sonnet classification works but needs to be automated for benchmark flow.

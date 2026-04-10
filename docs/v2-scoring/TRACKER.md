@@ -34,52 +34,51 @@ Zero LLM cost. Same plan always gets the same score. Source-dir augmentation val
 | 87 | 04-08 | + decomp scorer (graph_cov gate too strict) | 7 | 79.2 | 65-93 | 9 | 7 | 0 | graph_cov gate impossible to clear. Fixed. |
 | 88 | 04-08 | + decomp scorer + consistency cascade fix | 7 | 84.6 | 67-100 | 14 | 11 | 0 | 0 missing files. Fab 14->2 from decomp fix. Consistency cascade eliminated. Parse failures = remaining bottleneck. |
 | 89 | 04-09 | + LLM quality layer (generate.py) | 10 | 86.8→**90.0** | 73.8→77.1 — 95→**100** | 8 | 16 | 0 | generate() with budget cap + truncation retry. Scorer: parse recovery + codebase awareness + private method skip. |
+| **91** | **04-10** | **+ artifact black box (raw code output)** | **6** | **87.3** | **73.3-100.0** | **3** | **1** | **0** | **Artifact generation refactored: pluggable strategies, output validation + retry, raw code output (no JSON). Parse fails 16→1. Fabs 8→3.** |
 
 ### Run progression
 
-| Metric | Run 84 (pre-decomp) | Run 88 (post-decomp) | Run 89 (+ quality layer + scorer fixes) |
-|--------|---------------------|---------------------|----------------------------------------|
-| Plans | 7 | 7 | 10 |
-| Avg | 88.3 | 84.6 | **90.0** |
-| Range | 75-98 | 67-100 | **77.1-100.0** |
-| Completeness | 26/30 | **30/30** | **30/30** |
-| Missing files | 2/7 | **0/7** | **0/10** |
-| Fabrications | 14 | 14 | **8** |
-| Parse failures | 6 | 11 | 16 |
-| Consistency avg | 18.3/20 | 13.5/20 | **15.3/20** |
-| 95+ plans | 1/7 | 1/7 | **4/10** |
-| 100 plans | 0/7 | 0/7 | **1/10** |
+| Metric | Run 84 | Run 88 | Run 89 | Run 91 |
+|--------|--------|--------|--------|--------|
+| Plans | 7 | 7 | 10 | 6 |
+| Avg | 88.3 | 84.6 | **90.0** | 87.3 |
+| Range | 75-98 | 67-100 | 77.1-100 | 73.3-100 |
+| Completeness | 26/30 | **30/30** | **30/30** | 28/30 |
+| Fabrications | 14 | 14 | 8 | **3** |
+| Parse failures | 6 | 11 | 16 | **1** |
+| Consistency avg | 18.3/20 | 13.5/20 | 15.3/20 | 16.7/20 |
+| 100/100 plans | 0/7 | 0/7 | 1/10 | **1/6** |
 
-Run 89: LLM quality layer (generate.py) + three scorer fixes (parse recovery in consistency checker, codebase method awareness, private method skip). Also: broader reference method detection in pipeline (affects future plans only).
+Run 91: artifact generation black box with raw code output, pluggable strategies (surgical + new_code), output validation (parseable, fabrication, yield, return type), retry with error feedback. Parse failures nearly eliminated. Fabrication validation had a bug (missing dedent recovery in check_artifact) — fixed post-run.
 
 ---
 
 ## Current Failure Patterns
 
-| ID | Pattern | Occurrence (run 89) | Measured Impact | Fix Type | Status |
+| ID | Pattern | Occurrence (run 91) | Measured Impact | Fix Type | Status |
 |----|---------|---------------------|-----------------|----------|--------|
-| V2-F1 | Engine.py parse failure (truncation) | 1/10 | -3 pts | LLM quality layer reduces but doesn't eliminate | Mitigated |
-| V2-F2 | Small artifact parse failure | 6/10 | ~0 pts | — | **Won't fix** (no score impact) |
-| V2-F3 | Streaming file missing yield | 0/10 | — | — | Not seen |
-| V2-F4 | NotImplementedError stub | 0/10 | — | — | Not seen |
-| V2-F5 | Duplicate artifacts | 0/10 | — | Deterministic dedup | **Fixed** (run 84) |
-| V2-F6a | Consistency: scorer parse recovery gap | — | — | Parse recovery added to `_extract_method_definitions` | **Fixed** (run 89) |
+| V2-F1 | Engine.py parse failure | 0/6 | — | Raw code output eliminates JSON parse issues | **Fixed** (run 91) |
+| V2-F2 | Small artifact parse failure | 1/6 | ~0 pts | Raw code output reduces; residual from truncation | Mitigated |
+| V2-F3 | Streaming file missing yield | 0/6 | — | Artifact validation checks for yield + retries | **Fixed** (run 91) |
+| V2-F4 | NotImplementedError stub | 0/6 | — | Artifact validation detects (soft fail) | Not seen |
+| V2-F5 | Duplicate artifacts | 0/6 | — | Deterministic dedup | **Fixed** (run 84) |
+| V2-F6a | Consistency: scorer parse recovery gap | — | — | Parse recovery in `_extract_method_definitions` | **Fixed** (run 89) |
 | V2-F6b | Consistency: calls to existing codebase methods | — | — | Codebase method awareness + private method skip | **Fixed** (run 89) |
-| V2-F6c | Consistency: type disagreement (answer_stream→Answer) | 3/10 | -10 pts | Model returns blocking type from streaming method | Open (LLM quality) |
-| V2-F6d | Consistency: genuine method name mismatch | 1/10 | -7 pts | `_synthesizer.stream()` vs `generate_stream()` | Open (rare) |
-| V2-F7 | Missing required file | 0/10 | — | Decomp scorer + prompt fix | **Fixed** (run 88) |
-| V2-F8a | Fabricated methods on tangential files | 1/10 | -13 pts | Broader reference method detection (pipeline fix, future plans) | Mitigated |
-| V2-F8b | Fabricated provider subclasses | 0/10 | — | Decomp scorer ref_complete fixes root cause | **Fixed** (run 88) |
-| V2-F8c | Fabricated request DTOs | 0/10 | — | Not seen in run 89 | Resolved |
+| V2-F6c | Consistency: type disagreement | 1/6 | -10 pts | Artifact validation checks return type + retries | Mitigated |
+| V2-F6d | Consistency: method name mismatch | 1/6 | -10 pts | `_synthesizer.stream()` vs `generate_stream()` | Open (rare) |
+| V2-F7 | Missing required file | 1/6 | -15 pts | Decomp scorer + prompt fix; residual from synthesis reasoning | Open (rare) |
+| V2-F8a | Fabricated classes (e.g. AnswerChunk) | 2/6 | -15 pts | Artifact validation now catches via dedent recovery (post-run fix) | **Fixed** |
+| V2-F8b | Fabricated provider subclasses | 0/6 | — | Decomp scorer ref_complete | **Fixed** (run 88) |
+| V2-F8c | Fabricated request DTOs | 0/6 | — | Not seen | Resolved |
 
-**Current state:** Run 89 (rescored). LLM quality layer + scorer fixes + broader reference method detection.
+**Current state:** Run 91 + post-run fix (fabrication validation dedent recovery).
 
-**Score: avg 90.0/100, range 77.1-100.0, 4/10 plans at 95+, 1 perfect 100.**
+**Artifact generation:** black box with pluggable strategies, raw code output (no JSON), validation + retry. 30/30 success on isolated artifact tests. Parse failures nearly eliminated (16→1).
 
-**Remaining issues (all LLM quality, not scorer/pipeline bugs):**
-1. V2-F6c: model names method `answer_stream` but returns blocking `Answer` type (3/10)
-2. V2-F8a: fabrication on tangential files — broader ref method detection should help (future plans)
-3. V2-F6d: genuine method name mismatch across artifacts (1/10, rare)
+**Remaining issues:**
+1. V2-F7: Missing required file (1/6) — synthesis reasoning doesn't always include engine.py. Upstream issue, not artifact generation.
+2. V2-F6d: Method name mismatch (1/6) — model picks different names across artifacts. Prior signature injection partially helps.
+3. V2-F8a: Should be fixed by dedent recovery in fabrication validation (not yet benchmarked).
 
 ---
 
@@ -117,3 +116,9 @@ Run 89: LLM quality layer (generate.py) + three scorer fixes (parse recovery in 
 | 04-09 | LLM quality layer: standalone `generate()` in `fitz_forge/llm/generate.py` — budget cap, sanitization, truncation retry |
 | 04-09 | All 36 `client.generate()` call sites migrated to `generate()` |
 | 04-09 | Broader reference method detection: matches any method name in purpose text against source file (no verb pattern required, private methods included) |
+| 04-09 | Full LLM provenance tracing: JSON traces per generate() call + stage snapshots |
+| 04-09 | Stage-level replay: load snapshot, skip completed stages, re-run rest with real LLM |
+| 04-10 | Artifact generation black box: `fitz_forge/planning/artifact/` — pluggable strategies, validation + retry |
+| 04-10 | Raw code output: artifacts output Python directly (no JSON wrapping). Eliminates quote mangling. 100% success on isolated tests |
+| 04-10 | Surgical rewrite is now default for ANY file with a reference method (not gated by 3+ pipeline steps) |
+| 04-10 | Fabrication validation dedent recovery: check_artifact uses dedented content for indented surgical artifacts |
