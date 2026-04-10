@@ -95,7 +95,12 @@ def _check_fabrication(
     if ctx.source_dir:
         lookup.augment_from_source_dir(ctx.source_dir)
 
+    # Try with original content first, then dedented — surgical rewrites
+    # produce indented method bodies that check_artifact can't parse raw.
     violations = check_artifact({"filename": ctx.filename, "content": content}, lookup)
+    if len(violations) == 1 and violations[0].kind == "parse_error":
+        dedented = textwrap.dedent(content)
+        violations = check_artifact({"filename": ctx.filename, "content": dedented}, lookup)
 
     errors = []
     for v in violations:
