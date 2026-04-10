@@ -160,4 +160,4 @@ Benchmarks use `ideal_context.json` to bypass code retrieval and test only the p
 - Each run creates a fresh pipeline instance. No state leaks between runs.
 - Model must be loaded in LM Studio before running. The health check verifies connectivity but won't auto-load.
 - Results folder auto-increments: `YYYY-MM-DD_HH-MM-SS_run_NNN`.
-- Current baseline: run 91, avg 87.3/100, range 73.3-100.0 (6 plans).
+- Current baseline: run 92, avg 92.2/100, range 75.0-100.0 (10 plans, 4 perfect 100s).

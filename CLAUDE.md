@@ -9,6 +9,8 @@
 7. **No implementation without consulting me first** - If you think a change is needed, or if you're not sure about something, first propose the change and discuss it with me before implementing. Small changes are fine to implement directly, but for anything non-trivial, let's align on the approach first. This is especially important for changes that affect the LLM prompts, pipeline structure, or job handling logic. We want to avoid unnecessary work and ensure we're making the right improvements.
 8. **Ask yourself periodically** - "Do I need to update any documentation?". 
 9. **Benchmarking** - When you run the benchmark, consult benchmarks/BENCHMARK.md for instructions. Also make sure to always check the benchmark result after the first run, to validate that it's working correctly. If you see any anomalies in the scores, investigate before proceeding with further changes.
+10. **Fix invariants, not symptoms** - Before patching a bug, ask: "what invariant is being violated here, and does my fix enforce it for every variant or only the one I just saw?" If a fix only works for the specific failure in front of you, it's a symptom patch and the next variant will slip through. State the underlying property the system must satisfy, then enforce it. Example: "the route calls `service.query_stream` which doesn't exist" is a symptom; "every cross-file reference in an artifact must be satisfied by the codebase or a sibling artifact" is the invariant. Patches to the specific failure breed whack-a-mole; enforcing the invariant catches the whole class.
+11. **Watch for set-level bugs** - If validation looks at things one at a time (one artifact, one stage, one call) but the bug only exists at the set level (inconsistency across siblings, missing dependency spanning files, closure violations), no amount of per-item checking will catch it. When you notice this shape, lift the check to operate on the whole set, not the individual item. Ask: "is this property a property of the item, or of the set?" — and put the check at the right level.
 
 ## What This Is
 
@@ -65,10 +67,27 @@ All LLM calls go through `fitz_forge/llm/generate.py:generate()` — never call 
 
 ### Artifact Generation Black Box
 
-All artifact generation goes through `fitz_forge/planning/artifact/generate_artifact()`. This is a black box: input goes in, validated artifact comes out. Internally:
+All artifact generation goes through `fitz_forge/planning/artifact/`. Two entry points:
+
+**Per-artifact:** `generate_artifact(filename, purpose, ctx, ...)` — produces one validated artifact.
 - **Input assembly** (`context.py`): gathers source, interfaces, reference methods deterministically
 - **Strategy selection**: `SurgicalRewriteStrategy` if reference method exists (default), `NewCodeStrategy` for genuinely new files
 - **Raw code output**: model outputs Python directly — no JSON wrapping, no quote mangling
 - **Validation** (`validate.py`): parseable, no fabrication, has yield (streaming), correct return type
 - **Retry with feedback**: up to 3 attempts, each retry includes specific error messages from validation
+
+**Batch:** `generate_artifact_set(specs, ctx, ...)` — produces a *closed* artifact set. This is the primary entry point synthesis uses.
+- Calls `generate_artifact` per spec (unchanged), accumulating method signatures for consistency
+- After all artifacts are generated, runs the **closure family of checks** (`closure.py`) — five invariants on the set:
+  1. **Existence** — every cross-file symbol must be satisfied by codebase or sibling artifact
+  2. **Usage** — `async for` only on async iterators; `await` only on coroutines; `for` not on async iterables
+  3. **Kwargs** — every keyword argument name must be a parameter of the callee
+  4. **Imports** — `from pkg.mod import X` → X must resolve in codebase or siblings
+  5. **Field access** — `obj.field` on a typed local → field must exist on that type
+- **Type tracking** that powers all five: function param annotations, `var = ClassName(...)`, service locator return types (`var = get_service()`), and `self._attr` types parsed from the target class's `__init__` in disk source
+- **Repair strategies**:
+  - *Strategy 1 (expand)* — for missing symbols, add a new sibling artifact (e.g. `services/fitz_service.py` when a route calls `service.query_stream()` that never existed)
+  - *Strategy 2 (regenerate)* — for usage/kwargs/field violations, regenerate the offending artifact with specific feedback
+- Returns `ArtifactSetResult` with `closed=True/False` and any remaining violations
+- Closure is an **invariant on the set**, not on any individual artifact — per-artifact validation alone can never catch cross-file inconsistency (see rule 11)
 
