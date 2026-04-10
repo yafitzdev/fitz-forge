@@ -2160,12 +2160,14 @@ class SynthesisStage(PipelineStage):
         # Build compact decision summary for injection
         decision_summary = self._format_resolutions(resolutions)
 
-        artifacts: list[dict] = []
-        prior_signatures: list[str] = []  # F3: accumulate method sigs
         t0 = time.monotonic()
 
-        # Use the artifact generation black box
-        from fitz_forge.planning.artifact import generate_artifact
+        # Use the batch-level artifact generation black box.
+        # It handles per-artifact generation, accumulates signatures, and runs
+        # a plan-level closure check. When cross-file references are unsatisfied
+        # (e.g. route calls `service.query_stream()` but no FitzService artifact
+        # adds it), it expands the set with repair artifacts.
+        from fitz_forge.planning.artifact import generate_artifact_set
 
         # Get structural index for validation
         agent_ctx_idx = prior_outputs.get("_agent_context", {})
@@ -2174,46 +2176,44 @@ class SynthesisStage(PipelineStage):
             or prior_outputs.get("_gathered_context", "")
         )
 
-        for filename, purpose in artifact_specs:
-            # Filter decisions relevant to this file
-            relevant_decisions = self._filter_decisions_for_file(
-                filename,
-                resolutions,
-            )
+        def decisions_for(filename: str) -> str:
+            return self._filter_decisions_for_file(filename, resolutions)
 
-            result = await generate_artifact(
-                client=client,
-                filename=filename,
-                purpose=purpose,
-                source_dir=source_dir,
-                structural_index=structural_index,
-                decisions=relevant_decisions,
-                reasoning=reasoning,
-                prior_outputs=prior_outputs,
-                prior_sigs=prior_signatures if prior_signatures else None,
-            )
+        set_result = await generate_artifact_set(
+            client=client,
+            specs=artifact_specs,
+            source_dir=source_dir,
+            structural_index=structural_index,
+            decisions_for=decisions_for,
+            reasoning=reasoning,
+            prior_outputs=prior_outputs,
+        )
 
-            if result.success:
-                artifacts.append({
-                    "filename": result.filename,
-                    "content": result.content,
-                    "purpose": result.purpose,
-                })
-                # Accumulate signatures for downstream artifacts
-                prior_signatures.extend(result.signatures)
-            else:
+        artifacts = set_result.as_artifact_dicts()
+
+        # Log failures from per-artifact generation
+        for r in set_result.results:
+            if not r.success:
                 logger.warning(
                     "artifact[%s]: failed after %d attempts — %s",
-                    filename,
-                    result.attempts,
-                    result.failure_reason,
+                    r.filename,
+                    r.attempts,
+                    r.failure_reason,
                 )
 
         elapsed = time.monotonic() - t0
+        closure_note = "" if set_result.closed else (
+            f" (unclosed: {len(set_result.closure_violations)} violation(s))"
+        )
+        expansion_note = (
+            f" [+{len(set_result.expanded_files)} repair]"
+            if set_result.expanded_files
+            else ""
+        )
         logger.info(
             f"Stage 'synthesis': per-file artifacts complete — "
-            f"{len(artifacts)}/{len(artifact_specs)} artifacts "
-            f"in {elapsed:.1f}s"
+            f"{len(artifacts)}/{len(artifact_specs) + len(set_result.expanded_files)} artifacts "
+            f"in {elapsed:.1f}s{expansion_note}{closure_note}"
         )
 
         if not artifacts:
