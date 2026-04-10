@@ -1,6 +1,6 @@
 # Benchmarking Guide
 
-Benchmarks evaluate plan quality by running the planning pipeline against a fixed codebase and scoring the output with Sonnet-as-Judge.
+Benchmarks evaluate plan quality by running the planning pipeline against a fixed codebase and scoring with the V2 deterministic scorer (0-100).
 
 ## Quick Start
 
@@ -8,19 +8,22 @@ Benchmarks evaluate plan quality by running the planning pipeline against a fixe
 # 1. Load model in LM Studio
 lms load qwen3-coder-next-reap-40b-a3b-i1 -y -c 65536
 
-# 2. Run 5 plans
+# 2. Run plans with V2 scoring
 .venv/Scripts/python -m benchmarks.plan_factory decomposed \
-  --runs 5 \
+  --runs 7 \
   --source-dir ../fitz-sage \
   --context-file benchmarks/ideal_context.json \
   --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
-  --score
+  --score-v2
 
-# 3. Results land in benchmarks/results/decomposed_YYYYMMDD_HHMMSS/
-#    - plan_NN.json     per-run plan output
-#    - run_NN.json      per-run metadata (timing, decisions, success)
-#    - SUMMARY.md       aggregate stats
-#    - score_prompt_NN.md  evaluation prompts (when --score is used)
+# 3. Results land in benchmarks/results/YYYY-MM-DD_HH-MM-SS_run_NNN/
+#    - plan_NN.json              per-run plan output
+#    - run_NN.json               per-run metadata (timing, decisions, success)
+#    - traces_NN/                per-run LLM call provenance + stage snapshots
+#    - SUMMARY.md                aggregate stats (timing, architecture, stages)
+#    - SCORE_V2_SUMMARY.md       deterministic scores per plan
+#    - scores_v2.json            full scoring data (completeness, artifact quality, consistency)
+#    - score_v2_prompt_NN.md     taxonomy prompts for Sonnet classification (Tier 2)
 ```
 
 ## Commands
@@ -35,111 +38,116 @@ Options:
   --source-dir PATH  Target codebase (e.g. ../fitz-sage)
   --context-file F   JSON with pre-gathered retrieval context
   --query TEXT       Task description
-  --score            Generate scoring prompts after runs
+  --score-v2         Run V2 deterministic scorer after generation
+  --score            Generate V1 scoring prompts (legacy, Sonnet-as-Judge)
 ```
 
-### `reasoning`
+### `replay`
 
-Runs the monolithic 3-stage pipeline (context + arch+design + roadmap+risk). Older, kept for comparison.
+Replay a pipeline from a saved stage snapshot. Skips completed stages, re-runs only the remaining stages with the real LLM.
 
-### `retrieval`
+```bash
+.venv/Scripts/python -m benchmarks.plan_factory replay \
+  --snapshot benchmarks/results/.../traces_01/snapshot_after_decision_decomposition.json \
+  --source-dir ../fitz-sage \
+  --context-file benchmarks/ideal_context.json \
+  --score-v2
+```
 
-Benchmarks code retrieval only (no LLM planning). Tests which files the agent finds for a given query.
+Use this to test pipeline changes without re-running the full 10-minute pipeline. Available snapshots:
+- `snapshot_after__pre_stages.json` — re-run everything from decomposition
+- `snapshot_after_decision_decomposition.json` — re-run resolution + synthesis
+- `snapshot_after_decision_resolution.json` — re-run only synthesis (artifact generation)
 
-### `prepare-scoring`
+### `prepare-scoring-v2`
 
-Generates scoring prompts from existing plan files without re-running the pipeline.
+Rescore existing plans without re-running the pipeline.
+
+```bash
+.venv/Scripts/python -m benchmarks.plan_factory prepare-scoring-v2 \
+  --results-dir benchmarks/results/YYYY-MM-DD_HH-MM-SS_run_NNN \
+  --context-file benchmarks/ideal_context.json
+```
+
+### `reasoning` / `retrieval`
+
+Legacy commands for monolithic pipeline and retrieval-only benchmarks.
 
 ## Scoring
 
-Plans are evaluated on 6 dimensions (each 1-10, total /60):
+### V2 Deterministic (Tier 1) — automatic, zero LLM cost
 
-| Dimension | What it measures |
-|-----------|-----------------|
-| **file_identification** | Did the plan find the right files to modify? |
-| **contract_preservation** | Does the plan preserve existing method signatures and behavior? |
-| **internal_consistency** | Do the decisions and artifacts agree with each other? |
-| **codebase_alignment** | Are method names, field names, imports correct (not fabricated)? |
-| **implementability** | Could a developer follow this plan and produce working code? |
-| **scope_calibration** | Is the scope appropriate — not too narrow, not too broad? |
+Plans scored on 3 dimensions (total /100):
+
+| Dimension | Weight | What it measures |
+|-----------|--------|-----------------|
+| **Completeness** | 0-30 | Required files present (from taxonomy) |
+| **Artifact quality** | 0-50 | Size-weighted mean: parseable, fabrication, streaming behavior |
+| **Consistency** | 0-20 | Cross-artifact method name + type agreement |
+
+Same plan always gets the same score. Source-dir augmentation validates against the full codebase (not just retrieval subset).
+
+### V2 Taxonomy (Tier 2) — Sonnet classification
+
+Sonnet classifies each plan's architecture and artifacts into a predefined taxonomy:
+- Architecture: A1 (best, full pipeline + streaming) to A5 (fail)
+- Per-file: E1-E6 (engine), R1-R5 (routes), S1-S3 (synthesizer)
+
+Run via Claude Code subagents on `score_v2_prompt_NN.md` files. Not yet automated.
 
 ### Scoring workflow
 
-**Sequential assessment protocol (required for pipeline experiments):**
-
-Run plans one at a time in this sequence so you can catch regressions early:
-
-```
-1 plan → assess → 1 plan → assess → 1 plan → assess → 2 plans → assess both → synthesize
-```
-
-Commands:
-
-```bash
-# Plans 1, 2, 3 (run one at a time, score and assess after each)
-.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 1 \
-  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
-  --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
-  --score
-
-# Plans 4-5 (run together)
-.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 2 \
-  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
-  --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
-  --score
-```
-
-After each run, score with parallel Sonnet subagents (one per plan):
-
-```
-Read score_prompt_NN.md and follow ALL instructions to score the plan. Output ONLY the final JSON scorecard.
-```
-
-Extract scores from JSON: `file + contract + consistency + alignment + implementability + scope`.
-
-After all 5 plans, synthesize: compare to baseline avg, note floor/ceiling shifts, update tracker.
+1. Run plans with `--score-v2` — deterministic scores are computed automatically
+2. Check `SCORE_V2_SUMMARY.md` for per-plan breakdown
+3. If investigating specific failures, check `scores_v2.json` for detailed artifact checks and consistency results
+4. For architecture quality assessment, run Tier 2 taxonomy classification via Sonnet subagents
 
 **When to abort early:**
-- If plans 1-2 both show obvious regressions (score < 30 or same failure mode as what you're trying to fix), stop immediately and diagnose before running more.
-- If a plan reveals a bug in the pipeline code (wrong output, crash, incorrect behavior), stop the benchmark sequence, fix the bug, then restart from plan 1.
-- Do NOT continue generating plans if a bug is confirmed — additional plans waste time and produce misleading data.
+- If plans 1-2 both show obvious regressions (score < 70 or same failure mode), stop and diagnose
+- If a plan reveals a pipeline bug (crash, wrong output), stop, fix, restart from plan 1
+- Do NOT continue generating plans if a bug is confirmed
 
-**Full 5-run batch (verification only, not for active experiments):**
+## Provenance & Replay
 
-```bash
-.venv/Scripts/python -m benchmarks.plan_factory decomposed --runs 5 \
-  --source-dir ../fitz-sage --context-file benchmarks/ideal_context.json \
-  --query "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response" \
-  --score
-```
+Every benchmark run produces full LLM call provenance in `traces_NN/`:
+- `NNN_label.json` — every generate() call with messages, output, timing, max_tokens
+- `snapshot_after_{stage}.json` — full prior_outputs dict after each pipeline stage
 
-1. `--score` flag writes `score_prompt_NN.md` files alongside plans
-2. Feed these to Claude Code subagents for Sonnet-as-Judge evaluation
-3. No Anthropic SDK needed — evaluation runs through Claude Code's own interface
+Use `replay` to jump back to any stage and re-run from there. This enables:
+- Testing artifact generation changes without re-running decomposition (~50s saved)
+- Testing synthesis changes without re-running resolution (~70s saved)
+- Rapid A/B testing of prompt changes on the same decisions
 
 ## Architecture
 
 ```
-plan_factory.py          CLI entry (typer)
+plan_factory.py                  CLI entry (typer)
   |
-  +-- _run_decomposed_once()    creates fresh config/client/pipeline per run
+  +-- _run_decomposed_once()     creates fresh config/client/pipeline per run
   |     |
-  |     +-- AgentContextGatherer    code retrieval (skipped via _bench_override_files)
-  |     +-- DecomposedPipeline      decision decompose -> resolve -> synthesize
+  |     +-- configure_tracing()  enables LLM call provenance
+  |     +-- AgentContextGatherer code retrieval (skipped via _bench_override_files)
+  |     +-- DecomposedPipeline   decision decompose -> resolve -> synthesize
   |           |
-  |           +-- LM Studio API     http://localhost:1234/v1 (OpenAI-compat)
+  |           +-- generate()     centralized LLM calls (budget cap, retry, tracing)
+  |           +-- generate_artifact()  artifact black box (validate + retry)
   |
-  +-- eval_plans.py             scoring prompt generation (--score)
+  +-- _prepare_scoring_v2()      deterministic scoring + taxonomy prompts
+  +-- _run_replay_once()         replay from saved snapshot
 
 ### Key files
 
 | File | Purpose |
 |------|---------|
-| `benchmarks/plan_factory.py` | Benchmark runner CLI |
-| `benchmarks/eval_plans.py` | Scoring prompt generation |
-| `benchmarks/eval_prompt.py` | Prompt template for Sonnet-as-Judge |
+| `benchmarks/plan_factory.py` | Benchmark runner CLI (decomposed, replay, prepare-scoring-v2) |
+| `benchmarks/eval_v2_deterministic.py` | V2 deterministic scorer (completeness, artifact quality, consistency) |
+| `benchmarks/eval_v2_taxonomy.py` | V2 taxonomy classification (Sonnet prompt builder + parser) |
+| `benchmarks/streaming_taxonomy.json` | Task-specific taxonomy (A1-A5, E1-E6, R1-R5, S1-S3) |
 | `benchmarks/ideal_context.json` | Pre-gathered retrieval context (fixed across runs) |
-| `benchmarks/results/streaming-task-tracker.md` | Run log with all results and session handoffs |
+| `fitz_forge/llm/generate.py` | Centralized LLM call with budget cap + tracing |
+| `fitz_forge/planning/artifact/` | Artifact generation black box (strategies + validation) |
+| `docs/v2-scoring/TRACKER.md` | Run history, scoring formula, failure patterns |
+```
 
 ## Fixed Context
 
@@ -147,7 +155,9 @@ Benchmarks use `ideal_context.json` to bypass code retrieval and test only the p
 
 ## Important Notes
 
-- The `--query` matters. The default query ("Add token usage tracking") is a different task than the streaming benchmark. Scores are NOT comparable across different queries.
-- Temperature is non-zero (0.7 for generation) — expect variance between runs. Always run 5+ plans and report mean + range.
+- The `--query` matters. Scores are NOT comparable across different queries.
+- Temperature is non-zero (0.7 for synthesis reasoning) — expect variance. Run 5+ plans and report mean + range.
 - Each run creates a fresh pipeline instance. No state leaks between runs.
 - Model must be loaded in LM Studio before running. The health check verifies connectivity but won't auto-load.
+- Results folder auto-increments: `YYYY-MM-DD_HH-MM-SS_run_NNN`.
+- Current baseline: run 91, avg 87.3/100, range 73.3-100.0 (6 plans).
