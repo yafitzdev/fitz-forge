@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 from fitz_forge.llm.generate import generate, get_trace_dir
 from fitz_forge.planning.pipeline.checkpoint import CheckpointManager
+from fitz_forge.planning.pipeline.stages.base import (
+    SYSTEM_PROMPT,
+    PipelineStage,
+    extract_json,
+)
+from fitz_forge.planning.prompts import load_prompt
 
 
 def _save_snapshot(stage_name: str, prior_outputs: dict) -> None:
@@ -53,13 +59,6 @@ def _save_snapshot(stage_name: str, prior_outputs: dict) -> None:
     except Exception as e:
         logger.warning("Snapshot save failed: %s", e)
 
-
-from fitz_forge.planning.pipeline.stages.base import (
-    SYSTEM_PROMPT,
-    PipelineStage,
-    extract_json,
-)
-from fitz_forge.planning.prompts import load_prompt
 
 if TYPE_CHECKING:
     from fitz_forge.planning.agent import AgentContextGatherer
