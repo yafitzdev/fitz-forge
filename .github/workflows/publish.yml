@@ -1,63 +1,57 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
-      - name: Install package with dev dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Run tests
-        run: pytest
-
   build:
-    needs: test
+    name: build sdist + wheel
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
-      - name: Install build tools
-        run: pip install build
+      - name: Install build backend
+        run: python -m pip install --upgrade build twine
 
       - name: Build distributions
         run: python -m build
 
-      - name: Upload distributions
+      - name: Sanity-check the artifacts
+        run: python -m twine check dist/*
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+          retention-days: 7
 
   publish:
+    name: publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # CRITICAL: environment name must match PyPI trusted publisher configuration
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/p/fitz-forge
+
     permissions:
-      # MANDATORY: id-token write permission for OIDC token minting
       id-token: write
+
     steps:
-      - name: Download distributions
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
@@ -65,11 +59,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # No credentials needed - uses OIDC trusted publishing
-        # Prerequisites:
-        # 1. Create 'pypi' environment in GitHub repo settings
-        # 2. Configure trusted publisher on PyPI project settings:
-        #    - Owner: <github-username>
-        #    - Repository: fitz-forge
-        #    - Workflow: publish.yml
-        #    - Environment: pypi
