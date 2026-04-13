@@ -281,8 +281,8 @@ async def generate_artifact_set(
 
     # Phase 1 — per-artifact generation. The per-artifact black box is unchanged.
     for filename, purpose in specs:
-        relevant_decisions = decisions_for(filename) if callable(decisions_for) else str(
-            decisions_for or ""
+        relevant_decisions = (
+            decisions_for(filename) if callable(decisions_for) else str(decisions_for or "")
         )
         result = await generate_artifact(
             client=client,
@@ -361,9 +361,7 @@ async def generate_artifact_set(
                 to_regenerate.setdefault(v.artifact, []).append(v)
 
         if not to_expand and not to_regenerate:
-            logger.info(
-                "artifact_set: no routable repair targets, returning unclosed set"
-            )
+            logger.info("artifact_set: no routable repair targets, returning unclosed set")
             break
 
         # Strategy 1: expand the set with new repair artifacts.
@@ -379,8 +377,8 @@ async def generate_artifact_set(
                 target,
                 symbols,
             )
-            repair_decisions = decisions_for(target) if callable(decisions_for) else str(
-                decisions_for or ""
+            repair_decisions = (
+                decisions_for(target) if callable(decisions_for) else str(decisions_for or "")
             )
             repair_result = await generate_artifact(
                 client=client,
@@ -415,9 +413,7 @@ async def generate_artifact_set(
             if offender_idx is None:
                 continue
             old_result = results[offender_idx]
-            feedback_lines = [
-                f"- {v.ref.pretty()}: {v.detail}" for v in vs[:5]
-            ]
+            feedback_lines = [f"- {v.ref.pretty()}: {v.detail}" for v in vs[:5]]
             feedback = "\n".join(feedback_lines)
             regen_purpose = (
                 f"{old_result.purpose}\n\n"
@@ -429,8 +425,10 @@ async def generate_artifact_set(
                 offender_file,
                 len(vs),
             )
-            regen_decisions = decisions_for(offender_file) if callable(decisions_for) else str(
-                decisions_for or ""
+            regen_decisions = (
+                decisions_for(offender_file)
+                if callable(decisions_for)
+                else str(decisions_for or "")
             )
             regen_result = await generate_artifact(
                 client=client,

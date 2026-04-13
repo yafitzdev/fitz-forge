@@ -306,9 +306,7 @@ class StructuralIndexLookup:
                 self._all_function_names.add(name)
         return added
 
-    def _absorb_file_pass2(
-        self, rel: str, tree: ast.Module, known_classes: set[str]
-    ) -> None:
+    def _absorb_file_pass2(self, rel: str, tree: ast.Module, known_classes: set[str]) -> None:
         """Pass 2: infer return types for functions that have no annotation."""
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -337,14 +335,12 @@ class StructuralIndexLookup:
                 if ret is None:
                     # Try body inference for unannotated methods
                     from .inference import _infer_return_from_body, _infer_return_from_yields
+
                     ret = _infer_return_from_body(child) or _infer_return_from_yields(child)
                 methods[mname] = IndexedMethod(mname, ret)
 
         fields = extract_class_fields(node)
-        bases = [
-            extract_type_name(b) or ""
-            for b in node.bases
-        ]
+        bases = [extract_type_name(b) or "" for b in node.bases]
         bases = [b for b in bases if b]
 
         if name in self._all_class_names:

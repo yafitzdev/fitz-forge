@@ -121,24 +121,78 @@ class ClosureViolation:
 
 _SKIP_NAMES = _GROUNDING_SKIP_NAMES | frozenset(
     {
-        "AsyncIterator", "AsyncGenerator", "Awaitable", "Coroutine",
-        "uuid", "asyncio", "functools", "itertools",
+        "AsyncIterator",
+        "AsyncGenerator",
+        "Awaitable",
+        "Coroutine",
+        "uuid",
+        "asyncio",
+        "functools",
+        "itertools",
     }
 )
 
 # Stdlib / 3rd-party module prefixes — imports from these are never closure-checked.
 _STDLIB_PACKAGES = frozenset(
     {
-        "typing", "collections", "abc", "functools", "itertools", "asyncio",
-        "dataclasses", "contextlib", "pathlib", "json", "re", "os", "sys",
-        "time", "uuid", "logging", "enum", "datetime", "decimal", "math",
-        "random", "hashlib", "base64", "struct", "pickle", "copy", "types",
-        "inspect", "warnings", "traceback", "io", "tempfile", "shutil",
-        "subprocess", "threading", "concurrent", "queue", "weakref",
-        "pydantic", "fastapi", "starlette", "httpx", "requests", "aiohttp",
-        "uvicorn", "sqlalchemy", "pytest", "typer", "click", "rich",
-        "numpy", "pandas", "anthropic", "openai", "cohere", "ollama",
-        "mistralai", "google",
+        "typing",
+        "collections",
+        "abc",
+        "functools",
+        "itertools",
+        "asyncio",
+        "dataclasses",
+        "contextlib",
+        "pathlib",
+        "json",
+        "re",
+        "os",
+        "sys",
+        "time",
+        "uuid",
+        "logging",
+        "enum",
+        "datetime",
+        "decimal",
+        "math",
+        "random",
+        "hashlib",
+        "base64",
+        "struct",
+        "pickle",
+        "copy",
+        "types",
+        "inspect",
+        "warnings",
+        "traceback",
+        "io",
+        "tempfile",
+        "shutil",
+        "subprocess",
+        "threading",
+        "concurrent",
+        "queue",
+        "weakref",
+        "pydantic",
+        "fastapi",
+        "starlette",
+        "httpx",
+        "requests",
+        "aiohttp",
+        "uvicorn",
+        "sqlalchemy",
+        "pytest",
+        "typer",
+        "click",
+        "rich",
+        "numpy",
+        "pandas",
+        "anthropic",
+        "openai",
+        "cohere",
+        "ollama",
+        "mistralai",
+        "google",
     }
 )
 
@@ -203,9 +257,7 @@ def load_target_self_attrs(
     return {}
 
 
-def _target_class_for_file(
-    filename: str, lookup: StructuralIndexLookup
-) -> str | None:
+def _target_class_for_file(filename: str, lookup: StructuralIndexLookup) -> str | None:
     """Find the primary class owning `filename` (most methods wins)."""
     candidates: list[tuple[str, int]] = []
     for cls_list in lookup.classes.values():
@@ -432,9 +484,7 @@ class _ReferenceCollector(ast.NodeVisitor):
                 continue
             self._emit(
                 Reference(
-                    ref=SymbolRef(
-                        owner=node.module, name=alias.name, kind="import_name"
-                    ),
+                    ref=SymbolRef(owner=node.module, name=alias.name, kind="import_name"),
                     line=getattr(node, "lineno", 0),
                     context=f"from {node.module} import {alias.name}",
                     usage="import",
@@ -543,13 +593,9 @@ def extract_provides(
                     sig = _sig_from_funcdef(child)
                     out[SymbolRef(owner=node.name, name=child.name, kind="method")] = sig
                     out[SymbolRef(owner=node.name, name=child.name, kind="field")] = sig
-                elif isinstance(child, ast.AnnAssign) and isinstance(
-                    child.target, ast.Name
-                ):
+                elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     # Pydantic / dataclass fields
-                    out[
-                        SymbolRef(owner=node.name, name=child.target.id, kind="field")
-                    ] = None
+                    out[SymbolRef(owner=node.name, name=child.target.id, kind="field")] = None
 
     return out
 
@@ -632,9 +678,7 @@ def _looks_like_generator(return_type: str | None) -> bool:
 def _is_async_iter_type(return_type: str | None) -> bool:
     if not return_type:
         return False
-    return any(
-        x in return_type for x in ("AsyncIterator", "AsyncGenerator", "AsyncIterable")
-    )
+    return any(x in return_type for x in ("AsyncIterator", "AsyncGenerator", "AsyncIterable"))
 
 
 def _is_awaitable_type(return_type: str | None) -> bool:

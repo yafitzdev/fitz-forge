@@ -2171,9 +2171,8 @@ class SynthesisStage(PipelineStage):
 
         # Get structural index for validation
         agent_ctx_idx = prior_outputs.get("_agent_context", {})
-        structural_index = (
-            agent_ctx_idx.get("full_structural_index", "")
-            or prior_outputs.get("_gathered_context", "")
+        structural_index = agent_ctx_idx.get("full_structural_index", "") or prior_outputs.get(
+            "_gathered_context", ""
         )
 
         def decisions_for(filename: str) -> str:
@@ -2202,13 +2201,13 @@ class SynthesisStage(PipelineStage):
                 )
 
         elapsed = time.monotonic() - t0
-        closure_note = "" if set_result.closed else (
-            f" (unclosed: {len(set_result.closure_violations)} violation(s))"
+        closure_note = (
+            ""
+            if set_result.closed
+            else (f" (unclosed: {len(set_result.closure_violations)} violation(s))")
         )
         expansion_note = (
-            f" [+{len(set_result.expanded_files)} repair]"
-            if set_result.expanded_files
-            else ""
+            f" [+{len(set_result.expanded_files)} repair]" if set_result.expanded_files else ""
         )
         logger.info(
             f"Stage 'synthesis': per-file artifacts complete — "

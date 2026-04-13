@@ -75,9 +75,7 @@ def _format_artifacts_summary(artifacts: list[dict]) -> str:
     for a in artifacts:
         content = a.get("content", "")
         line_count = content.count("\n") + 1
-        lines.append(
-            f"- {a.get('filename', '?')} ({line_count} lines): {a.get('purpose', '')}"
-        )
+        lines.append(f"- {a.get('filename', '?')} ({line_count} lines): {a.get('purpose', '')}")
     return "\n".join(lines)
 
 
@@ -276,7 +274,10 @@ async def validate_grounding(
     if client is not None:
         try:
             prompt = build_llm_grounding_prompt(
-                ast_violations, artifacts, structural_index, resolutions,
+                ast_violations,
+                artifacts,
+                structural_index,
+                resolutions,
             )
             messages = [
                 {

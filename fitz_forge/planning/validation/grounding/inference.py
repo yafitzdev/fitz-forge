@@ -143,10 +143,7 @@ def _infer_return_from_body(
     candidates: set[str] = set()
     for child in ast.walk(node):
         # Don't descend into nested functions
-        if (
-            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and child is not node
-        ):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child is not node:
             continue
         if not isinstance(child, ast.Return) or child.value is None:
             continue
@@ -169,10 +166,7 @@ def _infer_return_from_yields(
     """
     has_yield = False
     for child in ast.walk(node):
-        if (
-            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and child is not node
-        ):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child is not node:
             continue
         if isinstance(child, (ast.Yield, ast.YieldFrom)):
             has_yield = True
@@ -297,10 +291,7 @@ def extract_init_self_attrs(
     # Find __init__
     init_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     for child in class_node.body:
-        if (
-            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and child.name == "__init__"
-        ):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name == "__init__":
             init_node = child
             break
     if init_node is None:
