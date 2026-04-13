@@ -26,6 +26,16 @@ from fitz_forge.models.jobs import JobRecord, JobState
 from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 
+async def _wait_for_terminal(store: SQLiteJobStore, job_id: str, timeout: float = 10.0) -> None:
+    """Poll until job reaches COMPLETE or FAILED, avoiding fixed sleeps that break on slow CI."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        job = await store.get(job_id)
+        if job and job.state in (JobState.COMPLETE, JobState.FAILED):
+            return
+        await asyncio.sleep(0.05)
+
+
 @pytest_asyncio.fixture
 async def store(tmp_path: Path) -> SQLiteJobStore:
     """Create a temporary SQLite store for testing."""
@@ -103,7 +113,7 @@ async def test_process_job_success(store: SQLiteJobStore, tmp_path: Path):
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", return_value=mock_pipeline_result):
         await worker.start()
-        await asyncio.sleep(0.5)
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
     # Verify job is complete
@@ -144,11 +154,7 @@ async def test_process_job_health_check_fails(store: SQLiteJobStore, tmp_path: P
         store, config=config, poll_interval=0.1, ollama_client=mock_client, memory_threshold=80.0
     )
     await worker.start()
-
-    # Wait for job to fail
-    await asyncio.sleep(0.5)
-
-    # Stop worker
+    await _wait_for_terminal(store, "test_job")
     await worker.stop()
 
     # Verify job is failed
@@ -225,7 +231,7 @@ async def test_process_job_oom_fallback(store: SQLiteJobStore, tmp_path: Path):
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", return_value=mock_pipeline_result):
         await worker.start()
-        await asyncio.sleep(0.5)
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
     # Verify job is complete (fallback handled inside OllamaClient)
@@ -275,7 +281,7 @@ async def test_process_job_memory_abort(store: SQLiteJobStore, tmp_path: Path):
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", return_value=mock_pipeline_result):
         await worker.start()
-        await asyncio.sleep(0.5)
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
     # Verify job is failed
@@ -318,11 +324,7 @@ async def test_process_job_connection_error(store: SQLiteJobStore, tmp_path: Pat
         store, config=config, poll_interval=0.1, ollama_client=mock_client, memory_threshold=80.0
     )
     await worker.start()
-
-    # Wait for job to fail
-    await asyncio.sleep(0.5)
-
-    # Stop worker
+    await _wait_for_terminal(store, "test_job")
     await worker.stop()
 
     # Verify job is failed
@@ -353,11 +355,7 @@ async def test_process_job_no_client_stub(store: SQLiteJobStore):
     # Create worker without OllamaClient
     worker = BackgroundWorker(store, poll_interval=0.1, ollama_client=None)
     await worker.start()
-
-    # Wait for job to complete (stub)
-    await asyncio.sleep(0.5)
-
-    # Stop worker
+    await _wait_for_terminal(store, "test_job")
     await worker.stop()
 
     # Verify job completes with stub behavior

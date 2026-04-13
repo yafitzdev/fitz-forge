@@ -24,6 +24,16 @@ from fitz_forge.models.jobs import JobRecord, JobState
 from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 
+async def _wait_for_terminal(store: SQLiteJobStore, job_id: str, timeout: float = 10.0) -> None:
+    """Poll until job reaches COMPLETE or FAILED, avoiding fixed sleeps that break on slow CI."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        job = await store.get(job_id)
+        if job and job.state in (JobState.COMPLETE, JobState.FAILED):
+            return
+        await asyncio.sleep(0.05)
+
+
 @pytest_asyncio.fixture
 async def store(tmp_path: Path) -> SQLiteJobStore:
     """Create a temporary SQLite store for testing."""
@@ -104,11 +114,7 @@ async def test_worker_uses_pipeline(store: SQLiteJobStore, tmp_path: Path):
         worker._pipeline, "execute", return_value=mock_pipeline_result
     ) as mock_execute:
         await worker.start()
-
-        # Wait for job to complete
-        await asyncio.sleep(0.5)
-
-        # Stop worker
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
         # Verify pipeline was called
@@ -203,7 +209,7 @@ async def test_worker_progress_updates(store: SQLiteJobStore, tmp_path: Path):
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", side_effect=mock_execute):
         await worker.start()
-        await asyncio.sleep(0.5)
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
     # Verify job completed
@@ -250,7 +256,7 @@ async def test_worker_pipeline_failure(store: SQLiteJobStore, tmp_path: Path):
     # Mock pipeline execute
     with patch.object(worker._pipeline, "execute", return_value=mock_pipeline_result):
         await worker.start()
-        await asyncio.sleep(0.5)
+        await _wait_for_terminal(store, "test_job")
         await worker.stop()
 
     # Verify job failed
@@ -282,7 +288,7 @@ async def test_worker_without_pipeline_stub(store: SQLiteJobStore):
     # Create worker without OllamaClient (no pipeline)
     worker = BackgroundWorker(store, poll_interval=0.1, ollama_client=None)
     await worker.start()
-    await asyncio.sleep(0.5)
+    await _wait_for_terminal(store, "test_job")
     await worker.stop()
 
     # Verify job completed with stub
