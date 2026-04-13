@@ -340,7 +340,8 @@ class TestRetryBehavior:
 
     @pytest.mark.asyncio
     async def test_retries_on_openai_api_connection_error(self):
-        from openai import APIConnectionError
+        openai = pytest.importorskip("openai")
+        APIConnectionError = openai.APIConnectionError
 
         client = _make_client(model="test-model")
 

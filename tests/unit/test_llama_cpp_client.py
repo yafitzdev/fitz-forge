@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.importorskip("openai")
+
 from fitz_forge.config.schema import LlamaCppModelConfig
 from fitz_forge.llm.llama_cpp import LlamaCppClient
 

@@ -13,10 +13,11 @@ class TestGetFreeVram:
     """Tests for nvidia-smi free VRAM query."""
 
     def test_returns_int_on_success(self):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "28456\n"
-            assert GPUTemperatureGuard.get_free_vram_mb() == 28456
+        with patch("shutil.which", return_value="/usr/bin/nvidia-smi"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value.returncode = 0
+                mock_run.return_value.stdout = "28456\n"
+                assert GPUTemperatureGuard.get_free_vram_mb() == 28456
 
     def test_returns_none_when_no_nvidia_smi(self):
         with patch("shutil.which", return_value=None):
@@ -34,10 +35,11 @@ class TestGetGpuTemp:
     """Tests for nvidia-smi temperature query."""
 
     def test_returns_int_on_success(self):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "42\n"
-            assert GPUTemperatureGuard.get_gpu_temp() == 42
+        with patch("shutil.which", return_value="/usr/bin/nvidia-smi"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value.returncode = 0
+                mock_run.return_value.stdout = "42\n"
+                assert GPUTemperatureGuard.get_gpu_temp() == 42
 
     def test_returns_none_when_no_nvidia_smi(self):
         with patch("shutil.which", return_value=None):
@@ -58,10 +60,11 @@ class TestGetGpuTemp:
                 assert GPUTemperatureGuard.get_gpu_temp() is None
 
     def test_multi_gpu_returns_first(self):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "55\n62\n"
-            assert GPUTemperatureGuard.get_gpu_temp() == 55
+        with patch("shutil.which", return_value="/usr/bin/nvidia-smi"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value.returncode = 0
+                mock_run.return_value.stdout = "55\n62\n"
+                assert GPUTemperatureGuard.get_gpu_temp() == 55
 
 
 class TestPreflight:
