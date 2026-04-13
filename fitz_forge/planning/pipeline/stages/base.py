@@ -60,6 +60,36 @@ def _count_unclosed_delimiters(text: str) -> tuple[int, int, bool]:
     return max(braces, 0), max(brackets, 0), in_string
 
 
+def _compute_closing_suffix(text: str) -> str:
+    """Compute the closing suffix needed to balance all unclosed delimiters.
+
+    Tracks the actual nesting stack so that mixed { and [ are closed in the
+    correct reverse order (e.g. '{"a": [{"b": 1' → '}]}' not ']]}}').
+    """
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in ("}", "]") and stack and stack[-1] == ch:
+            stack.pop()
+    return "".join(reversed(stack))
+
+
 def _repair_truncated_json(
     candidate: str, braces: int, brackets: int, in_string: bool
 ) -> dict[str, Any] | None:
@@ -83,7 +113,7 @@ def _repair_truncated_json(
     # Strip back to after the last complete JSON value by removing trailing
     # partial tokens (commas, colons, partial keys, whitespace).
     for _ in range(200):  # max trim attempts
-        suffix = "]" * brackets + "}" * braces
+        suffix = _compute_closing_suffix(text)
         try:
             return json.loads(text + suffix)
         except json.JSONDecodeError:
@@ -116,7 +146,6 @@ def _repair_truncated_json(
         braces, brackets, in_string = _count_unclosed_delimiters(text)
         if in_string:
             text = text + '"'
-            braces, brackets, in_string = _count_unclosed_delimiters(text)
 
     return None
 

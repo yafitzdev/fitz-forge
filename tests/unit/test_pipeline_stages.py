@@ -642,13 +642,13 @@ class TestSynthesisExecute:
         stage = SynthesisStage()
         mock_client = AsyncMock()
 
-        # Responses: 1 synthesis + 1 critique + field groups
+        # Responses: 1 synthesis + 1 critique + 1 roadmap_risk + field groups
         # Context: description, stakeholders, files, assumptions (4)
         # Architecture: approaches, tradeoffs (2)
         # Design: adrs, components, integrations (3) + artifacts (1)
         # Roadmap: phases, scheduling (2)
         # Risk: risks (1)
-        # Total: 3 synthesis (best-of-3) + 1 critique + 4 + 2 + 3 + 1 + 2 + 1 = 17
+        # Total: 3 synthesis (best-of-3) + 1 critique + 1 roadmap_risk + 4 + 2 + 3 + 1 + 2 + 1 = 18
         mock_client.generate = AsyncMock(
             side_effect=[
                 # 1a. Synthesis reasoning candidate 1
@@ -659,6 +659,8 @@ class TestSynthesisExecute:
                 "Third synthesis candidate for scope consensus...",
                 # 2. Self-critique
                 "Reviewed and refined synthesis...",
+                # 2b. Roadmap+risk reasoning (separate pass added in feat: split synthesis reasoning)
+                "Roadmap and risk reasoning pass...",
                 # Context groups
                 json.dumps(
                     {
