@@ -36,6 +36,7 @@ dependencies = [
     "typer>=0.9",
     "rich>=13.0",
     "fitz-sage[code]",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

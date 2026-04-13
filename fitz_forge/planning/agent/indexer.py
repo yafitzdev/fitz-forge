@@ -509,7 +509,10 @@ def _extract_config(suffix: str, content: str) -> str:
         elif suffix == ".json":
             data = json.loads(content)
         elif suffix == ".toml":
-            import tomllib
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore[no-reattr]
 
             data = tomllib.loads(content)
         else:
