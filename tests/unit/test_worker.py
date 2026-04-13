@@ -22,6 +22,16 @@ from fitz_forge.models.jobs import JobRecord, JobState
 from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 
+async def _wait_for_terminal(store: SQLiteJobStore, job_id: str, timeout: float = 10.0) -> None:
+    """Poll until job reaches COMPLETE or FAILED, avoiding fixed sleeps that break on slow CI."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        job = await store.get(job_id)
+        if job and job.state in (JobState.COMPLETE, JobState.FAILED):
+            return
+        await asyncio.sleep(0.05)
+
+
 @pytest_asyncio.fixture
 async def store(tmp_path: Path) -> SQLiteJobStore:
     """Create a temporary SQLite store for testing."""
@@ -54,10 +64,7 @@ async def test_worker_processes_queued_job(store: SQLiteJobStore):
     worker = BackgroundWorker(store, poll_interval=0.1)
     await worker.start()
 
-    # Wait for job to be processed
-    await asyncio.sleep(0.5)
-
-    # Stop worker
+    await _wait_for_terminal(store, "job1")
     await worker.stop()
 
     # Verify job is complete
@@ -108,10 +115,8 @@ async def test_worker_fifo_order(store: SQLiteJobStore):
     worker = BackgroundWorker(store, poll_interval=0.1)
     await worker.start()
 
-    # Wait for both jobs to complete
-    await asyncio.sleep(0.8)
-
-    # Stop worker
+    await _wait_for_terminal(store, "job_a")
+    await _wait_for_terminal(store, "job_b")
     await worker.stop()
 
     # Verify both complete
