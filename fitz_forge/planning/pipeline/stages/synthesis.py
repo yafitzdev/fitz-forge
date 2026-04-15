@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+from collections import Counter
 from typing import Any
 
 from fitz_forge.llm.generate import generate
@@ -1836,6 +1837,125 @@ class SynthesisStage(PipelineStage):
             "Do not skip intermediate layers — trace the full call chain."
         )
 
+    # ------------------------------------------------------------------
+    # V2-F7 Fix A: decomposition → synthesis closure
+    # ------------------------------------------------------------------
+    #
+    # Invariant: every file that decomposition analyzed in 2+ decision
+    # evidence entries must appear in needed_artifacts. Synthesis reasoning
+    # sometimes "routes around" files that decomposition explicitly
+    # identified as needing changes; this helper auto-injects them.
+    #
+    # Same shape as the artifact closure principle — state the invariant,
+    # then enforce it — just at a different pipeline level (decomp→synthesis
+    # transition rather than the per-artifact set). See
+    # docs/roadmap/v2-f7-decision-synthesis-closure.md and
+    # CLAUDE.md rules 10+11.
+    #
+    # Codebase/language-agnostic: file references are discovered by matching
+    # evidence text against the actual files in the structural index. No
+    # hardcoded extensions, no regex patterns specific to Python.
+
+    @staticmethod
+    def _known_files_from_index(structural_index: str) -> set[str]:
+        """Extract all file paths from the structural index (## headers).
+
+        The structural index is the same source both decomposition and
+        synthesis see. Using its file list keeps this step aligned with
+        what the model was told exists.
+        """
+        files: set[str] = set()
+        for line in structural_index.split("\n"):
+            line = line.strip()
+            if not line.startswith("## "):
+                continue
+            candidate = line[3:].strip()
+            # A file header should contain a path separator; skip section
+            # headers like "## Structural Overview".
+            if "/" in candidate or "\\" in candidate:
+                files.add(candidate.replace("\\", "/"))
+        return files
+
+    @staticmethod
+    def _enforce_decision_coverage(
+        needed_artifacts: list[str],
+        resolutions: list[dict[str, Any]],
+        known_files: set[str],
+        min_refs: int = 2,
+    ) -> list[str]:
+        """Inject files referenced ≥min_refs times in decisions but missing from needed.
+
+        A file is "referenced" by a decision if its path appears in that
+        decision's text or evidence entries. Bounded by word boundaries so
+        `engine.py` doesn't match `my_engine.py`. We only inject files that
+        exist in the codebase (via `known_files` from the structural index),
+        so we never fabricate a path.
+
+        Injected entries are prepended so they take priority inside the
+        downstream 8-file cap — the signal from decomposition is stronger
+        than whatever synthesis reasoning happened to produce.
+        """
+        if not known_files or not resolutions:
+            return needed_artifacts
+
+        # Longer paths first so nested paths don't hide under shorter ones.
+        sorted_files = sorted(known_files, key=len, reverse=True)
+
+        file_refs: Counter[str] = Counter()
+        file_to_decision: dict[str, list[dict[str, Any]]] = {}
+        for r in resolutions:
+            blob = r.get("decision", "") + "\n" + "\n".join(r.get("evidence", []))
+            if not blob.strip():
+                continue
+            seen_in_this: set[str] = set()
+            for fname in sorted_files:
+                if fname in seen_in_this:
+                    continue
+                # Word-boundary check: filename must not be glued to a
+                # preceding word character or trailed by one (so
+                # "engine.py" doesn't match inside "my_engine.pyc" etc.).
+                escaped = re.escape(fname)
+                if re.search(
+                    r"(?<![A-Za-z0-9_])" + escaped + r"(?![A-Za-z0-9_])",
+                    blob,
+                ):
+                    file_refs[fname] += 1
+                    file_to_decision.setdefault(fname, []).append(r)
+                    seen_in_this.add(fname)
+
+        # Compute the set of filenames already planned
+        existing: set[str] = set()
+        for entry in needed_artifacts:
+            path = entry.split(" -- ")[0].strip() if " -- " in entry else entry.strip()
+            if path:
+                existing.add(path.replace("\\", "/"))
+
+        injected: list[str] = []
+        for fname, count in file_refs.most_common():
+            if count < min_refs or fname in existing:
+                continue
+            # Derive purpose from the decision that mentions this file most
+            # prominently (longest decision text is a reasonable proxy).
+            best = max(
+                file_to_decision[fname],
+                key=lambda r: len(r.get("decision", "")),
+            )
+            purpose = best.get("decision", "")[:200].replace("\n", " ").strip()
+            if not purpose:
+                purpose = (
+                    f"Modify {fname}: referenced by {count} decisions but "
+                    f"missing from needed_artifacts"
+                )
+            injected.append(f"{fname} -- {purpose}")
+            logger.info(
+                "V2-F7: injecting %s (%d decision refs)", fname, count
+            )
+
+        if not injected:
+            return needed_artifacts
+        # Prepend so injections are prioritized inside the downstream cap
+        return injected + needed_artifacts
+
     def parse_output(self, raw_output: str) -> dict[str, Any]:
         return extract_json(raw_output)
 
@@ -2104,9 +2224,31 @@ class SynthesisStage(PipelineStage):
                 prior_outputs,
             )
 
-        # Parse needed_artifacts into (filename, purpose) pairs
+        # V2-F7 Fix A: enforce decomposition→synthesis closure.
+        # Any file referenced in 2+ decision evidence entries but absent
+        # from needed_artifacts gets auto-injected with a derived purpose.
+        # Same invariant shape as artifact closure; different pipeline level.
+        resolution_output_for_coverage = prior_outputs.get("decision_resolution", {})
+        resolutions_for_coverage = resolution_output_for_coverage.get("resolutions", [])
+        agent_ctx_for_coverage = prior_outputs.get("_agent_context", {})
+        structural_index_for_coverage = (
+            agent_ctx_for_coverage.get("full_structural_index", "")
+            or prior_outputs.get("_gathered_context", "")
+        )
+        known_files_for_coverage = self._known_files_from_index(
+            structural_index_for_coverage
+        )
+        needed = self._enforce_decision_coverage(
+            needed,
+            resolutions_for_coverage,
+            known_files_for_coverage,
+        )
+
+        # Parse needed_artifacts into (filename, purpose) pairs.
+        # Cap raised slightly to accommodate V2-F7 injections without
+        # pushing out user-intent artifacts.
         artifact_specs: list[tuple[str, str]] = []
-        for entry in needed[:8]:  # cap at 8 artifacts
+        for entry in needed[:12]:
             # Format: "path/to/file.py -- purpose description"
             if " -- " in entry:
                 fname, purpose = entry.split(" -- ", 1)
