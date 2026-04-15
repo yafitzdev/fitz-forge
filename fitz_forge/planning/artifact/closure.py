@@ -1074,9 +1074,80 @@ def check_closure(
             # 3. Kwargs (additive)
             violations.extend(_check_kwargs(reference, filename, lookup, provides))
 
+    # Fix E: collapse cascading violations on fabricated owners.
+    # When a parameter type annotation is a fabricated class (not in
+    # codebase, not in siblings), every `param.field` access fires an
+    # individual missing violation. That's noise — the root issue is the
+    # fabricated parameter TYPE, not each field. Convert the cluster into
+    # a single "missing class" violation pointing at the first occurrence,
+    # so repair strategy 1 routes on the class and strategy 2 sees one
+    # actionable error instead of 5-10 duplicates.
+    violations = _dedupe_fabricated_owner_cascades(violations, lookup, provides)
+
     order = {"missing": 0, "import": 1, "field": 2, "usage": 3, "kwargs": 4}
     violations.sort(key=lambda v: (order.get(v.kind, 99), v.artifact, v.line))
     return violations
+
+
+def _dedupe_fabricated_owner_cascades(
+    violations: list[ClosureViolation],
+    lookup: StructuralIndexLookup,
+    provides: dict[SymbolRef, Signature | None],
+) -> list[ClosureViolation]:
+    """Collapse per-field violations into one root-class violation when the owner is fabricated.
+
+    A parameter annotation pointing at a class that doesn't exist produces
+    one violation per field access on that param. Those aren't independent
+    bugs — they're all symptoms of one bad annotation. Collapse them into
+    a single violation naming the fabricated class, preserving the first
+    artifact/line as the error site.
+    """
+    if not violations:
+        return violations
+
+    # Find owners that are themselves missing (fabricated classes).
+    fabricated_owners: set[str] = set()
+    for v in violations:
+        if v.ref.kind == "field" and v.ref.owner:
+            # Check if owner exists in codebase or siblings
+            owner_exists = lookup.class_exists(v.ref.owner)
+            if not owner_exists:
+                for sib in provides:
+                    if sib.owner == v.ref.owner:
+                        owner_exists = True
+                        break
+            if not owner_exists:
+                fabricated_owners.add(v.ref.owner)
+
+    if not fabricated_owners:
+        return violations
+
+    deduped: list[ClosureViolation] = []
+    # Track which fabricated owners we've already reported a root for
+    seen_root_for_owner: dict[tuple[str, str], ClosureViolation] = {}
+    for v in violations:
+        if v.ref.owner in fabricated_owners and v.ref.kind == "field":
+            # Cascading field access on a fabricated class — replace with
+            # a single root missing-class violation (per-artifact).
+            key = (v.artifact, v.ref.owner)
+            if key in seen_root_for_owner:
+                continue  # already emitted the root for this file
+            root = ClosureViolation(
+                artifact=v.artifact,
+                ref=SymbolRef(owner=v.ref.owner, name=None, kind="class"),
+                line=v.line,
+                context=f"{v.ref.owner} (fabricated class used as parameter type — root of field cascade)",
+                kind="missing",
+                detail=(
+                    f"Parameter type {v.ref.owner} does not exist in codebase "
+                    f"or sibling artifacts. Use an existing schema class."
+                ),
+            )
+            seen_root_for_owner[key] = root
+            deduped.append(root)
+        else:
+            deduped.append(v)
+    return deduped
 
 
 # ---------------------------------------------------------------------------
