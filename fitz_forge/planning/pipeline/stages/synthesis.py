@@ -2473,52 +2473,98 @@ class SynthesisStage(PipelineStage):
         reasoning: str,
         prior_outputs: dict[str, Any],
     ) -> str:
-        """Extract Pydantic model fields referenced in decisions/reasoning.
+        """Extract all pydantic/dataclass field cheat sheets relevant to artifact generation.
 
-        Deterministically looks up class fields from the structural index
-        for any CamelCase class names found in the text. Returns a compact
-        cheat sheet like:
-            QueryRequest fields: question, source, top_k, conversation_context
-            ChatRequest fields: message, history, collection
+        Strategy:
+          1. Look up every known class from the disk-augmented index's
+             `fields` dict (populated by extract_class_fields during
+             augment_from_source_dir). This gets every class that already
+             has field annotations in the real codebase.
+          2. Filter to classes that look schema-shaped OR are mentioned in
+             decisions/reasoning text. Schema-shaped = name ends in
+             Request/Response/Input/Output/Event/Chunk/Config/Options/etc.,
+             or has any annotated fields at all (pydantic / dataclass).
+          3. Emit a compact cheat sheet like:
+                ChatRequest fields: message, history, collection, top_k
+                QueryRequest fields: query, collection, top_k
+
+        Language/codebase-agnostic: no hardcoded class names. Pulls from
+        whatever schema classes the real codebase happens to define.
+        Strong injection helps prevent the model inventing parallel
+        fabricated classes like `StreamQueryRequest`.
         """
         import re as _re
 
         agent_ctx = prior_outputs.get("_agent_context", {})
+        source_dir = prior_outputs.get("_source_dir", "")
         full_index = agent_ctx.get("full_structural_index", "")
         if not full_index:
             full_index = prior_outputs.get("_gathered_context", "")
-        if not full_index:
+        if not full_index and not source_dir:
             return ""
 
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
 
         lookup = StructuralIndexLookup(full_index)
+        if source_dir:
+            try:
+                lookup.augment_from_source_dir(source_dir)
+            except Exception:
+                pass
 
-        # Find CamelCase names that look like schemas/models
+        # Find classes referenced in decisions/reasoning for prioritization
         text = relevant_decisions + " " + reasoning[:3000]
-        candidates = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text))
-        # Also catch single-word capitalized types (Query, Answer, etc.)
-        candidates.update(_re.findall(r"\b([A-Z][a-z]{2,})\b", text))
-        # Also include common request/response patterns from index
-        candidates.update(
-            name
-            for name in lookup.classes
-            if any(kw in name.lower() for kw in ("request", "response", "query", "chat", "answer"))
+        mentioned: set[str] = set(
+            _re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
         )
 
-        lines = []
-        for name in sorted(candidates):
-            cls = lookup.find_class(name)
-            if not cls:
-                continue
-            # Get fields from AST if source available
-            file_contents = agent_ctx.get("file_contents", {})
-            source_dir = prior_outputs.get("_source_dir", "")
-            fields = _extract_class_fields(name, file_contents, source_dir)
-            if fields:
-                lines.append(f"{name} fields: {', '.join(fields)}")
+        # Schema-shaped suffixes — language/codebase-agnostic; these are
+        # common conventions for data container classes. Matches classes
+        # in any codebase that follows similar naming.
+        schema_suffixes = (
+            "Request",
+            "Response",
+            "Input",
+            "Output",
+            "Event",
+            "Chunk",
+            "Message",
+            "Query",
+            "Config",
+            "Options",
+            "Params",
+            "Context",
+            "Result",
+            "State",
+            "Payload",
+        )
 
-        return "\n".join(lines)
+        lines: list[str] = []
+        seen: set[str] = set()
+        for name, cls_list in lookup.classes.items():
+            if name in seen:
+                continue
+            for cls in cls_list:
+                fields = cls.fields
+                if not fields:
+                    continue
+                is_schema_shaped = any(name.endswith(s) for s in schema_suffixes)
+                is_mentioned = name in mentioned
+                if not (is_schema_shaped or is_mentioned):
+                    continue
+                field_names = sorted(fields.keys())
+                lines.append(f"{name} fields: {', '.join(field_names)}")
+                seen.add(name)
+                break
+
+        # Cap to keep prompt compact — prioritize mentioned classes first,
+        # then schema-shaped ones.
+        def sort_key(line: str) -> tuple[int, str]:
+            name = line.split(" fields:")[0]
+            return (0 if name in mentioned else 1, name)
+
+        lines.sort(key=sort_key)
+        return "\n".join(lines[:30])
 
     @staticmethod
     def _resolve_class_interfaces(

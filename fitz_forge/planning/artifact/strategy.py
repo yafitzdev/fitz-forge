@@ -173,6 +173,14 @@ class NewCodeStrategy:
             "- When adding a parallel method, match the original "
             "method's parameters exactly\n"
             "- Do NOT fabricate method names — if unsure, omit the call\n"
+            "- For function PARAMETER type annotations (e.g. `def handler(req: "
+            "SomeClass)`), use ONLY classes listed in DATA MODEL FIELDS above. "
+            "Do NOT invent new Request/Response/Input/Output classes — reuse "
+            "the existing ones by name. If none of the listed classes fit, "
+            "reuse the closest match and access only its real fields\n"
+            "- When reading fields on a typed parameter (e.g. `request.foo`), "
+            "use ONLY the field names listed under that class in DATA MODEL "
+            "FIELDS. Do NOT invent new fields\n"
         )
 
         # Grounding block (high priority — goes first)
