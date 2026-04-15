@@ -290,20 +290,30 @@ class _ReferenceCollector(ast.NodeVisitor):
         filename: str,
         lookup: StructuralIndexLookup,
         self_attrs: dict[str, str] | None = None,
+        sibling_provides: dict[SymbolRef, Signature | None] | None = None,
     ) -> None:
         self.filename = filename
         self.lookup = lookup
         self.self_attrs = self_attrs or {}
+        self.sibling_provides = sibling_provides or {}
         self.refs: list[Reference] = []
         self._scope_stack: list[dict[str, str]] = [{}]
+        # Iterator/awaitable kind tracked per variable for async-for/await
+        # propagation. Maps var name → (kind, originating_ref) where kind is
+        # one of {"sync_iter", "async_iter", "awaitable"} and originating_ref
+        # is the SymbolRef of the call that produced the value. Cleared on
+        # function scope pop alongside type bindings.
+        self._iter_kinds_stack: list[dict[str, tuple[str, SymbolRef, str]]] = [{}]
 
     # -- scope helpers ------------------------------------------------------
 
     def _push_scope(self) -> None:
         self._scope_stack.append({})
+        self._iter_kinds_stack.append({})
 
     def _pop_scope(self) -> None:
         self._scope_stack.pop()
+        self._iter_kinds_stack.pop()
 
     def _lookup_type(self, name: str) -> str | None:
         for scope in reversed(self._scope_stack):
@@ -313,6 +323,19 @@ class _ReferenceCollector(ast.NodeVisitor):
 
     def _bind(self, name: str, type_name: str) -> None:
         self._scope_stack[-1][name] = type_name
+
+    def _lookup_iter_kind(
+        self, name: str
+    ) -> tuple[str, SymbolRef, str] | None:
+        for scope in reversed(self._iter_kinds_stack):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def _bind_iter_kind(
+        self, name: str, kind: str, ref: SymbolRef, context: str
+    ) -> None:
+        self._iter_kinds_stack[-1][name] = (kind, ref, context)
 
     # -- emit helpers -------------------------------------------------------
 
@@ -407,9 +430,19 @@ class _ReferenceCollector(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            var_name = node.targets[0].id
             t = self._infer_rhs_type(node.value)
             if t:
-                self._bind(node.targets[0].id, t)
+                self._bind(var_name, t)
+            # Track iterator/awaitable kind for async-for/await propagation:
+            # when `var = typed_obj.method(...)` and method's return type is
+            # an Iterator/AsyncIterator/Coroutine, record it so a later
+            # `async for x in var` or `await var` can resolve back to the
+            # originating call.
+            kind_info = self._infer_rhs_iter_kind(node.value)
+            if kind_info:
+                kind, ref, context = kind_info
+                self._bind_iter_kind(var_name, kind, ref, context)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
@@ -427,6 +460,16 @@ class _ReferenceCollector(ast.NodeVisitor):
         if isinstance(node.iter, ast.Call):
             self._emit_call(node.iter, usage="async_iter")
             self._walk_call_args(node.iter)
+        elif isinstance(node.iter, ast.Name):
+            # Propagate usage back to the originating call when iterating a
+            # variable that was bound to a method call result. Catches:
+            #     stream = service.query_stream(...)   # bound as sync_iter
+            #     async for x in stream: ...           # ← usage mismatch
+            self._propagate_var_usage(
+                node.iter.id,
+                used_as="async_iter",
+                line=getattr(node.iter, "lineno", 0),
+            )
         else:
             self.visit(node.iter)
         self.visit(node.target)
@@ -439,6 +482,12 @@ class _ReferenceCollector(ast.NodeVisitor):
         if isinstance(node.iter, ast.Call):
             self._emit_call(node.iter, usage="iter")
             self._walk_call_args(node.iter)
+        elif isinstance(node.iter, ast.Name):
+            self._propagate_var_usage(
+                node.iter.id,
+                used_as="iter",
+                line=getattr(node.iter, "lineno", 0),
+            )
         else:
             self.visit(node.iter)
         self.visit(node.target)
@@ -451,8 +500,40 @@ class _ReferenceCollector(ast.NodeVisitor):
         if isinstance(node.value, ast.Call):
             self._emit_call(node.value, usage="await")
             self._walk_call_args(node.value)
+        elif isinstance(node.value, ast.Name):
+            self._propagate_var_usage(
+                node.value.id,
+                used_as="await",
+                line=getattr(node.value, "lineno", 0),
+            )
         else:
             self.visit(node.value)
+
+    def _propagate_var_usage(
+        self,
+        var_name: str,
+        used_as: str,
+        line: int,
+    ) -> None:
+        """Emit a Reference if `var_name` was bound to a call with a mismatched iter kind.
+
+        When `var = obj.method(...)` was recorded with a return type kind
+        (sync_iter / async_iter / awaitable), a later `async for`, `for`, or
+        `await` on that variable re-emits the original call's SymbolRef with
+        the new usage context so `_check_usage` catches the mismatch.
+        """
+        info = self._lookup_iter_kind(var_name)
+        if info is None:
+            return
+        _kind, ref, context = info
+        self._emit(
+            Reference(
+                ref=ref,
+                line=line,
+                context=f"{context} → {var_name}",
+                usage=used_as,
+            )
+        )
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
         # Bare attribute reads (not the .func of a Call).
@@ -506,18 +587,134 @@ class _ReferenceCollector(ast.NodeVisitor):
                     return func.attr
         return None
 
+    def _infer_rhs_iter_kind(
+        self, value: ast.expr
+    ) -> tuple[str, SymbolRef, str] | None:
+        """If RHS is a call whose return type is iterable/awaitable, return
+        (kind, ref, context) for later usage propagation.
+
+        Resolves the callee against sibling_provides first, then the
+        codebase index. Works for:
+            var = typed_obj.method(...)
+            var = self._attr.method(...)
+            var = top_level_func(...)
+        """
+        if not isinstance(value, ast.Call):
+            return None
+        ref_and_return = self._resolve_call_target(value)
+        if ref_and_return is None:
+            return None
+        ref, return_type, context = ref_and_return
+        if return_type is None:
+            return None
+        # Classify the return type into an iterator / awaitable kind.
+        if _is_async_iter_type(return_type):
+            return ("async_iter", ref, context)
+        if _is_awaitable_type(return_type):
+            return ("awaitable", ref, context)
+        if _looks_like_generator(return_type):
+            return ("sync_iter", ref, context)
+        return None
+
+    def _resolve_call_target(
+        self, call: ast.Call
+    ) -> tuple[SymbolRef, str | None, str] | None:
+        """Resolve a Call to (SymbolRef of callee, return_type_string, context).
+
+        Looks up the target method/function via sibling_provides first,
+        then the codebase index. Returns None if the target can't be
+        identified (e.g. bare local call, builtin).
+        """
+        func = call.func
+        # Case: typed_obj.method(...)
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            obj_name = func.value.id
+            attr = func.attr
+            if obj_name == "self":
+                return None  # handled via self._attr case below
+            obj_type = self._lookup_type(obj_name)
+            if not obj_type or obj_type in _SKIP_NAMES:
+                return None
+            ref = SymbolRef(owner=obj_type, name=attr, kind="method")
+            return_type = self._lookup_return_type(ref)
+            return (ref, return_type, f"{obj_name}.{attr}()")
+
+        # Case: self._attr.method(...)
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Attribute)
+            and isinstance(func.value.value, ast.Name)
+            and func.value.value.id == "self"
+        ):
+            attr_name = func.value.attr
+            method = func.attr
+            attr_type = self.self_attrs.get(attr_name)
+            if not attr_type or attr_type in _SKIP_NAMES:
+                return None
+            ref = SymbolRef(owner=attr_type, name=method, kind="method")
+            return_type = self._lookup_return_type(ref)
+            return (ref, return_type, f"self.{attr_name}.{method}()")
+
+        # Case: top_level_func(...)
+        if isinstance(func, ast.Name):
+            if func.id in _SKIP_NAMES or func.id[:1].isupper():
+                return None
+            ref = SymbolRef(owner=None, name=func.id, kind="function")
+            # Check sibling provides
+            sig = self.sibling_provides.get(ref)
+            if sig and sig.return_type:
+                return (ref, sig.return_type, f"{func.id}()")
+            # Fallback to codebase
+            funcs = self.lookup.find_function(func.id)
+            if funcs:
+                return (ref, funcs[0].return_type, f"{func.id}()")
+            return None
+
+        return None
+
+    def _lookup_return_type(self, ref: SymbolRef) -> str | None:
+        """Find return type of a method ref via siblings then codebase."""
+        # Sibling provides (new artifacts being added in this plan)
+        sig = self.sibling_provides.get(ref)
+        if sig is None:
+            # Try without exact kind match (field vs method)
+            for k in ("method", "field", "function"):
+                alt = SymbolRef(owner=ref.owner, name=ref.name, kind=k)
+                sig = self.sibling_provides.get(alt)
+                if sig is not None:
+                    break
+        if sig and sig.return_type:
+            return sig.return_type
+        # Codebase lookup via IndexedMethod
+        if ref.owner and ref.name:
+            for cls in self.lookup.classes.get(ref.owner, []):
+                if ref.name in cls.methods:
+                    return cls.methods[ref.name].return_type
+        return None
+
 
 def extract_references(
     content: str,
     filename: str,
     lookup: StructuralIndexLookup,
     self_attrs: dict[str, str] | None = None,
+    sibling_provides: dict[SymbolRef, Signature | None] | None = None,
 ) -> list[Reference]:
-    """Walk an artifact and return its cross-file references."""
+    """Walk an artifact and return its cross-file references.
+
+    `sibling_provides` enables the collector to resolve cross-file method
+    return types for variable-binding propagation (so `var = obj.method()`
+    followed by `async for x in var` can be checked).
+    """
     tree = try_parse(content)
     if tree is None:
         return []
-    collector = _ReferenceCollector(filename, lookup, self_attrs=self_attrs)
+    collector = _ReferenceCollector(
+        filename,
+        lookup,
+        self_attrs=self_attrs,
+        sibling_provides=sibling_provides,
+    )
     collector.visit(tree)
     return collector.refs
 
@@ -856,7 +1053,13 @@ def check_closure(
         content = art.get("content", "")
 
         self_attrs = load_target_self_attrs(filename, source_dir, lookup)
-        refs = extract_references(content, filename, lookup, self_attrs=self_attrs)
+        refs = extract_references(
+            content,
+            filename,
+            lookup,
+            self_attrs=self_attrs,
+            sibling_provides=provides,
+        )
 
         for reference in refs:
             # 1. Existence
