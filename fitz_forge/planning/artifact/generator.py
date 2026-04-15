@@ -14,7 +14,10 @@ from fitz_forge.llm.generate import generate
 
 from .closure import (
     ClosureViolation,
+    Signature,
+    SymbolRef,
     check_closure,
+    extract_provides,
     route_missing_symbol,
 )
 from .context import assemble_context
@@ -27,6 +30,86 @@ from .strategy import (
 from .validate import ArtifactError, validate
 
 logger = logging.getLogger(__name__)
+
+
+def _build_repair_hint_block(
+    violations: list[ClosureViolation],
+    provides: dict[SymbolRef, Signature | None],
+    lookup: Any,
+) -> str:
+    """Build a real-signatures hint block for regen prompts.
+
+    Two sections:
+
+    1. **Available cross-artifact methods** — every sibling-provided method
+       with its full signature. Gives the model the exact shape of
+       methods it must call (not just error messages).
+    2. **Real class fields** — for every class touched by a field/missing
+       violation, list the real field names from the structural index.
+       Counters hallucinated pydantic field names.
+
+    Language/codebase-agnostic: only uses data already in the lookup and
+    provides dict. No hardcoded file extensions or class names.
+    """
+    sections: list[str] = []
+
+    # Section 1: sibling method signatures
+    method_lines: list[str] = []
+    seen_methods: set[tuple[str | None, str | None]] = set()
+    for ref, sig in provides.items():
+        if ref.kind != "method" or not sig:
+            continue
+        if ref.owner is None or ref.name is None:
+            continue
+        key = (ref.owner, ref.name)
+        if key in seen_methods:
+            continue
+        seen_methods.add(key)
+        params = ", ".join(sig.params)
+        if sig.has_var_keywords:
+            params = f"{params}, **kwargs" if params else "**kwargs"
+        ret_str = f" -> {sig.return_type}" if sig.return_type else ""
+        async_marker = "async " if sig.is_async else ""
+        gen_marker = "  # generator" if sig.is_generator else ""
+        method_lines.append(
+            f"    {async_marker}{ref.owner}.{ref.name}({params}){ret_str}{gen_marker}"
+        )
+    if method_lines:
+        sections.append(
+            "## Available cross-artifact method signatures (use exactly these)\n"
+            + "\n".join(sorted(method_lines)[:25])
+        )
+
+    # Section 2: real class fields for classes touched by violations.
+    # Include both the class named in a field violation AND any class that
+    # appears as the owner of a missing reference, so the model sees the
+    # real shape of things it's trying to use.
+    touched_owners: set[str] = set()
+    for v in violations:
+        if v.ref.owner and v.kind in ("field", "missing", "kwargs", "usage"):
+            touched_owners.add(v.ref.owner)
+
+    field_lines: list[str] = []
+    for owner in sorted(touched_owners):
+        classes = lookup.classes.get(owner) if hasattr(lookup, "classes") else None
+        if not classes:
+            continue
+        cls = classes[0]
+        # Collect both dedicated fields and methods (properties look like fields)
+        fields = sorted(getattr(cls, "fields", {}).keys())
+        methods = sorted(getattr(cls, "methods", {}).keys())
+        if fields:
+            field_lines.append(f"  {owner} fields: {', '.join(fields)}")
+        if methods and not fields:
+            # No fields but methods — likely a non-pydantic class, skip
+            continue
+    if field_lines:
+        sections.append(
+            "## Real class fields / attributes (do NOT invent new ones)\n"
+            + "\n".join(field_lines[:15])
+        )
+
+    return "\n\n".join(sections)
 
 
 @dataclass
@@ -402,6 +485,21 @@ async def generate_artifact_set(
                     repair_result.failure_reason,
                 )
 
+        # Build the sibling-provides dict once for this iteration so we can
+        # inject real signatures into regeneration prompts. Error messages
+        # alone don't give the model the correct shape to aim at — it tends
+        # to regenerate with the same fabrication. Showing the actual
+        # available signatures is much more effective feedback.
+        combined_provides: dict[SymbolRef, Signature | None] = {}
+        for art in artifact_dicts:
+            combined_provides.update(
+                extract_provides(
+                    art.get("content", ""),
+                    art.get("filename", ""),
+                    lookup,
+                )
+            )
+
         # Strategy 2: regenerate violating artifacts with feedback about the
         # specific usage/kwargs/field errors.
         for offender_file, vs in to_regenerate.items():
@@ -415,11 +513,23 @@ async def generate_artifact_set(
             old_result = results[offender_idx]
             feedback_lines = [f"- {v.ref.pretty()}: {v.detail}" for v in vs[:5]]
             feedback = "\n".join(feedback_lines)
+
+            # Fix C: enrich the regen prompt with real signatures so the
+            # model can see the exact shape of things it must use (instead
+            # of just being told its attempt was wrong).
+            hint_block = _build_repair_hint_block(
+                violations=vs,
+                provides=combined_provides,
+                lookup=lookup,
+            )
+
             regen_purpose = (
                 f"{old_result.purpose}\n\n"
                 f"## Fix these cross-artifact issues from the previous attempt:\n"
                 f"{feedback}"
             )
+            if hint_block:
+                regen_purpose += f"\n\n{hint_block}"
             logger.info(
                 "artifact_set: regenerating %s with %d usage/kwargs feedback item(s)",
                 offender_file,
