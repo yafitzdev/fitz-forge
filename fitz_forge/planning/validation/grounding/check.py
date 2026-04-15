@@ -401,19 +401,29 @@ def _check_node(
             else:
                 expected_params = lookup.function_params(func_name)
                 if expected_params is not None:
-                    actual_args = len(node.args) + len(node.keywords)
-                    expected = len(expected_params)
-                    if actual_args > 0 and expected > 0 and abs(actual_args - expected) > 2:
-                        violations.append(
-                            Violation(
-                                filename,
-                                line,
-                                f"{func_name}()",
-                                "wrong_arity",
-                                f"Called with {actual_args} args but index shows "
-                                f"{expected} params: ({', '.join(expected_params)})",
+                    # Variadic (*args / **kwargs) accepts anything — don't
+                    # count the call against a fixed arity.
+                    has_varargs = any(
+                        p.startswith("*") for p in expected_params
+                    )
+                    if not has_varargs:
+                        actual_args = len(node.args) + len(node.keywords)
+                        expected = len(expected_params)
+                        if (
+                            actual_args > 0
+                            and expected > 0
+                            and abs(actual_args - expected) > 2
+                        ):
+                            violations.append(
+                                Violation(
+                                    filename,
+                                    line,
+                                    f"{func_name}()",
+                                    "wrong_arity",
+                                    f"Called with {actual_args} args but index shows "
+                                    f"{expected} params: ({', '.join(expected_params)})",
+                                )
                             )
-                        )
 
     # Attribute access on typed local variables (obj.field)
     elif (

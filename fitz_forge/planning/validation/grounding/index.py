@@ -300,7 +300,17 @@ class StructuralIndexLookup:
                 name = node.name
                 if name in self._all_function_names:
                     continue
+                # Capture all parameter kinds so the downstream arity check
+                # doesn't flag correct calls to functions with keyword-only
+                # args (e.g. `def f(a, b, *, x=0, y=0)`). Previously we only
+                # captured positional-or-keyword args, which made any call
+                # using the kwonly params look like wrong_arity.
                 params = [a.arg for a in node.args.args]
+                params.extend(a.arg for a in node.args.kwonlyargs)
+                if node.args.vararg:
+                    params.append(f"*{node.args.vararg.arg}")
+                if node.args.kwarg:
+                    params.append(f"**{node.args.kwarg.arg}")
                 func = IndexedFunction(name, rel, params, None)  # return type later
                 self.functions.setdefault(name, []).append(func)
                 self._all_function_names.add(name)
