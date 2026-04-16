@@ -12,6 +12,74 @@
 10. **Fix invariants, not symptoms** - Before patching a bug, ask: "what invariant is being violated here, and does my fix enforce it for every variant or only the one I just saw?" If a fix only works for the specific failure in front of you, it's a symptom patch and the next variant will slip through. State the underlying property the system must satisfy, then enforce it. Example: "the route calls `service.query_stream` which doesn't exist" is a symptom; "every cross-file reference in an artifact must be satisfied by the codebase or a sibling artifact" is the invariant. Patches to the specific failure breed whack-a-mole; enforcing the invariant catches the whole class.
 11. **Watch for set-level bugs** - If validation looks at things one at a time (one artifact, one stage, one call) but the bug only exists at the set level (inconsistency across siblings, missing dependency spanning files, closure violations), no amount of per-item checking will catch it. When you notice this shape, lift the check to operate on the whole set, not the individual item. Ask: "is this property a property of the item, or of the set?" — and put the check at the right level.
 
+## The Fixer Loop
+
+Autonomous benchmark-improvement cycle. Use when plan quality needs
+to go up on a specific task. Every fix must be **codebase and programming
+language agnostic** — no task-specific hacks.
+
+### Setup
+
+1. Pick a target codebase + task description
+2. Create `benchmarks/<task>/taxonomy.json` (architecture tiers + per-file quality tiers)
+3. Create `benchmarks/<task>/ideal_context.json` (file_list of ~30 relevant files)
+4. Create `docs/v2-scoring/<task>/BUG_REGISTER.md`
+5. Run a baseline benchmark: `plan_factory decomposed --runs 10 --taxonomy <path>`
+
+### Loop (each cycle)
+
+1. **Score** — compute deterministic scores using the task's taxonomy
+2. **Triage** — read all failure patterns from the run, add to BUG_REGISTER.md with impact scores (1–10)
+3. **Pick** — select the single highest-impact open bug
+4. **Fix** — implement the fix, generalized to every variant of the failure shape (rule 10). Ask: "does this fix apply to any codebase/language, or is it specific to fitz-sage?" If specific, don't ship it
+5. **Replay-validate** — replay a snapshot from the baseline run (~5 min). Only promote to full benchmark if replay shows improvement
+6. **Regression-check** — re-score ALL previous task benchmarks with the new code. If any regress, revert
+7. **Mark done** — update BUG_REGISTER.md, loop to step 1
+
+### Exit criteria
+
+- 10 runs with 90+ average, at most 1 dud below 90
+- OR: all open bugs have impact ≤ 3 and no fix is available without regressing other tasks
+
+### Commands
+
+```bash
+# Baseline run
+.venv/Scripts/python -m benchmarks.plan_factory decomposed \
+    --runs 10 --source-dir <codebase> \
+    --context-file benchmarks/<task>/ideal_context.json \
+    --query "<task description>" \
+    --taxonomy benchmarks/<task>/taxonomy.json \
+    --score-v2
+
+# Replay (fast validation, ~5 min)
+.venv/Scripts/python -m benchmarks.plan_factory replay \
+    --snapshot benchmarks/results/<run>/traces_01/snapshot_after_decision_resolution.json \
+    --source-dir <codebase> \
+    --context-file benchmarks/<task>/ideal_context.json \
+    --query "<task description>" \
+    --score-v2
+
+# Manual scoring with correct taxonomy
+python -c "
+from benchmarks.eval_v2_deterministic import run_deterministic_checks
+from benchmarks.eval_v2_taxonomy import load_taxonomy
+tax = load_taxonomy(Path('benchmarks/<task>/taxonomy.json'))
+r = run_deterministic_checks(plan, structural_index='',
+    task_requires_streaming=False,
+    taxonomy_files=tax.required_files,
+    source_dir='<codebase>')
+print(r.deterministic_score)
+"
+```
+
+### Track record
+
+| Task | Codebase | Language | Baseline | After loop | Runs |
+|------|----------|----------|----------|------------|------|
+| Streaming | fitz-sage | Python | 68.85 | 97.70 | 30 |
+| Ranking explanations | fitz-sage | Python | 68.85 | 97.08 | 10 |
+
 ## What This Is
 
 Local-first AI architectural planning via local LLMs (Ollama or LM Studio). Two interfaces (CLI + MCP) wrap the same `tools/` service layer. Background worker processes jobs sequentially from SQLite queue.
