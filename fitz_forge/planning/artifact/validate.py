@@ -58,8 +58,74 @@ def _check_parseable(content: str) -> ArtifactError | None:
     return None
 
 
+_DATA_BASES = frozenset(
+    {
+        "BaseModel",
+        "Enum",
+        "IntEnum",
+        "StrEnum",
+        "Flag",
+        "IntFlag",
+        "TypedDict",
+        "NamedTuple",
+    }
+)
+_DATA_DECORATORS = frozenset(
+    {"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"}
+)
+
+
+def _is_data_class(node: ast.ClassDef) -> bool:
+    """True if `node` is a Pydantic / dataclass / Enum / TypedDict style class.
+
+    These are valid Python artifacts with no `def` — they contain only
+    annotated fields or enum values, and should not trip the empty check.
+    """
+    # Any annotated field (pydantic / dataclass / plain class with annotations)
+    for child in node.body:
+        if isinstance(child, ast.AnnAssign):
+            return True
+    # Inherits from a data-model base
+    for base in node.bases:
+        name: str | None = None
+        if isinstance(base, ast.Name):
+            name = base.id
+        elif isinstance(base, ast.Attribute):
+            name = base.attr
+        if name in _DATA_BASES:
+            return True
+    # @dataclass / @pydantic.dataclass / @attr.s / @define decorator
+    for dec in node.decorator_list:
+        name = None
+        if isinstance(dec, ast.Name):
+            name = dec.id
+        elif isinstance(dec, ast.Call):
+            if isinstance(dec.func, ast.Name):
+                name = dec.func.id
+            elif isinstance(dec.func, ast.Attribute):
+                name = dec.func.attr
+        elif isinstance(dec, ast.Attribute):
+            name = dec.attr
+        if name in _DATA_DECORATORS:
+            return True
+    # Enum-style class with plain assignments (e.g. `FOO = "foo"`)
+    for child in node.body:
+        if isinstance(child, ast.Assign) and any(
+            isinstance(t, ast.Name) for t in child.targets
+        ):
+            # Only enough if inherits from an Enum — covered above. Don't
+            # over-accept plain constants.
+            pass
+    return False
+
+
 def _check_empty(content: str) -> ArtifactError | None:
-    """Check if content has actual code."""
+    """Check if content has actual code.
+
+    Accepts files with function/method defs OR with a data-model class
+    (Pydantic BaseModel, dataclass, Enum, TypedDict, plain class with
+    annotated fields). Schema files are valid Python but contain no defs.
+    """
     lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
     code_lines = [line for line in lines if not line.startswith("#") and not line.startswith('"""')]
     if len(code_lines) < 2:
@@ -68,12 +134,25 @@ def _check_empty(content: str) -> ArtifactError | None:
             message="Content has no meaningful code (fewer than 2 non-comment lines)",
             suggestion="Write the actual implementation, not just comments or stubs",
         )
-    has_def = any("def " in line for line in code_lines)
-    if not has_def:
+    tree = _try_parse(content)
+    if tree is not None:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return None
+            if isinstance(node, ast.ClassDef) and _is_data_class(node):
+                return None
         return ArtifactError(
             check="empty",
-            message="Content has no function or method definitions",
-            suggestion="Include at least one function/method definition",
+            message="Content has no function/method defs and no data-model class",
+            suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
+        )
+    # Unparseable — fall back to text heuristic. Parseable check will fire
+    # separately if truly broken.
+    if not any("def " in line or "class " in line for line in code_lines):
+        return ArtifactError(
+            check="empty",
+            message="Content has no function or class definitions",
+            suggestion="Include at least one function/method or class",
         )
     return None
 

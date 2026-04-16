@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
@@ -198,6 +199,126 @@ _STDLIB_PACKAGES = frozenset(
 
 
 # ---------------------------------------------------------------------------
+# Enum standard members + protocol widening helpers
+# ---------------------------------------------------------------------------
+
+
+_ENUM_STANDARD_ATTRS = frozenset(
+    {"value", "name", "_value_", "_name_", "_ignore_", "_order_", "_missing_"}
+)
+_ENUM_BASES = frozenset(
+    {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"}
+)
+
+
+def _is_enum_class(class_name: str, lookup: StructuralIndexLookup) -> bool:
+    """True if `class_name`'s MRO includes an Enum base.
+
+    Enum subclasses get `.value` and `.name` (plus a few other dunders)
+    for free from `enum.Enum`. Those aren't in the class's own field
+    set, so `class_has_field` says missing. This walks up to check.
+    """
+    seen: set[str] = set()
+    stack = [class_name]
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        if current in _ENUM_BASES:
+            return True
+        for cls in lookup.classes.get(current, []):
+            for base in cls.bases:
+                base_clean = base.split("[")[0].strip()
+                if base_clean and base_clean not in seen:
+                    stack.append(base_clean)
+    return False
+
+
+def _owner_is_protocol(class_name: str, lookup: StructuralIndexLookup) -> bool:
+    """True if `class_name` declares `Protocol` as a base.
+
+    Protocol classes are structural: any object that has the right
+    methods satisfies them, regardless of declared type. So when
+    `obj: MyProtocol` is called with `obj.foo()` and `foo` isn't on
+    `MyProtocol`, the runtime instance may still have it.
+    """
+    for cls in lookup.classes.get(class_name, []):
+        for base in cls.bases:
+            if base.split("[")[0].strip() == "Protocol":
+                return True
+    return False
+
+
+def _method_exists_anywhere(
+    method_name: str, lookup: StructuralIndexLookup
+) -> bool:
+    """True if any class in the codebase defines a method named `method_name`."""
+    for cls_list in lookup.classes.values():
+        for cls in cls_list:
+            if method_name in cls.methods:
+                return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Annotation walking — yields every class-shaped Name in a type position
+# ---------------------------------------------------------------------------
+
+
+def _iter_annotation_class_names(ann: ast.expr | None) -> Iterator[tuple[str, int]]:
+    """Yield (class_name, line) for every class-shaped Name in an annotation subtree.
+
+    Walks nested generics (List[Foo], Dict[str, Bar], Foo | None, Optional[X])
+    and emits one tuple per capitalized Name that isn't in _SKIP_NAMES.
+
+    Single-letter uppercase names (T, K, V, P, R, ...) are skipped: they're
+    conventionally TypeVars, and fabricated schema classes are never that
+    short. Longer TypeVar names are handled by per-artifact detection in
+    `_find_module_typevars`.
+    """
+    if ann is None:
+        return
+    for node in ast.walk(ann):
+        if isinstance(node, ast.Name):
+            name = node.id
+            if not name[:1].isupper():
+                continue
+            if name in _SKIP_NAMES:
+                continue
+            if len(name) == 1:
+                # Single-letter uppercase — TypeVar convention, skip.
+                continue
+            yield (name, getattr(node, "lineno", 0))
+
+
+def _find_module_typevars(tree: ast.AST) -> set[str]:
+    """Collect names assigned to TypeVar/ParamSpec/TypeVarTuple calls.
+
+    Catches `T = TypeVar("T")`, `P = ParamSpec("P")`, `Ts = TypeVarTuple("Ts")`
+    at any scope. These names act as type-level placeholders and must not be
+    checked as if they were concrete class references.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        rhs = node.value
+        if not isinstance(rhs, ast.Call):
+            continue
+        func = rhs.func
+        if isinstance(func, ast.Name) and func.id in (
+            "TypeVar",
+            "ParamSpec",
+            "TypeVarTuple",
+        ):
+            names.add(node.targets[0].id)
+    return names
+
+
+# ---------------------------------------------------------------------------
 # Locator-style return type inference for closure-local scope
 # ---------------------------------------------------------------------------
 
@@ -291,11 +412,13 @@ class _ReferenceCollector(ast.NodeVisitor):
         lookup: StructuralIndexLookup,
         self_attrs: dict[str, str] | None = None,
         sibling_provides: dict[SymbolRef, Signature | None] | None = None,
+        local_skip: frozenset[str] | None = None,
     ) -> None:
         self.filename = filename
         self.lookup = lookup
         self.self_attrs = self_attrs or {}
         self.sibling_provides = sibling_provides or {}
+        self.local_skip = local_skip or frozenset()
         self.refs: list[Reference] = []
         self._scope_stack: list[dict[str, str]] = [{}]
         # Iterator/awaitable kind tracked per variable for async-for/await
@@ -344,6 +467,28 @@ class _ReferenceCollector(ast.NodeVisitor):
 
     def _emit(self, ref: Reference) -> None:
         self.refs.append(ref)
+
+    def _emit_annotation_types(self, ann: ast.expr | None, context_desc: str) -> None:
+        """Emit a class Reference for every class-shaped Name in an annotation.
+
+        Catches fabricated classes in every type position: parameter annotations,
+        return annotations, variable annotations, except-handler types, cast/
+        isinstance type args, raise type args. Existence is the only check that
+        fires (usage="call" falls through _check_usage untouched).
+        """
+        if ann is None:
+            return
+        for name, line in _iter_annotation_class_names(ann):
+            if name in self.local_skip:
+                continue
+            self._emit(
+                Reference(
+                    ref=SymbolRef(owner=name, name=None, kind="class"),
+                    line=line,
+                    context=f"{context_desc}: {name}",
+                    usage="call",
+                )
+            )
 
     def _emit_call(self, node: ast.Call, usage: str) -> None:
         """Emit a Reference for a Call node with the given usage kind."""
@@ -412,12 +557,30 @@ class _ReferenceCollector(ast.NodeVisitor):
 
     def _visit_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self._push_scope()
+        # Positional args
         for arg in node.args.args:
-            if not arg.annotation:
+            if arg.annotation is None:
                 continue
+            self._emit_annotation_types(arg.annotation, f"param {arg.arg}")
             t = extract_type_name(arg.annotation)
             if t and t not in _SKIP_NAMES:
                 self._bind(arg.arg, t)
+        # Keyword-only args
+        for arg in node.args.kwonlyargs:
+            if arg.annotation is None:
+                continue
+            self._emit_annotation_types(arg.annotation, f"kwonly {arg.arg}")
+            t = extract_type_name(arg.annotation)
+            if t and t not in _SKIP_NAMES:
+                self._bind(arg.arg, t)
+        # *args and **kwargs annotations
+        if node.args.vararg and node.args.vararg.annotation:
+            self._emit_annotation_types(node.args.vararg.annotation, "vararg")
+        if node.args.kwarg and node.args.kwarg.annotation:
+            self._emit_annotation_types(node.args.kwarg.annotation, "kwarg")
+        # Return annotation
+        if node.returns is not None:
+            self._emit_annotation_types(node.returns, "return type")
         for stmt in node.body:
             self.visit(stmt)
         self._pop_scope()
@@ -446,6 +609,10 @@ class _ReferenceCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        target_desc = (
+            node.target.id if isinstance(node.target, ast.Name) else "var"
+        )
+        self._emit_annotation_types(node.annotation, f"annotation on {target_desc}")
         if isinstance(node.target, ast.Name):
             t = extract_type_name(node.annotation)
             if t and t not in _SKIP_NAMES:
@@ -453,8 +620,40 @@ class _ReferenceCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        # Special-case type-introspection calls: the type argument is a class
+        # position, even though syntactically it's a call arg. Emit class refs
+        # for any fabricated classes used there.
+        func = node.func
+        if isinstance(func, ast.Name):
+            fname = func.id
+            if fname in ("isinstance", "issubclass") and len(node.args) >= 2:
+                self._emit_annotation_types(node.args[1], f"{fname} type")
+            elif fname == "cast" and len(node.args) >= 1:
+                self._emit_annotation_types(node.args[0], "cast type")
         self._emit_call(node, usage="call")
         self._walk_call_args(node)
+
+    def visit_Raise(self, node: ast.Raise) -> None:  # noqa: N802
+        # `raise Foo` — bare Name exception class. `raise Foo(...)` falls
+        # through to generic_visit which hits visit_Call and already catches
+        # capitalized-name instantiation. Here we only handle the Name case.
+        if isinstance(node.exc, ast.Name):
+            name = node.exc.id
+            if name[:1].isupper() and name not in _SKIP_NAMES:
+                self._emit(
+                    Reference(
+                        ref=SymbolRef(owner=name, name=None, kind="class"),
+                        line=getattr(node, "lineno", 0),
+                        context=f"raise {name}",
+                        usage="call",
+                    )
+                )
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+        if node.type is not None:
+            self._emit_annotation_types(node.type, "except")
+        self.generic_visit(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # noqa: N802
         if isinstance(node.iter, ast.Call):
@@ -709,11 +908,13 @@ def extract_references(
     tree = try_parse(content)
     if tree is None:
         return []
+    local_skip = frozenset(_find_module_typevars(tree))
     collector = _ReferenceCollector(
         filename,
         lookup,
         self_attrs=self_attrs,
         sibling_provides=sibling_provides,
+        local_skip=local_skip,
     )
     collector.visit(tree)
     return collector.refs
@@ -808,11 +1009,28 @@ def _ref_in_codebase(ref: SymbolRef, lookup: StructuralIndexLookup) -> bool:
         return _import_in_codebase(ref, lookup)
     if ref.owner and ref.name:
         if ref.kind == "field":
-            # MRO-aware field check includes pydantic / dataclass fields AND
-            # property-decorated methods (which look like fields to callers).
-            return lookup.class_has_field(ref.owner, ref.name)
-        # For methods (and MRO-aware walk)
-        return lookup.class_has_method(ref.owner, ref.name)
+            if lookup.class_has_field(ref.owner, ref.name):
+                return True
+            # Enum subclasses inherit `.value` / `.name` / etc from enum.Enum.
+            # The index doesn't track those (they come from stdlib), so accept
+            # them when the owner walks to an Enum base.
+            if ref.name in _ENUM_STANDARD_ATTRS and _is_enum_class(
+                ref.owner, lookup
+            ):
+                return True
+            return False
+        # For methods (MRO-aware walk)
+        if lookup.class_has_method(ref.owner, ref.name):
+            return True
+        # Protocol widening: `obj: SomeProtocol` calling a method that
+        # isn't on SomeProtocol but exists on some concrete class in the
+        # codebase is legitimate duck-typing. Accept when the owner is a
+        # Protocol and the method exists anywhere in the codebase.
+        if _owner_is_protocol(ref.owner, lookup) and _method_exists_anywhere(
+            ref.name, lookup
+        ):
+            return True
+        return False
     if ref.owner:
         return lookup.class_exists(ref.owner)
     if ref.name:
@@ -1084,9 +1302,28 @@ def check_closure(
     # actionable error instead of 5-10 duplicates.
     violations = _dedupe_fabricated_owner_cascades(violations, lookup, provides)
 
+    # Drop exact duplicates: a fabricated class referenced from both a
+    # parameter annotation (via _emit_annotation_types) and a field cascade
+    # (collapsed by Fix E) would otherwise yield two identical class
+    # violations on the same artifact. Dedupe by (artifact, kind, ref).
+    violations = _dedupe_exact(violations)
+
     order = {"missing": 0, "import": 1, "field": 2, "usage": 3, "kwargs": 4}
     violations.sort(key=lambda v: (order.get(v.kind, 99), v.artifact, v.line))
     return violations
+
+
+def _dedupe_exact(violations: list[ClosureViolation]) -> list[ClosureViolation]:
+    """Drop exact-duplicate violations (same artifact, kind, ref)."""
+    seen: set[tuple[str, str, str | None, str | None, str]] = set()
+    out: list[ClosureViolation] = []
+    for v in violations:
+        key = (v.artifact, v.kind, v.ref.owner, v.ref.name, v.ref.kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
+    return out
 
 
 def _dedupe_fabricated_owner_cascades(

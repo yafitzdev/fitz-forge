@@ -261,9 +261,10 @@ async def validate_grounding(
     structural_index: str,
     resolutions: list[dict[str, Any]],
     client: Any | None = None,
+    source_dir: str = "",
 ) -> GroundingReport:
     """Run both validation paths and return combined report."""
-    ast_violations = check_all_artifacts(artifacts, structural_index)
+    ast_violations = check_all_artifacts(artifacts, structural_index, source_dir=source_dir)
     logger.info(
         f"Grounding AST check: {len(ast_violations)} violations across {len(artifacts)} artifacts"
     )

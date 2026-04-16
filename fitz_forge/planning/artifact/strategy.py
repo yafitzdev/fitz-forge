@@ -29,17 +29,24 @@ _RAW_CODE_INSTRUCTION = (
 
 
 def _strip_fences(raw: str) -> str:
-    """Strip markdown code fences if the model wraps its output."""
-    text = raw.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove opening fence (```python or ```)
-        lines = lines[1:]
-        # Remove closing fence
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return text
+    """Strip markdown code fences without touching leading indentation.
+
+    Surgical method rewrites are indented (4-space class-body indent). A naive
+    `.strip()` removes that indent on the first line but leaves the rest,
+    producing mixed-indent multi-method outputs that can't be parsed. So we
+    strip only blank lines at the top/bottom and the fences themselves — never
+    touching the leading whitespace of real code lines.
+    """
+    lines = raw.split("\n")
+    while lines and lines[0].strip() == "":
+        lines.pop(0)
+    if lines and lines[0].lstrip().startswith("```"):
+        lines.pop(0)
+    while lines and lines[-1].strip() == "":
+        lines.pop()
+    if lines and lines[-1].strip() == "```":
+        lines.pop()
+    return "\n".join(lines)
 
 
 class ArtifactStrategy(Protocol):
@@ -79,21 +86,7 @@ class SurgicalRewriteStrategy:
     name = "surgical"
 
     async def generate(self, client: Any, ctx: ArtifactContext) -> str:
-        change_hint = _extract_change_hint(ctx.reference_method)
-
-        prompt = (
-            f"Rewrite this existing method to: {ctx.purpose}\n\n"
-            f"## EXISTING METHOD (copy this structure exactly)\n"
-            f"```python\n{ctx.reference_method}\n```\n\n"
-            f"## INSTRUCTIONS\n"
-            f"1. Copy the method above, renaming it appropriately\n"
-            f"2. Keep ALL internal pipeline steps (every self._xxx call) "
-            f"in the same order — these do retrieval, validation, "
-            f"enrichment, etc. that must not be skipped\n"
-            f"3. Do NOT skip steps or call lower-level primitives directly\n"
-            f"{change_hint}\n"
-            f"{_RAW_CODE_INSTRUCTION}\n"
-        )
+        prompt = self._build_prompt(ctx)
 
         safe = ctx.filename.replace("/", "_").replace("\\", "_")
         raw = await generate(
@@ -103,6 +96,39 @@ class SurgicalRewriteStrategy:
             label=f"artifact_surgical_{safe}",
         )
         return _strip_fences(raw)
+
+    def _build_prompt(self, ctx: ArtifactContext) -> str:
+        change_hint = _extract_change_hint(ctx.reference_method)
+        grounding = _surgical_grounding_block(ctx)
+        return (
+            f"Rewrite this existing method to: {ctx.purpose}\n\n"
+            f"## EXISTING METHOD (copy this structure exactly)\n"
+            f"```python\n{ctx.reference_method}\n```\n"
+            f"{grounding}\n"
+            f"## INSTRUCTIONS\n"
+            f"1. Copy the method above, renaming it appropriately\n"
+            f"2. Keep ALL internal pipeline steps (every self._xxx call) "
+            f"in the same order — these do retrieval, validation, "
+            f"enrichment, etc. that must not be skipped\n"
+            f"3. Do NOT skip steps or call lower-level primitives directly\n"
+            f"4. Do NOT invent new self.xxx or self._xxx methods. Use ONLY "
+            f"methods from METHODS AVAILABLE ON self above. If the right "
+            f"helper doesn't exist, call only real methods — never guess "
+            f"plausible-sounding names like self._execute_pipeline or "
+            f"self._run_pipeline\n"
+            f"5. Do NOT invent new Request/Response/Input/Output/Event/"
+            f"Chunk/Stream/Message/Result classes for ANY position — "
+            f"parameter annotations, return types, variable annotations, "
+            f"yields, raises, isinstance, or instantiation. Use ONLY "
+            f"classes from DATA MODEL FIELDS above, the reference method "
+            f"above, or Python stdlib. If the right class doesn't exist, "
+            f"yield primitives (str, dict, tuple) or compose from existing "
+            f"dataclasses\n"
+            f"6. When reading fields on a typed object, use ONLY the "
+            f"field names listed under that class in DATA MODEL FIELDS\n"
+            f"{change_hint}\n"
+            f"{_RAW_CODE_INSTRUCTION}\n"
+        )
 
     def build_retry_prompt(
         self,
@@ -116,18 +142,9 @@ class SurgicalRewriteStrategy:
             if e.check != "not_implemented"
         )
 
-        change_hint = _extract_change_hint(ctx.reference_method)
-
+        base = self._build_prompt(ctx)
         prompt = (
-            f"Rewrite this existing method to: {ctx.purpose}\n\n"
-            f"## EXISTING METHOD (copy this structure exactly)\n"
-            f"```python\n{ctx.reference_method}\n```\n\n"
-            f"## INSTRUCTIONS\n"
-            f"1. Copy the method above, renaming it appropriately\n"
-            f"2. Keep ALL internal pipeline steps (every self._xxx call) "
-            f"in the same order\n"
-            f"3. Do NOT skip steps or call lower-level primitives directly\n"
-            f"{change_hint}\n"
+            f"{base}\n"
             f"## ERRORS IN YOUR PREVIOUS ATTEMPT (fix these)\n"
             f"{error_text}\n\n"
             f"Your previous output:\n"
@@ -162,8 +179,12 @@ class NewCodeStrategy:
             "Rules:\n"
             "- Write ONLY the new or modified code (not the entire file)\n"
             "- Use exact attribute names from the source code above\n"
+            "- When calling self.xxx or self._xxx (the target class's own "
+            "methods), use ONLY methods listed in METHODS AVAILABLE ON self "
+            "above. Do NOT invent new helper names — the retry feedback "
+            "will keep rejecting plausible-sounding guesses\n"
             "- When calling self._xxx.method(), use ONLY methods listed "
-            "in AVAILABLE METHODS above\n"
+            "in AVAILABLE METHODS ON INSTANCE ATTRIBUTES above\n"
             "- When calling imported objects (e.g. service.xxx()), use ONLY "
             "methods listed in IMPORTED TYPE APIs above. If a method is not "
             "listed, it does NOT exist — do NOT assume it will be added later\n"
@@ -173,18 +194,35 @@ class NewCodeStrategy:
             "- When adding a parallel method, match the original "
             "method's parameters exactly\n"
             "- Do NOT fabricate method names — if unsure, omit the call\n"
-            "- For function PARAMETER type annotations (e.g. `def handler(req: "
-            "SomeClass)`), use ONLY classes listed in DATA MODEL FIELDS above. "
-            "Do NOT invent new Request/Response/Input/Output classes — reuse "
-            "the existing ones by name. If none of the listed classes fit, "
-            "reuse the closest match and access only its real fields\n"
-            "- When reading fields on a typed parameter (e.g. `request.foo`), "
-            "use ONLY the field names listed under that class in DATA MODEL "
-            "FIELDS. Do NOT invent new fields\n"
+            "- Do NOT invent new Request/Response/Input/Output/Event/Chunk/"
+            "Stream/Message/Result/Payload/Context classes. Use ONLY classes "
+            "that appear in DATA MODEL FIELDS above, AVAILABLE METHODS above, "
+            "the CURRENT SOURCE CODE below, or Python stdlib. This rule "
+            "applies to EVERY type position:\n"
+            "    * parameter annotations     (def foo(req: X))\n"
+            "    * return annotations        (def foo() -> X)\n"
+            "    * variable annotations      (x: X = ...)\n"
+            "    * instantiation             (X(...))\n"
+            "    * yield values              (yield X(...))\n"
+            "    * isinstance / cast         (isinstance(v, X))\n"
+            "    * raise / except            (raise X, except X)\n"
+            "  If the right class doesn't exist, compose from existing "
+            "dataclasses, or yield primitives (str, dict, tuple) instead "
+            "of inventing a new class\n"
+            "- When reading fields on a typed object (parameter OR local "
+            "variable, e.g. `request.foo`), use ONLY the field names listed "
+            "under that class in DATA MODEL FIELDS. Do NOT invent new fields\n"
         )
 
         # Grounding block (high priority — goes first)
         grounding_parts = []
+        if ctx.target_self_methods:
+            grounding_parts.append(
+                f"\n## METHODS AVAILABLE ON self (target class)\n"
+                f"When calling self.xxx or self._xxx, use ONLY these — "
+                f"do NOT invent new helper names:\n"
+                f"```\n{ctx.target_self_methods}\n```"
+            )
         if ctx.available_methods:
             grounding_parts.append(
                 f"\n## AVAILABLE METHODS ON INSTANCE ATTRIBUTES\n"
@@ -264,6 +302,35 @@ class NewCodeStrategy:
             f"{_RAW_CODE_INSTRUCTION}\n"
         )
         return _make_messages(prompt)
+
+
+def _surgical_grounding_block(ctx: ArtifactContext) -> str:
+    """Compose DATA MODEL FIELDS + AVAILABLE METHODS for a surgical rewrite.
+
+    Kept minimal on purpose — surgical's philosophy is "copy the reference,
+    make the minimal change." But fabrication of schema classes is so common
+    that the schema block pays for itself here too.
+    """
+    parts: list[str] = []
+    if ctx.target_self_methods:
+        parts.append(
+            f"\n## METHODS AVAILABLE ON self (target class)\n"
+            f"When calling self.xxx or self._xxx, use ONLY these — "
+            f"do NOT invent new helper names:\n"
+            f"```\n{ctx.target_self_methods}\n```\n"
+        )
+    if ctx.schema_fields:
+        parts.append(
+            f"\n## DATA MODEL FIELDS (use these exact class and field names)\n"
+            f"{ctx.schema_fields}\n"
+        )
+    if ctx.available_methods:
+        parts.append(
+            f"\n## AVAILABLE METHODS ON INSTANCE ATTRIBUTES\n"
+            f"When calling methods on self._xxx, use ONLY these:\n"
+            f"{ctx.available_methods}\n"
+        )
+    return "".join(parts)
 
 
 def _extract_change_hint(reference_body: str) -> str:

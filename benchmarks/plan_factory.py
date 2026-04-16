@@ -954,6 +954,40 @@ def replay_cmd(
         structural_index = context.get("synthesized", "")
         _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir)
 
+        # Also score plan_replay.json specifically — _find_plan_files skips
+        # it, so without this the replay output is invisible to the scorer
+        # and every cycle reports the unchanged original average.
+        replay_path = out_dir / "plan_replay.json"
+        if replay_path.exists():
+            from .eval_v2_deterministic import run_deterministic_checks
+            from .eval_v2_taxonomy import load_taxonomy
+
+            taxonomy_path = Path(__file__).parent / "streaming_taxonomy.json"
+            tax_files = None
+            if taxonomy_path.exists():
+                tax_files = load_taxonomy(taxonomy_path).required_files or None
+            replay_data = json.loads(replay_path.read_text(encoding="utf-8"))
+            rep = run_deterministic_checks(
+                replay_data,
+                structural_index,
+                task_requires_streaming=True,
+                taxonomy_files=tax_files,
+                source_dir=source_dir,
+            )
+            logger.info(
+                f"Replay score: total={rep.deterministic_score} "
+                f"(comp={rep.completeness_score} "
+                f"art={rep.artifact_quality_score} "
+                f"cons={rep.consistency_score})"
+            )
+            print(
+                f"\n=== REPLAY DETERMINISTIC SCORE ===\n"
+                f"  total: {rep.deterministic_score}/100\n"
+                f"  completeness: {rep.completeness_score}/30\n"
+                f"  artifacts:    {rep.artifact_quality_score}/50\n"
+                f"  consistency:  {rep.consistency_score}/20\n"
+            )
+
 
 if __name__ == "__main__":
     app()

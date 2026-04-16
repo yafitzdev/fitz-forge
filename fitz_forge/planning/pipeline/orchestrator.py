@@ -961,6 +961,7 @@ class DecomposedPipeline:
                 structural_index=full_index,
                 resolutions=resolutions,
                 client=client,
+                source_dir=prior_outputs.get("_source_dir", ""),
             )
             prior_outputs["_grounding_validation"] = grounding_report.to_dict()
             logger.info(f"Grounding validation: {grounding_report.total_violations} AST violations")

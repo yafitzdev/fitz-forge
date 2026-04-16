@@ -578,6 +578,7 @@ def check_cross_artifact_consistency(
     artifacts: list[dict],
     artifact_checks: list[ArtifactCheck] | None = None,
     structural_index: str = "",
+    source_dir: str = "",
 ) -> list[ConsistencyResult]:
     """Check consistency across artifacts.
 
@@ -586,18 +587,26 @@ def check_cross_artifact_consistency(
     no methods, so any caller would fail — but that's a parse failure,
     not a consistency error.  Don't double-count.
 
-    If structural_index is provided, method calls to methods that exist
-    in the real codebase are skipped — they're not consistency errors,
-    they're calls to existing code that the artifact doesn't redefine.
+    If structural_index (or source_dir) is provided, method calls to
+    methods that exist in the real codebase are skipped — they're not
+    consistency errors, they're calls to existing code the artifact
+    doesn't redefine. `source_dir` augments the lookup with a full-disk
+    scan so classes outside the retrieval subset are recognized (same
+    treatment grounding got for B4).
     """
     results: list[ConsistencyResult] = []
 
-    # Build set of methods known in the real codebase (V2-F6a fix)
+    # Build set of methods known in the real codebase (V2-F6a fix).
+    # Augment from disk so codebase methods outside the retrieval subset
+    # (e.g. _synthesizer.generate on the real engine) aren't flagged as
+    # missing in the sibling artifact.
     codebase_methods: set[str] = set()
-    if structural_index:
+    if structural_index or source_dir:
         from fitz_forge.planning.validation.grounding import StructuralIndexLookup
 
         lookup = StructuralIndexLookup(structural_index)
+        if source_dir:
+            lookup.augment_from_source_dir(source_dir)
         codebase_methods = lookup._all_method_names | lookup._all_function_names
 
     # Track which files are unparseable (skip them as targets)
@@ -836,7 +845,7 @@ def run_deterministic_checks(
 
     # 3. Cross-artifact consistency
     consistency_checks = check_cross_artifact_consistency(
-        artifact_dicts, artifact_checks, structural_index
+        artifact_dicts, artifact_checks, structural_index, source_dir
     )
 
     # Score calculation

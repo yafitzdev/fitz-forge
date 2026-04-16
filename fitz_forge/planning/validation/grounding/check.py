@@ -240,9 +240,10 @@ def check_artifact(
     if not content.strip():
         return []
 
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
+    from fitz_forge.planning.validation.grounding.inference import try_parse
+
+    tree = try_parse(content)
+    if tree is None:
         return [
             Violation(
                 filename,
@@ -469,12 +470,21 @@ def _check_node(
 def check_all_artifacts(
     artifacts: list[dict[str, Any]],
     structural_index: str,
+    source_dir: str = "",
 ) -> list[Violation]:
-    """Run AST grounding check + parallel-method signature check on a set."""
+    """Run AST grounding check + parallel-method signature check on a set.
+
+    `source_dir` augments the lookup with a full-codebase scan so real
+    classes outside the retrieval subset are recognised. Without it,
+    grounding false-positives every real class that happens to be outside
+    the agent's 50-ish picked files.
+    """
     if not artifacts:
         return []
 
     lookup = StructuralIndexLookup(structural_index)
+    if source_dir:
+        lookup.augment_from_source_dir(source_dir)
     all_violations: list[Violation] = []
     for artifact in artifacts:
         all_violations.extend(check_artifact(artifact, lookup))
@@ -497,9 +507,10 @@ def _check_parallel_signatures(
         filename = artifact.get("filename", "unknown")
         if not content.strip():
             continue
-        try:
-            tree = ast.parse(content)
-        except SyntaxError:
+        from fitz_forge.planning.validation.grounding.inference import try_parse
+
+        tree = try_parse(content)
+        if tree is None:
             continue
 
         for node in ast.walk(tree):
