@@ -171,9 +171,7 @@ kv_cache_type: q8_0
 
 ## Related Features
 
-- [Split Reasoning](split-reasoning.md) -- auto-enabled based on
-  `context_length` from provider config
 - [Per-Field Extraction](per-field-extraction.md) -- uses `generate()` with
   `max_tokens=4096` for focused extractions
-- [Verification Agents](verification-agents.md) -- each agent call uses
-  `generate()` with `max_tokens=4096`
+- [Crash Recovery](crash-recovery.md) -- the worker reuses a single client
+  across resumed jobs

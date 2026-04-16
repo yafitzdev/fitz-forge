@@ -11,15 +11,17 @@ anything over ~2000 characters of JSON schema becomes unreliable.
 
 ## Solution
 
-Per-field extraction decomposes each pipeline stage into three phases:
+Per-field extraction decomposes the synthesis stage into three phases:
 
-1. **Free-form reasoning** -- the model writes unrestricted natural language
-   analysis, playing to its strength (generating coherent prose).
-2. **Self-critique** -- a second pass reviews the reasoning for scope inflation,
-   hallucinated files, and logical inconsistencies.
-3. **N small JSON extractions** -- one extraction call per field group, each
-   targeting a mini-schema under 2000 characters. The model only needs to
-   produce a few fields at a time from the reasoning it already wrote.
+1. **Best-of-3 reasoning + self-critique** -- the model writes three
+   unrestricted natural language attempts, scope consensus picks the best,
+   and a critique pass checks for scope inflation / hallucinated files.
+2. **13 small JSON extractions** -- one extraction call per field group,
+   each targeting a mini-schema under 2000 characters. The model only
+   produces a few fields at a time from the reasoning it already wrote.
+3. **Pydantic validation** -- extracted JSON is validated against typed
+   schemas. Failed groups get Pydantic defaults instead of crashing the
+   stage (partial plan > no plan).
 
 This is the core technique that makes local-first planning viable on consumer
 hardware. Without it, the pipeline would require a 70B+ model for structured
@@ -29,7 +31,7 @@ output reliability.
 
 ### Field Group Definitions
 
-Each pipeline stage defines its own `_FIELD_GROUPS` list. Each entry is a dict
+The synthesis stage defines a `_FIELD_GROUPS` list. Each entry is a dict
 with three keys:
 
 - `label` -- human-readable name used in logging and progress reporting
@@ -39,13 +41,15 @@ with three keys:
 - `schema` -- a `json.dumps()` string showing the exact shape the model must
   produce, kept under 2000 characters
 
-The current stage breakdown:
+The 13 groups, grouped by final plan section:
 
-| Stage                | Groups | Labels                                                            |
-|----------------------|--------|-------------------------------------------------------------------|
-| Context              | 4      | description, stakeholders, files, assumptions                     |
-| Architecture+Design  | 6      | approaches, tradeoffs, adrs, components, integrations, artifacts  |
-| Roadmap+Risk         | 3      | phases, scheduling, risks                                         |
+| Section      | Groups | Labels                                                        |
+|--------------|--------|---------------------------------------------------------------|
+| Context      | 4      | description, stakeholders, files, assumptions                 |
+| Architecture | 2      | approaches, tradeoffs                                         |
+| Design       | 4      | adrs, components, integrations, artifacts                     |
+| Roadmap      | 1      | phases                                                        |
+| Risk         | 2      | scheduling, risks                                             |
 
 ### Extraction Flow
 
@@ -66,17 +70,19 @@ For each group:
 ### Selective Codebase Context
 
 Not every field group needs codebase evidence. Injecting the full gathered
-context into every extraction wastes tokens and can confuse the model. Each
-stage defines a `_CONTEXT_GROUPS` set listing which groups receive it:
+context into every extraction wastes tokens and can confuse the model.
+Synthesis defines a `_CONTEXT_GROUPS` set listing which groups receive it:
 
-- Architecture+Design: `{"approaches", "adrs", "artifacts", "components",
-  "integrations"}` -- these reference real file paths and existing code
-- Roadmap+Risk: `{"phases", "risks"}` -- phases need it for verification
-  commands, risks need it to ground risk descriptions in actual code structure
-- Context stage: `{"files"}` -- only the files group needs codebase paths
+- Context: `{"description", "files"}` — both reference real file paths
+- Architecture: `{"approaches"}` — evaluates approaches against real code
+- Design: `{"adrs", "components", "integrations", "artifacts"}` — design
+  decisions and components must point at real interfaces
+- Roadmap/Risk: receive slim design output (component + artifact names, no
+  code bodies) plus decision constraints — enough to ground phases and
+  risks without re-sending the full codebase.
 
-Groups like `tradeoffs`, `scheduling`, and `assumptions` get no codebase
-context; they are purely derived from the reasoning text.
+Groups like `tradeoffs`, `stakeholders`, `assumptions`, and `scheduling`
+receive no codebase context — they derive purely from reasoning text.
 
 ### JSON Extraction Robustness
 
@@ -97,10 +103,10 @@ through a cascade of strategies:
 ### Empty Field Retry
 
 The `retry_if_empty` parameter on `_extract_field_group()` handles a specific
-failure mode (documented as F6): the model returns valid JSON but with an empty
-list for a critical field. When set, the method checks if the named field has
-an empty list and retries once. If the retry also returns empty, it accepts the
-result and lets downstream validators handle it.
+failure mode: the model returns valid JSON but with an empty list for a
+critical field. When set, the method checks if the named field has an empty
+list and retries once. If the retry also returns empty, it accepts the result
+and lets downstream validators handle it.
 
 ## Key Design Decisions
 
@@ -127,24 +133,20 @@ result and lets downstream validators handle it.
 
 ## Configuration
 
-No user-facing configuration. Field groups are defined as module-level constants
-in each stage file. The extraction budget (`max_tokens=4096`) is hardcoded in
-`_extract_field_group()`.
+No user-facing configuration. The 13 field groups are defined as a module-level
+constant in `synthesis.py`. The extraction budget (`max_tokens=4096`) is
+hardcoded in `_extract_field_group()`.
 
 ## Files
 
 | File | Role |
 |------|------|
 | `fitz_forge/planning/pipeline/stages/base.py` | `_extract_field_group()` method, `extract_json()` function |
-| `fitz_forge/planning/pipeline/stages/context.py` | 4 field groups for context extraction |
-| `fitz_forge/planning/pipeline/stages/architecture_design.py` | 6 field groups for architecture+design extraction |
-| `fitz_forge/planning/pipeline/stages/roadmap_risk.py` | 3 field groups for roadmap+risk extraction |
+| `fitz_forge/planning/pipeline/stages/synthesis.py` | All 13 field groups (context 4, architecture 2, design 4, roadmap 1, risk 2) |
 
 ## Related Features
 
-- [Split Reasoning](split-reasoning.md) -- reduces the reasoning prompt that
-  feeds into per-field extraction
+- [Synthesis](../pipeline/06_synthesis.md) -- the only stage that uses
+  per-field extraction in the current pipeline
 - [Crash Recovery](crash-recovery.md) -- checkpoints after each stage so
   extracted fields are not lost on crash
-- [Verification Agents](verification-agents.md) -- run between reasoning and
-  extraction to catch architectural flaws before fields are extracted

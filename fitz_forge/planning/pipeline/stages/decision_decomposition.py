@@ -345,7 +345,7 @@ class DecisionDecompositionStage(PipelineStage):
 
             decisions = parsed.get("decisions", [])
 
-            # F1 fix: deduplicate decisions by question similarity
+            # deduplicate decisions by question similarity
             keep_ids: set[str] = set()
             deduped: list[dict] = []
             for d in decisions:

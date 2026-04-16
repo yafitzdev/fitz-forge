@@ -125,11 +125,11 @@ Configuration is read from `AgentConfig` in the project's config schema.
 
 ## Related Features
 
-- **Implementation Check** -- Consumes the `synthesized` output to detect already-built
-  features before planning begins.
-- **Architecture-Design Stage** -- Uses `raw_summaries` for reasoning and
-  `_gathered_context` (synthesized) for field extraction grounding.
-- **Artifact Duplicate Check** -- Searches `full_structural_index` for existing files
-  matching proposed new artifacts.
-- **Pipeline Orchestrator** -- Manages the gatherer lifecycle, model switching, and
-  checkpoint persistence of agent context.
+- [Implementation Check](02_implementation-check.md) — consumes the `synthesized`
+  output to detect already-built features before planning begins.
+- [Call Graph Extraction](03_call-graph-extraction.md) — consumes `file_index_entries`
+  and the import graph built from the indexed files.
+- [Decision Decomposition](04_decision-decomposition.md) — first planning stage,
+  receives the one-line file manifest and structural overview.
+- [Synthesis](06_synthesis.md) — uses `file_contents` and `file_index_entries`
+  for per-artifact generation and `full_structural_index` for the duplicate check.

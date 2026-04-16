@@ -5,7 +5,7 @@
 
 # fitz-forge
 
-### Overnight AI architectural planning on local hardware. Queue a job. Go to sleep. Wake up to a plan.
+### Architectural planning harness for local LLMs
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
@@ -89,7 +89,7 @@ That's it. Your plan runs overnight on local hardware.
 
 ### About
 
-I built fitz-forge because the best AI coding tools are dangerously dependent on subsidized API pricing. Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone (understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. fitz-forge moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. And as local models improve, your plans improve for free.
+I built `fitz-forge` because the best AI coding tools are dangerously dependent on subsidized API pricing. Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone (understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. `fitz-forge` moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. And as local models improve, your plans improve for free.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
@@ -97,118 +97,97 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
-### The Problem
-
-The single most expensive operation in agentic LLM coding is the **planning phase**: understanding a codebase, reasoning about architecture, producing a structured plan. Every token burns through your API budget. And raw local LLMs can't do this well — ask a 30B model to plan a feature and you get generic advice with hallucinated file paths, no awareness of your existing code, and no structured output.
-
-What if local models could produce *good* plans — grounded in your codebase, structured into phases, with real file paths and verification commands?
-
----
-
-### The Insight 💡
-
-Running LLMs locally means balancing three things: **tokens per second**, **quantization quality**, and **model intelligence**. A 70B model at high quant gives you excellent reasoning but crawls at 2-5 tok/s on consumer hardware. That feels unusable — until you realize planning doesn't need to be interactive.
-
-> **Queue a job. Go to sleep. Let it run overnight.**
->
-> Suddenly tok/s doesn't matter. You can run a large, intelligent model purely in RAM at 10 tok/s and that's *fine*.
-
-```
-10 tok/s × 60s × 60min × 8 hours = 288,000 tokens
-```
-
-That's enough for a full architectural plan — reasoning, self-critique, structured extraction — from a model running on hardware you already own.
-
----
-
 ### Why fitz-forge?
 
-**Reads your codebase first 🔍** → [Agent Context Gathering](docs/features/pipeline/00_agent-context-gathering.md)
-> An agent builds a structural index of your codebase (classes, functions, imports), selects relevant files via LLM scan, expands through import chains and `__init__.py` facades, and auto-includes architectural hub files. Reasoning stages see a compact file manifest (~4K tokens) with on-demand `inspect_files` and `read_file` tools — 50+ files fit in 32K context.
+**Cut your Opus bill — plan locally, implement with Sonnet 💸**
+> Architectural planning is the most expensive phase of agentic coding. `fitz-forge` produces a markdown artifact you hand to Sonnet (or any cheaper model) for implementation. The expensive tokens never hit your API budget.
 
-**Per-field extraction that small models can handle 🧩** → [Per-Field Extraction](docs/features/infrastructure/per-field-extraction.md)
-> Each stage does 1 reasoning pass + 1 self-critique + N tiny JSON extractions (<2000 chars each). Even a 3B model can reliably produce structured output at this scale. Failed extractions get Pydantic defaults instead of crashing the stage — partial plan > no plan.
+**Your code never leaves your machine 🔒**
+> No API calls required. No telemetry. No cloud roundtrips. Your codebase, the LLM, and the generated plan all live on hardware you control — useful for proprietary code, NDA-bound work, or anywhere data-residency rules apply. The optional Anthropic review pass is off by default; opt in per-job if you want a second opinion.
 
-**Single model, zero swapping 🔀** → [LLM Providers](docs/features/infrastructure/llm-providers.md)
-> Qwen3-Coder-30B (MoE, 3B active) handles both retrieval and reasoning — benchmarked at 89% critical recall across 40 queries, faster than the 4B it replaced. No model switching, no VRAM churn. Split reasoning mode breaks large LLM calls into ~8K-token pieces, enabling dense 27B models at 32K context.
+**Fully local, zero dependencies 🧩**
+> Ollama, LM Studio, or a raw llama-server subprocess. Pick your runtime, pick your model — no vendor lock-in, no SaaS login, no "sign up for an API key" step. Works the same on an offline workstation as on a cloud VM.
 
-**Crash recovery built in 🔄** → [Crash Recovery](docs/features/infrastructure/crash-recovery.md)
-> Jobs checkpoint to SQLite. Machine crashes mid-plan? `retry` picks up from the last checkpoint. Power goes out overnight? Resume in the morning.
+**Dumb local models produce smart plans 🧠**
+> The pipeline breaks the task into atomic decisions, resolves each against relevant files, then narrates the committed decisions into a plan. A local LLM on a consumer GPU produces plans that a naked prompt to the same model can't.
 
-**5 verification agents catch mistakes 🔬** → [Verification Agents](docs/features/infrastructure/verification-agents.md)
-> After the main reasoning pass, 5 agents run in parallel: contract extraction, data flow tracing, pattern matching, type boundary auditing, and assumption surfacing. They catch hallucinated method calls and architectural gaps before the plan finalizes.
+**Runs on whatever hardware you've got 🖥️**
+> Consumer GPU? `Gemma4-26B-A4b` does the whole pipeline. CPU-only box or tiny VRAM? Run a medium model at 10 tok/s overnight. Tokens-per-second stops mattering when you're sleeping.
 
-**Claude where it counts, local everywhere else 🎯** → [Confidence Scoring](docs/features/pipeline/06_confidence-scoring.md)
-> The local model does the heavy lifting — 95% of the tokens. Per-section confidence scoring flags weak spots, and those sections can pause for an Anthropic API review pass. Fully optional — off by default, zero API calls unless you opt in.
+**Any codebase, any language 🌐**
+> Python, TypeScript, Go, Rust, NestJS backends, FastAPI services, React frontends — the retrieval layer indexes by file structure and imports, and the grounding layer validates generated artifacts against whatever the codebase actually contains. No Python bias, no hardcoded framework assumptions.
 
-**Two interfaces, same engine 🔌**
-> CLI for background job queues, MCP server for Claude Code / Claude Desktop integration. Both wrap the same `tools/` service layer and SQLite job store.
+**Queue a job. Go to sleep. Let it run overnight. 🌙**
+> Every stage produces checkpoints. Power outage at minute 55 of a 60-minute run? `fitz retry <id>` picks up from the last completed stage. The worker detects interrupted jobs on startup and marks them resumable automatically.
 
-**More features at a glance:**
-> - [x] **Three LLM providers.** [Ollama](docs/features/infrastructure/llm-providers.md) (with OOM fallback), LM Studio (OpenAI-compatible), or llama.cpp (managed subprocess with flash attention).
-> - [x] **[Split reasoning.](docs/features/infrastructure/split-reasoning.md)** Architecture and design as separate calls, roadmap and risk as separate calls. Reduces peak context from ~29K to ~8K tokens per call.
-> - [x] **[Cross-stage coherence check.](docs/features/pipeline/05_coherence-check.md)** Post-pipeline pass verifies context → architecture → roadmap consistency.
-> - [x] **[Implementation detection.](docs/features/pipeline/01_implementation-check.md)** Surgical check prevents planning to build what already exists.
-> - [x] **[Grounding validation.](docs/features/infrastructure/grounding-validation.md)** AST-based verification that generated artifacts reference real methods, not hallucinated ones.
+**Drops into Claude Code or Codex via MCP 🔌**
+> Expose `fitz-forge` as an MCP server (`fitz serve`) and it becomes a tool inside Claude Code, or any MCP-capable client. Ask the agent to plan a feature → it queues a job on your local worker → comes back with the finished plan when ready. Same service layer works from the CLI for standalone use.
 
 ---
 
 ### Benchmarks
 
-Can a structured pipeline make a local 40B model plan like a 140B one? 20 plans each, scored by a 6-dimension Sonnet-as-Judge rubric (/60).
-
-```
-  Qwen3-Coder-REAP-40B-A3B (raw)         ██████░░░░░░░░░░░░░░░░░░░░░░░░░  18.4 /60
-  + fitz-forge                           ██████████████████████░░░░░░░░░  45.1 /60   (+145%)
-  + sonnet judge                         █████████████████████████░░░░░░  51.2 /60   (+178%)
-
-  Qwen3-Coder-30B-A3B (raw)              ████░░░░░░░░░░░░░░░░░░░░░░░░░░░  12.3 /60
-  + fitz-forge                           ████████████████████░░░░░░░░░░░  40.3 /60   (+228%)
-
-  ───────────────────────────────────────────────────────────────────────────────────────────
-  Claude Sonnet 4.6                      █████████████████████████░░░░░░  51.8 /60
-  Claude Opus 4.6                        ████████████████████████████░░░  56.9 /60
-```
-
-> A 40B local model with fitz-forge scores **45.1** — closing 78% of the gap to Sonnet 4.6.
-> Add the optional Sonnet judge pass and it matches frontier at **51.2**.
-
-**Scoring:** 6-dimension Sonnet-as-Judge rubric — file identification, contract preservation, internal consistency, codebase alignment, implementability, scope calibration. Each dimension scored 1-10, total /60. 20 plans per configuration.
-
-> [!NOTE]
-> These are preliminary numbers from early eval runs. Final validated benchmarks are in progress.
+TBD
 
 ---
 
 ### How It Works
 
-A retrieval agent pre-stage followed by 3 planning stages. [Split reasoning](docs/features/infrastructure/split-reasoning.md) mode breaks architecture+design and roadmap+risk into separate LLM calls for smaller context models. Each stage uses [per-field extraction](docs/features/infrastructure/per-field-extraction.md): one reasoning prompt produces analysis, a self-critique pass catches scope inflation and hallucinated files, then small JSON extractions pull structured data from the reasoning.
+A 10-stage pipeline that decomposes architectural planning into small, focused LLM calls interleaved with deterministic AST work. Retrieval + implementation check feed a decision-based reasoning core (decompose → resolve → synthesize), then artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written.
 
 <br>
 
 ```
-  [Agent]    structural index → LLM scan → import expand → facade expand → hub auto-include
-                 |
-                 v
-  [Check]    implementation check — is this task already built?
-                 |
-                 v
-  [Stage 1]  Context — requirements, constraints, assumptions (4 field groups)
-  [Stage 2]  Architecture + Design — split or combined (6 field groups)
-               Split mode: architecture reasoning → design reasoning (each ~8K tokens)
-  [Stage 3]  Roadmap + Risk — split or combined (3 field groups)
-               Split mode: roadmap reasoning → risk reasoning (each ~8K tokens)
-                 |
-                 v
-  [Post]     coherence check → confidence scoring → optional API review → render markdown
+     USER PROMPT
+          │
+          ▼
+┌─────────────────────────────────────────┐
+│ 1. Agent Context Gathering    [6-8 LLM] │  retrieval + compression
+├─────────────────────────────────────────┤
+│ 2. Implementation Check       [1 LLM]   │  already built?
+├─────────────────────────────────────────┤
+│ 3. Call Graph Extraction      [0 · AST] │  deterministic
+├─────────────────────────────────────────┤
+│ 4. Decision Decomposition     [2-4 LLM] │  adaptive best-of-N
+├─────────────────────────────────────────┤
+│ 5. Decision Resolution        [10-15]   │  1 call per decision
+├─────────────────────────────────────────┤
+│ 6. Synthesis                  [~15 LLM] │  reasoning + 13 extractions
+├─────────────────────────────────────────┤
+│ 7. Artifact Generation        [3-8 LLM] │  per-artifact + closure checks
+├─────────────────────────────────────────┤
+│ 8. Grounding Validation       [0-5 LLM] │  AST + repair
+├─────────────────────────────────────────┤
+│ 9. Coherence Check            [1 LLM]   │  cross-stage sanity
+├─────────────────────────────────────────┤
+│ 10. Render + Write            [0]       │  markdown to disk
+└─────────────────────────────────────────┘
+          │
+          ▼
+    ~/.fitz-forge/plans/plan_<id>.md
+
+Total: ~40-60 LLM calls · ~7-9 min on RTX 5090
 ```
+
+| # | Stage | Docs |
+|---|-------|------|
+| 1 | Agent Context Gathering | [01_agent-context-gathering.md](docs/features/pipeline/01_agent-context-gathering.md) |
+| 2 | Implementation Check | [02_implementation-check.md](docs/features/pipeline/02_implementation-check.md) |
+| 3 | Call Graph Extraction | [03_call-graph-extraction.md](docs/features/pipeline/03_call-graph-extraction.md) |
+| 4 | Decision Decomposition | [04_decision-decomposition.md](docs/features/pipeline/04_decision-decomposition.md) |
+| 5 | Decision Resolution | [05_decision-resolution.md](docs/features/pipeline/05_decision-resolution.md) |
+| 6 | Synthesis | [06_synthesis.md](docs/features/pipeline/06_synthesis.md) |
+| 7 | Artifact Generation | [07_artifact-generation.md](docs/features/pipeline/07_artifact-generation.md) |
+| 8 | Grounding Validation | [08_grounding-validation.md](docs/features/pipeline/08_grounding-validation.md) |
+| 9 | Coherence Check | [09_coherence-check.md](docs/features/pipeline/09_coherence-check.md) |
+| 10 | Render + Write | — |
 
 <br>
 
 > [!NOTE]
-> The pipeline decomposes a problem that would overwhelm a small model into pieces it can handle reliably. Each JSON extraction is <2000 chars — small enough for a 3B quantized model to produce valid output. Split reasoning auto-enables when `context_length < 32768`, letting dense 27B models run the full pipeline.
+> The pipeline decomposes a problem that would overwhelm a small model into many small LLM calls it can handle reliably. Each per-field JSON extraction is under 2000 chars — small enough for a 3B quantized model to produce valid output. Deterministic AST work (call graph, grounding check) carries the structural load so LLMs only do what LLMs are good at.
 
-Full pipeline docs: **[docs/features/](docs/features/)** — 13 detailed feature docs covering every stage and infrastructure component.
+Full pipeline docs: **[docs/features/](docs/features/)** — detailed docs covering every stage and infrastructure component.
 
 ---
 

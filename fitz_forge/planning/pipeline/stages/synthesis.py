@@ -645,7 +645,7 @@ def _decompose_multi_handler_artifacts(
             sub_purpose = f"add {new_path} endpoint (streaming variant of {base_func}())"
             result.append((filename, sub_purpose))
             decomposed = True
-            logger.info(f"F25 decompose: {filename} -> {new_path} (ref: {base_func}())")
+            logger.info(f"decompose: {filename} -> {new_path} (ref: {base_func}())")
 
         if not decomposed:
             # Couldn't match — keep original
@@ -655,7 +655,7 @@ def _decompose_multi_handler_artifacts(
 
 
 def _extract_pipeline_constraint(reference_body: str) -> str:
-    """Extract the internal call chain from a reference method (F21 fix).
+    """Extract the internal call chain from a reference method.
 
     When creating a parallel variant (streaming, async, batch), the model
     must replicate all intermediate pipeline steps — not shortcut to a
@@ -747,7 +747,7 @@ def _extract_reference_method(
     When creating answer_stream() (streaming variant of answer()), the model
     needs to see answer()'s actual implementation to know how to chain
     _query_rewriter, _retrieval_router, _reader, etc. Without this, it
-    fabricates internal API calls (F9).
+    fabricates internal API calls.
 
     Strategy: parse the source file for all method names, then check which
     ones are mentioned in the purpose/decisions text. Pick the longest
@@ -839,13 +839,13 @@ def _extract_reference_method(
         # Cap at 16K chars to avoid blowing prompt budget
         if len(best_body) > 16000:
             best_body = best_body[:16000] + "\n    # ... (truncated)"
-        logger.info(f"F9: extracted reference method '{best_name}' ({len(best_body)} chars)")
+        logger.info(f"extracted reference method '{best_name}' ({len(best_body)} chars)")
 
     return best_body
 
 
 def _extract_method_signatures(content: str, filename: str) -> list[str]:
-    """Extract method/function signatures from artifact code for F3 injection.
+    """Extract method/function signatures from artifact code for signature injection.
 
     Returns lines like:
         engine.py: async def answer_stream(self, query: Query, ...) -> AsyncIterator[str]
@@ -1390,11 +1390,11 @@ def _repair_fabricated_refs(
     # NOTE: Hardcoded _INVALID_FIELD_PATTERNS removed. They were
     # codebase-specific (fitz-sage) and could produce wrong corrections
     # (e.g. request.question → request.message when QueryRequest DOES
-    # have .question). F2 is now solved by prompt reorder + schema
-    # field injection + F9 param type extraction.
+    # have .question). this is now solved by prompt reorder + schema
+    # field injection + param type extraction.
     field_fixes = 0
 
-    # F5 fix: repair wrong import paths using structural index
+    # repair wrong import paths using structural index
     import_fixes = 0
     if lookup:
         import_lines = repaired.split("\n")
@@ -1679,7 +1679,7 @@ class SynthesisStage(PipelineStage):
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
 
-        # F20 fix: merge redundant decisions before formatting
+        # merge redundant decisions before formatting
         resolutions = self._merge_redundant_decisions(resolutions)
 
         decision_text = self._format_resolutions(resolutions)
@@ -1838,7 +1838,7 @@ class SynthesisStage(PipelineStage):
         )
 
     # ------------------------------------------------------------------
-    # V2-F7 Fix A: decomposition → synthesis closure
+    # decomposition → synthesis closure
     # ------------------------------------------------------------------
     #
     # Invariant: every file that decomposition analyzed in 2+ decision
@@ -1848,9 +1848,7 @@ class SynthesisStage(PipelineStage):
     #
     # Same shape as the artifact closure principle — state the invariant,
     # then enforce it — just at a different pipeline level (decomp→synthesis
-    # transition rather than the per-artifact set). See
-    # docs/roadmap/v2-f7-decision-synthesis-closure.md and
-    # CLAUDE.md rules 10+11.
+    # transition rather than the per-artifact set).
     #
     # Codebase/language-agnostic: file references are discovered by matching
     # evidence text against the actual files in the structural index. No
@@ -1975,7 +1973,7 @@ class SynthesisStage(PipelineStage):
             injected.append(f"{fname} -- {purpose}")
             injected_paths.add(fname)
             logger.info(
-                "V2-F7: injecting %s (%d decision refs)", fname, count
+                "injecting %s (%d decision refs)", fname, count
             )
 
         # Criterion 2: evidence-source (min 1 — file was directly analyzed)
@@ -1992,7 +1990,7 @@ class SynthesisStage(PipelineStage):
             injected.append(f"{fname} -- {purpose}")
             injected_paths.add(fname)
             logger.info(
-                "V2-F7b: injecting %s (evidence-source in %d decision(s))",
+                "evidence-source injecting %s (evidence-source in %d decision(s))",
                 fname,
                 len(decisions),
             )
@@ -2259,7 +2257,7 @@ class SynthesisStage(PipelineStage):
         """
         needed = context_merged.get("needed_artifacts", [])
 
-        # V2-F7 Fix A: enforce decomposition→synthesis closure.
+        # enforce decomposition→synthesis closure.
         # Any file referenced in decision evidence but absent from
         # needed_artifacts gets auto-injected. This ALSO serves as the
         # primary fallback when needed_artifacts is empty — resolved
@@ -2292,7 +2290,7 @@ class SynthesisStage(PipelineStage):
             )
 
         # Parse needed_artifacts into (filename, purpose) pairs.
-        # Cap raised slightly to accommodate V2-F7 injections without
+        # Cap raised slightly to accommodate evidence injections without
         # pushing out user-intent artifacts.
         artifact_specs: list[tuple[str, str]] = []
         for entry in needed[:12]:
@@ -2303,7 +2301,7 @@ class SynthesisStage(PipelineStage):
             else:
                 artifact_specs.append((entry.strip(), ""))
 
-        # F12 fix: clean up corrupted artifact filenames
+        # clean up corrupted artifact filenames
         import re as _re
 
         cleaned_specs: list[tuple[str, str]] = []
@@ -2336,7 +2334,7 @@ class SynthesisStage(PipelineStage):
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
 
-        # F25 decomposition: split file-level artifacts into per-function
+        # Per-function decomposition: split file-level artifacts into per-function
         # artifacts when the source file has multiple route handlers and
         # the decisions reference multiple new endpoints for that file.
         artifact_specs = _decompose_multi_handler_artifacts(
@@ -2414,8 +2412,8 @@ class SynthesisStage(PipelineStage):
                 prior_outputs,
             )
 
-        # V2-F5 fix: deduplicate artifacts by filename.
-        # Per-function decomposition (F25) can produce multiple artifacts for
+        # deduplicate artifacts by filename.
+        # Per-function decomposition can produce multiple artifacts for
         # the same file (e.g., one per route handler). Keep the longest when
         # content differs, drop exact duplicates.
         seen: dict[str, dict] = {}  # normalized filename -> best artifact
@@ -2796,7 +2794,7 @@ class SynthesisStage(PipelineStage):
         purpose: str,
         reference_body: str,
     ) -> dict | None:
-        """F21 fix: generate artifact by surgically rewriting a reference method.
+        """ generate artifact by surgically rewriting a reference method.
 
         Instead of the normal prompt (46K chars with competing reasoning,
         decisions, source, etc.), give the model ONLY the reference method
@@ -2963,7 +2961,7 @@ class SynthesisStage(PipelineStage):
             init_attrs = _extract_init_attr_names(interface_source)
             # Map attr_name -> first public method (for attr-as-function repair)
             attr_methods = _build_attr_methods(type_attr_map, prior_outputs)
-            # F10 fix: resolve APIs for types imported/used as local
+            # resolve APIs for types imported/used as local
             # variables (not just self._xxx attrs). When the artifact
             # calls service.xxx(), the model needs to know what methods
             # the service object actually has.
@@ -2995,7 +2993,7 @@ class SynthesisStage(PipelineStage):
 
             source = compress_file(source, filename)
 
-        # F9 fix: inject reference method body when creating a variant.
+        # inject reference method body when creating a variant.
         # The model needs to see HOW existing methods chain internal
         # components to create a streaming/async/parallel variant.
         reference_body = ""
@@ -3011,7 +3009,7 @@ class SynthesisStage(PipelineStage):
                     f"reference method ({len(reference_body)} chars)"
                 )
 
-        # F21 fix: if reference method has a complex pipeline (3+ internal
+        # if reference method has a complex pipeline (3+ internal
         # calls), use a surgical rewrite approach instead of the normal
         # prompt. Give the model ONLY the reference + one instruction
         # in fresh context — prevents shortcutting.
@@ -3035,7 +3033,7 @@ class SynthesisStage(PipelineStage):
                     f"failed, falling back to normal prompt"
                 )
 
-        # F9 supplement: extract parameter type fields from reference method
+        # extract parameter type fields from reference method
         # so the model knows Query has (text, constraints, metadata) not
         # (conversation_context, history, mode, provider).
         param_type_fields = ""
@@ -3127,7 +3125,7 @@ class SynthesisStage(PipelineStage):
         )
 
         # Build grounding block — goes FIRST after purpose to avoid
-        # lost-in-the-middle effect (same fix as F7 for attr fabrication)
+        # lost-in-the-middle effect (same fix for attr fabrication)
         grounding = ""
         grounding_parts = [
             s for s in [interface_section, schema_section, prior_artifact_sigs] if s.strip()
@@ -3255,7 +3253,7 @@ class SynthesisStage(PipelineStage):
         prior_artifact_sigs: str = "",
         max_retries: int = 1,
     ) -> dict | None:
-        """Generate a single artifact with F25 wrong-field retry.
+        """Generate a single artifact with wrong-field retry.
 
         Generates the artifact, checks for wrong_field violations via AST,
         and retries up to max_retries times if violations are found.
@@ -3266,7 +3264,7 @@ class SynthesisStage(PipelineStage):
         )
 
         # Build lookup for validation — prefer the untruncated validation
-        # index (has Pydantic fields for F25), fall back to full_structural_index
+        # index (has Pydantic fields for typed attribute validation), fall back to full_structural_index
         lookup = None
         if prior_outputs:
             agent_ctx = prior_outputs.get("_agent_context", {})
@@ -4023,7 +4021,7 @@ class SynthesisStage(PipelineStage):
                 context_merged.update(partial)
 
             # Architecture fields
-            # F6: retry approaches if empty (critical for plan quality)
+            # retry approaches if empty (critical for plan quality)
             _RETRY_FIELDS = {
                 "approaches": "approaches",
                 "components": "components",
@@ -4174,7 +4172,7 @@ class SynthesisStage(PipelineStage):
                 roadmap_merged["phases"] = _remove_dependency_cycles(roadmap_merged["phases"])
             roadmap_merged.setdefault("phases", [])
 
-            # F4 fix: filter phantom phase references
+            # filter phantom phase references
             valid_phase_nums = {
                 p.get("number", i + 1) for i, p in enumerate(roadmap_merged["phases"])
             }
@@ -4195,7 +4193,7 @@ class SynthesisStage(PipelineStage):
             risk_merged.setdefault("risks", [])
             risk_merged.setdefault("overall_risk_level", "medium")
             risk_merged.setdefault("recommended_contingencies", [])
-            # Filter phantom phase refs in risks (same as F4)
+            # Filter phantom phase refs in risks (same as the roadmap filter above)
             for risk_item in risk_merged["risks"]:
                 if "affected_phases" in risk_item:
                     risk_item["affected_phases"] = [

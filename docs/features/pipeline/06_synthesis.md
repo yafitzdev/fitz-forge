@@ -36,21 +36,14 @@ After reasoning, the same field group extraction runs as in the classic pipeline
 
 Each extraction is <2000 chars — the same per-field extraction that makes small models reliable.
 
-### Per-Artifact Generation
+### Artifact Generation
 
-Artifacts (code templates, config files) are generated individually rather than in a batch. Each artifact gets its own LLM call with:
-- The reasoning context
-- Class interface signatures (AST-extracted) for the relevant files
-- Imported type API reference
-- Deterministic repair rules to fix common fabrication patterns
-
-### Deterministic Repair
-
-After artifact generation, each artifact goes through deterministic repair:
-- **F9 — Reference method injection**: Stubs for real implementations replace fabricated ones
-- **F10 — Service API fabrication**: Imported type APIs are injected so the model uses real methods
-- **F12 — Filename cleanup**: Strip method suffixes, reject invalid names
-- **F13 — Approach fallback**: Derive approach from key_tradeoffs when reasoning produces an empty approach
+Once `needed_artifacts` is extracted, synthesis hands the full spec list off
+to the artifact generation subsystem. See
+[Artifact Generation](07_artifact-generation.md) for strategies, per-artifact
+validation, the closure family of five set-level invariants, and the repair
+loop. Synthesis receives a closed (or best-effort) artifact set back and
+embeds it in the plan's design section.
 
 ### Output
 
@@ -66,7 +59,7 @@ The synthesis stage produces the full `PlanOutput`:
 }
 ```
 
-This is the same format as the classic pipeline, making both pipelines interchangeable for downstream rendering and confidence scoring.
+Downstream the orchestrator flattens the `context`/`architecture`/`design`/`roadmap`/`risk` sub-keys into `prior_outputs` so grounding validation and coherence check can read each section directly.
 
 ## Key Design Decisions
 
@@ -74,11 +67,9 @@ This is the same format as the classic pipeline, making both pipelines interchan
 
 2. **Best-of-3 for scope calibration.** Three reasoning attempts with scope consensus selection prevents the two most common failure modes: scope inflation (proposing features beyond the task) and scope deflation (missing required deliverables).
 
-3. **Per-artifact generation.** Each artifact gets its own call with tailored context (class interfaces, imported types). Batch artifact generation overwhelms small models — they lose track of which file they're generating.
+3. **Artifact generation is its own subsystem.** Synthesis doesn't write code directly — it hands `needed_artifacts` to `fitz_forge/planning/artifact/` which runs per-artifact generation, validation, and set-level closure checks. Keeps synthesis focused on prose-level narration.
 
-4. **Deterministic repair over LLM correction.** Fabricated method names are fixed by deterministic string matching against the structural index, not by asking the LLM to fix its own mistakes. The LLM is bad at correcting itself; pattern matching is reliable.
-
-5. **Same output format as classic pipeline.** The decomposed pipeline is a drop-in replacement for the classic pipeline. Downstream rendering, confidence scoring, and API review work identically regardless of which pipeline produced the plan.
+4. **Flattened section output.** The synthesis stage returns `{context, architecture, design, roadmap, risk}`. The orchestrator flattens these into `prior_outputs` so grounding and coherence can operate on each section as if it were a standalone stage output.
 
 ## Configuration
 
@@ -99,7 +90,8 @@ No user-facing configuration. The synthesis stage runs automatically as the fina
 
 ## Related Features
 
-- [Decision Resolution](09_decision-resolution.md) — produces the committed decisions synthesized here
-- [Per-Field Extraction](../infrastructure/per-field-extraction.md) — the extraction mechanism used for all 12 field groups
-- [Grounding Validation](../infrastructure/grounding-validation.md) — validates artifacts after synthesis
-- [Coherence Check](05_coherence-check.md) — runs after synthesis to verify cross-section consistency
+- [Decision Resolution](05_decision-resolution.md) — produces the committed decisions synthesized here
+- [Per-Field Extraction](../infrastructure/per-field-extraction.md) — the extraction mechanism used for all 13 field groups
+- [Artifact Generation](07_artifact-generation.md) — generates the code in `needed_artifacts`
+- [Grounding Validation](08_grounding-validation.md) — AST grounding pass on generated artifacts
+- [Coherence Check](09_coherence-check.md) — cross-section consistency

@@ -567,7 +567,7 @@ class PipelineStage(ABC):
             )
             result = extract_json(raw)
 
-            # F6 fix: retry once if a critical field came back empty
+            # Retry once if a critical field came back empty
             if retry_if_empty:
                 val = result.get(retry_if_empty)
                 if isinstance(val, list) and len(val) == 0:

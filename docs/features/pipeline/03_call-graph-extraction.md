@@ -77,6 +77,6 @@ No user-facing configuration. The call graph is always extracted when using the 
 
 ## Related Features
 
-- [Agent Context Gathering](00_agent-context-gathering.md) — provides the structural index and file list
-- [Decision Decomposition](08_decision-decomposition.md) — consumes the call graph to identify which decisions need which files
-- [Decision Resolution](09_decision-resolution.md) — uses `segment_for_files()` for focused per-decision context
+- [Agent Context Gathering](01_agent-context-gathering.md) — provides the structural index and file list
+- [Decision Decomposition](04_decision-decomposition.md) — consumes the call graph to identify which decisions need which files
+- [Decision Resolution](05_decision-resolution.md) — uses `segment_for_files()` for focused per-decision context

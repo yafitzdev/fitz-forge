@@ -22,8 +22,8 @@ every downstream stage starts from ground truth about the current state of the c
 ### Placement in the Pipeline
 
 The check runs at progress 0.092, after agent context gathering (0.06-0.09) and before
-the context stage (0.10-0.25). It is implemented as the `_implementation_check` method
-on `PlanningPipeline` in the orchestrator, not as a standalone stage.
+decision decomposition (0.10-0.20). It is implemented as the `_implementation_check`
+method on `PlanningPipeline` and called by the orchestrator, not as a standalone stage.
 
 ### Single LLM Call
 
@@ -112,11 +112,10 @@ a non-empty `_gathered_context` and `_implementation_check` is not already prese
 
 ## Related Features
 
-- **Agent Context Gathering** -- Produces the `synthesized` context that the
-  implementation check consumes.
-- **Context Stage** -- First consumer of the check result; adjusts `needed_artifacts`
-  based on whether the task already exists.
-- **Architecture-Design Stage** -- Uses the check to avoid proposing new code when
-  extending existing code is appropriate.
-- **Confidence Scoring** -- Section-specific criteria check whether the plan
-  acknowledges existing implementations.
+- [Agent Context Gathering](01_agent-context-gathering.md) — produces the
+  `synthesized` context that the implementation check consumes.
+- [Decision Decomposition](04_decision-decomposition.md) — first consumer of
+  the check result; decomposes around verification and extension rather than
+  building from scratch when the task is already implemented.
+- [Synthesis](06_synthesis.md) — the check is also injected into synthesis
+  reasoning so the final plan acknowledges existing implementations.

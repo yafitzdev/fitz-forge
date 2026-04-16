@@ -6,7 +6,7 @@ A monolithic planning prompt ("design the architecture for X") overwhelms small 
 
 ## Solution
 
-Break the task into atomic decisions *before* any heavy reasoning. One cheap LLM call (~2-4K input tokens) takes the task description + call graph + one-line file manifest and produces an ordered list of specific questions that need answering. Each decision can then be resolved independently with focused context.
+Break the task into atomic decisions *before* any heavy reasoning. A cheap LLM call (~2-4K input tokens) takes the task description + call graph + one-line file manifest and produces an ordered list of specific questions. Adaptive best-of-N selection runs a minimum of 2 candidates and up to 4, scoring each on decision count, call-graph coverage, question specificity, dependency coherence, and reference completeness. The highest scorer wins. Each decision can then be resolved independently with focused context.
 
 ## How It Works
 
@@ -14,14 +14,14 @@ Break the task into atomic decisions *before* any heavy reasoning. One cheap LLM
 
 The decomposition stage receives:
 - **Task description** — the user's natural language request
-- **Call graph** — deterministic AST-extracted caller→callee chain (see [Call Graph Extraction](07_call-graph-extraction.md))
+- **Call graph** — deterministic AST-extracted caller→callee chain (see [Call Graph Extraction](03_call-graph-extraction.md))
 - **File manifest** — one-liner per file (path + docstring), not full source
 
 This is deliberately lightweight — the model identifies *what* to decide, not *how* to decide it.
 
 ### LLM Call
 
-A single call using the `decision_decomposition.txt` prompt template. The model produces a JSON array of `AtomicDecision` objects:
+Uses the `decision_decomposition.txt` prompt template. Minimum 2 candidates are generated at `temperature=0.3`; if the best candidate fails the gate criteria (min decision count 5, specificity 15, valid deps, reference completeness 10), additional candidates are generated up to a maximum of 4. Each candidate produces a JSON array of `AtomicDecision` objects:
 
 ```json
 [
@@ -85,6 +85,6 @@ No user-facing configuration. The decomposition runs automatically as the first 
 
 ## Related Features
 
-- [Call Graph Extraction](07_call-graph-extraction.md) — provides the call graph consumed here
-- [Decision Resolution](09_decision-resolution.md) — resolves each decision in topological order
-- [Implementation Check](01_implementation-check.md) — signals whether the task is already built
+- [Call Graph Extraction](03_call-graph-extraction.md) — provides the call graph consumed here
+- [Decision Resolution](05_decision-resolution.md) — resolves each decision in topological order
+- [Implementation Check](02_implementation-check.md) — signals whether the task is already built

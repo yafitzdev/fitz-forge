@@ -22,9 +22,9 @@ are protected because the LLM routinely truncates arrays in its fix output.
 
 ### Placement in the Pipeline
 
-The coherence check runs at progress 0.955, after the roadmap-risk stage (0.65-0.95)
-and before confidence scoring. It is implemented as the `_coherence_check` method on
-`PlanningPipeline` in the orchestrator.
+The coherence check runs at progress 0.955, after grounding validation (0.94) and
+before the plan is rendered. It is implemented as the `_coherence_check` method on
+`PlanningPipeline` and called from the orchestrator.
 
 ### Input Construction
 
@@ -127,12 +127,7 @@ successfully.
 
 ## Related Features
 
-- **Context Stage** -- Produces requirements and needed artifacts that the check
-  verifies are addressed downstream.
-- **Architecture-Design Stage** -- Produces the recommended approach and component
-  names that the check verifies are implemented in the roadmap.
-- **Roadmap-Risk Stage** -- Produces phases and risks that the check verifies are
-  internally consistent and aligned with upstream decisions.
-- **Confidence Scoring** -- Runs after coherence fixes are applied, scoring the
-  corrected plan sections.
-- **Plan Renderer** -- Renders the final plan from the coherence-checked outputs.
+- [Synthesis](06_synthesis.md) — produces the five plan sections (context,
+  architecture, design, roadmap, risk) whose cross-references are checked here.
+- [Grounding Validation](08_grounding-validation.md) — runs before coherence
+  so the coherence check sees artifacts with fabrications already repaired.

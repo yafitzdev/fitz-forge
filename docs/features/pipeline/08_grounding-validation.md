@@ -166,15 +166,15 @@ requires a client to be available; AST validation always runs.
 
 | File | Role |
 |------|------|
-| `fitz_forge/planning/validation/grounding.py` | `StructuralIndexLookup`, `check_artifact()`, `check_all_artifacts()`, `repair_violations()`, `validate_grounding()`, `GroundingReport` |
-| `fitz_forge/planning/pipeline/orchestrator.py` | Calls `validate_grounding()` after synthesis in the decomposed pipeline |
+| `fitz_forge/planning/validation/grounding/check.py` | `StructuralIndexLookup`, `check_artifact()`, AST walker for `self.method()`, function, class, signature checks |
+| `fitz_forge/planning/validation/grounding/index.py` | `augment_from_source_dir()` — augments the structural index with disk-only classes |
+| `fitz_forge/planning/validation/grounding/inference.py` | `try_parse()` (class-wrap + import-split fallback), `extract_type_name()` |
+| `fitz_forge/planning/validation/grounding/llm.py` | `repair_violations()`, `validate_grounding()`, `GroundingReport` |
+| `fitz_forge/planning/pipeline/orchestrator.py` | Calls `validate_grounding()` after synthesis |
 | `fitz_forge/planning/pipeline/stages/base.py` | `extract_json()` used by repair to parse LLM responses |
 
 ## Related Features
 
-- [Verification Agents](verification-agents.md) -- pre-extraction architectural
-  verification that complements post-synthesis AST grounding
-- [Per-Field Extraction](per-field-extraction.md) -- produces the artifacts
-  that grounding validation checks
-- [LLM Providers](llm-providers.md) -- provides the client for LLM validation
-  path and repair calls
+- [Synthesis](06_synthesis.md) — generates the artifacts validated here
+- [Coherence Check](09_coherence-check.md) — runs after grounding on the repaired artifacts
+- [LLM Providers](../infrastructure/llm-providers.md) — provides the client for LLM validation and repair

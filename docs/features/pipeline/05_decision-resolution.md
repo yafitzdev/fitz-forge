@@ -84,6 +84,6 @@ No user-facing configuration. The resolution stage runs automatically as part of
 
 ## Related Features
 
-- [Decision Decomposition](08_decision-decomposition.md) — produces the decisions resolved here
-- [Synthesis](10_synthesis.md) — narrates the committed decisions into the final plan
-- [Call Graph Extraction](07_call-graph-extraction.md) — provides per-decision subgraph segments
+- [Decision Decomposition](04_decision-decomposition.md) — produces the decisions resolved here
+- [Synthesis](06_synthesis.md) — narrates the committed decisions into the final plan
+- [Call Graph Extraction](03_call-graph-extraction.md) — provides per-decision subgraph segments

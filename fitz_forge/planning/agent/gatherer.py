@@ -365,7 +365,7 @@ class AgentContextGatherer:
             )
 
             # Build untruncated validation index using fitz_forge's indexer
-            # (includes Pydantic fields for typed attribute validation — F25).
+            # (includes Pydantic fields for typed attribute validation).
             validation_index = build_validation_index(
                 str(Path(self._source_dir)),
                 file_paths,
