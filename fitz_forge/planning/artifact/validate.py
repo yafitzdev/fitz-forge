@@ -34,17 +34,10 @@ class ArtifactError:
 
 
 def _try_parse(content: str) -> ast.Module | None:
-    """Try parsing with recovery: raw -> dedent -> class wrap."""
-    for attempt in [
-        content,
-        textwrap.dedent(content),
-        "class _:\n    " + content.replace("\n", "\n    "),
-    ]:
-        try:
-            return ast.parse(attempt)
-        except SyntaxError:
-            continue
-    return None
+    """Try parsing with recovery: raw -> dedent -> class wrap -> import-split."""
+    from fitz_forge.planning.validation.grounding.inference import try_parse
+
+    return try_parse(content)
 
 
 def _check_parseable(content: str) -> ArtifactError | None:

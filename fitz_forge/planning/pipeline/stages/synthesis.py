@@ -1883,24 +1883,31 @@ class SynthesisStage(PipelineStage):
         known_files: set[str],
         min_refs: int = 2,
     ) -> list[str]:
-        """Inject files referenced ≥min_refs times in decisions but missing from needed.
+        """Inject files referenced by decisions but missing from needed.
 
-        A file is "referenced" by a decision if its path appears in that
-        decision's text or evidence entries. Bounded by word boundaries so
-        `engine.py` doesn't match `my_engine.py`. We only inject files that
-        exist in the codebase (via `known_files` from the structural index),
-        so we never fabricate a path.
+        Two injection criteria (codebase/language agnostic):
 
-        Injected entries are prepended so they take priority inside the
-        downstream 8-file cap — the signal from decomposition is stronger
-        than whatever synthesis reasoning happened to produce.
+        1. **Cross-reference** (existing): file path found in ≥min_refs
+           distinct resolutions (text search with word boundaries). Catches
+           files that span multiple decisions.
+
+        2. **Evidence-source** (new): a resolution has an evidence entry
+           whose file_path field (or leading path prefix) matches a known
+           file. This means the resolution specifically analyzed code FROM
+           that file, making it a direct target of the decision. Injected
+           at min_refs=1 because a single dedicated decision is strong
+           enough signal.
+
+        Only files from the structural index (`known_files`) are injected,
+        so we never fabricate a path. Injected entries are prepended so
+        they take priority inside the downstream artifact cap.
         """
         if not known_files or not resolutions:
             return needed_artifacts
 
-        # Longer paths first so nested paths don't hide under shorter ones.
         sorted_files = sorted(known_files, key=len, reverse=True)
 
+        # --- Pass 1: text-search cross-reference counting ---
         file_refs: Counter[str] = Counter()
         file_to_decision: dict[str, list[dict[str, Any]]] = {}
         for r in resolutions:
@@ -1911,9 +1918,6 @@ class SynthesisStage(PipelineStage):
             for fname in sorted_files:
                 if fname in seen_in_this:
                     continue
-                # Word-boundary check: filename must not be glued to a
-                # preceding word character or trailed by one (so
-                # "engine.py" doesn't match inside "my_engine.pyc" etc.).
                 escaped = re.escape(fname)
                 if re.search(
                     r"(?<![A-Za-z0-9_])" + escaped + r"(?![A-Za-z0-9_])",
@@ -1923,19 +1927,41 @@ class SynthesisStage(PipelineStage):
                     file_to_decision.setdefault(fname, []).append(r)
                     seen_in_this.add(fname)
 
-        # Compute the set of filenames already planned
+        # --- Pass 2: evidence-source detection ---
+        # Each evidence entry is either a dict with file_path or a string
+        # like "path/to/file.py: ClassName.method(...) -- description".
+        # The file path is the PRIMARY TARGET of that evidence.
+        evidence_source_files: set[str] = set()
+        for r in resolutions:
+            for entry in r.get("evidence", []):
+                fp = ""
+                if isinstance(entry, dict):
+                    fp = entry.get("file_path", "")
+                elif isinstance(entry, str) and ": " in entry:
+                    fp = entry.split(": ", 1)[0].strip()
+                fp = fp.replace("\\", "/").strip()
+                if fp in known_files:
+                    evidence_source_files.add(fp)
+                    if fp not in file_to_decision:
+                        file_to_decision[fp] = [r]
+                    elif r not in file_to_decision[fp]:
+                        file_to_decision[fp].append(r)
+
+        # --- Build the existing set ---
         existing: set[str] = set()
         for entry in needed_artifacts:
             path = entry.split(" -- ")[0].strip() if " -- " in entry else entry.strip()
             if path:
                 existing.add(path.replace("\\", "/"))
 
+        # --- Inject ---
         injected: list[str] = []
+        injected_paths: set[str] = set()
+
+        # Criterion 1: cross-reference (min_refs threshold)
         for fname, count in file_refs.most_common():
             if count < min_refs or fname in existing:
                 continue
-            # Derive purpose from the decision that mentions this file most
-            # prominently (longest decision text is a reasonable proxy).
             best = max(
                 file_to_decision[fname],
                 key=lambda r: len(r.get("decision", "")),
@@ -1947,13 +1973,32 @@ class SynthesisStage(PipelineStage):
                     f"missing from needed_artifacts"
                 )
             injected.append(f"{fname} -- {purpose}")
+            injected_paths.add(fname)
             logger.info(
                 "V2-F7: injecting %s (%d decision refs)", fname, count
             )
 
+        # Criterion 2: evidence-source (min 1 — file was directly analyzed)
+        for fname in sorted(evidence_source_files):
+            if fname in existing or fname in injected_paths:
+                continue
+            decisions = file_to_decision.get(fname, [])
+            if not decisions:
+                continue
+            best = max(decisions, key=lambda r: len(r.get("decision", "")))
+            purpose = best.get("decision", "")[:200].replace("\n", " ").strip()
+            if not purpose:
+                purpose = f"Modify {fname}: evidence-source in a resolved decision"
+            injected.append(f"{fname} -- {purpose}")
+            injected_paths.add(fname)
+            logger.info(
+                "V2-F7b: injecting %s (evidence-source in %d decision(s))",
+                fname,
+                len(decisions),
+            )
+
         if not injected:
             return needed_artifacts
-        # Prepend so injections are prioritized inside the downstream cap
         return injected + needed_artifacts
 
     def parse_output(self, raw_output: str) -> dict[str, Any]:

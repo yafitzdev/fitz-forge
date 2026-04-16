@@ -31,7 +31,17 @@ import textwrap
 
 
 def try_parse(content: str) -> ast.Module | None:
-    """Parse Python with dedent + class-wrap recovery for surgical artifacts."""
+    """Parse Python with dedent + class-wrap recovery for surgical artifacts.
+
+    Recovery chain:
+      1. Raw
+      2. Dedent
+      3. Class-wrap (whole content)
+      4. Import-split: separate top-level imports from indented method bodies,
+         then class-wrap only the body. Handles hybrid outputs where the model
+         mixes ``import X`` at indent 0 with ``def method(self, ...)`` at
+         indent 4.
+    """
     for attempt in (
         content,
         textwrap.dedent(content),
@@ -41,6 +51,33 @@ def try_parse(content: str) -> ast.Module | None:
             return ast.parse(attempt)
         except SyntaxError:
             continue
+
+    # Recovery 4: split imports from indented body
+    lines = content.split("\n")
+    imports: list[str] = []
+    body: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if (
+            not body
+            and line == stripped
+            and (stripped.startswith("import ") or stripped.startswith("from "))
+        ):
+            imports.append(line)
+        else:
+            body.append(line)
+    if imports and body:
+        body_text = textwrap.dedent("\n".join(body))
+        wrapped = (
+            "\n".join(imports)
+            + "\n\nclass _:\n    "
+            + body_text.replace("\n", "\n    ")
+        )
+        try:
+            return ast.parse(wrapped)
+        except SyntaxError:
+            pass
+
     return None
 
 
@@ -49,14 +86,49 @@ def try_parse(content: str) -> ast.Module | None:
 # ---------------------------------------------------------------------------
 
 
+_CONTAINER_TYPES = frozenset(
+    {
+        "list",
+        "List",
+        "dict",
+        "Dict",
+        "set",
+        "Set",
+        "tuple",
+        "Tuple",
+        "frozenset",
+        "FrozenSet",
+        "Sequence",
+        "MutableSequence",
+        "Mapping",
+        "MutableMapping",
+        "Iterable",
+        "Collection",
+        "deque",
+        "Counter",
+        "OrderedDict",
+        "defaultdict",
+    }
+)
+
+
 def extract_type_name(annotation: ast.expr | None) -> str | None:
     """Extract a primary class name from a type annotation.
 
-    `ChatRequest` → ChatRequest
-    `Optional[ChatRequest]` → ChatRequest
-    `list[ChatRequest]` → ChatRequest
-    `fitz.ChatRequest` → ChatRequest
-    `Iterator[str]` → Iterator
+    ``ChatRequest`` → ``ChatRequest``
+    ``Optional[ChatRequest]`` → ``ChatRequest``
+    ``list[ChatRequest]`` → ``list``  (container — NOT the element type)
+    ``fitz.ChatRequest`` → ``ChatRequest``
+    ``Iterator[str]`` → ``Iterator``
+
+    Container generics (``list[X]``, ``dict[K,V]``, ``set[X]``, …) return
+    the container name, which downstream callers skip via ``_SKIP_NAMES``.
+    This prevents ``items: list[Foo]`` from binding ``items`` to type
+    ``Foo``, which would cause ``items.append()`` to fail as
+    ``Foo.append()``.
+
+    Transparent wrappers (``Optional[X]``, ``Union[X,Y]``) drill into the
+    inner type, which is the correct binding target.
     """
     if annotation is None:
         return None
@@ -65,6 +137,13 @@ def extract_type_name(annotation: ast.expr | None) -> str | None:
     if isinstance(annotation, ast.Attribute):
         return annotation.attr
     if isinstance(annotation, ast.Subscript):
+        outer = None
+        if isinstance(annotation.value, ast.Name):
+            outer = annotation.value.id
+        elif isinstance(annotation.value, ast.Attribute):
+            outer = annotation.value.attr
+        if outer in _CONTAINER_TYPES:
+            return outer
         slice_node = annotation.slice
         if isinstance(slice_node, ast.Tuple):
             if slice_node.elts:
@@ -72,7 +151,6 @@ def extract_type_name(annotation: ast.expr | None) -> str | None:
         else:
             return extract_type_name(slice_node)
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        # Forward reference: `"ChatRequest"`. Take the first identifier-looking token.
         m = re.match(r"^[A-Za-z_][A-Za-z_0-9]*", annotation.value.strip())
         return m.group(0) if m else None
     return None
