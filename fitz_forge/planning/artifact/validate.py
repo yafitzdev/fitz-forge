@@ -139,9 +139,15 @@ def _check_empty(content: str) -> ArtifactError | None:
             message="Content has no function/method defs and no data-model class",
             suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
         )
-    # Unparseable — fall back to text heuristic. Parseable check will fire
-    # separately if truly broken.
-    if not any("def " in line or "class " in line for line in code_lines):
+    # Unparseable (or non-Python) — use language-agnostic text heuristics.
+    # Accept if content has definition-like keywords from any common language.
+    _DEF_KEYWORDS = (
+        "def ", "class ", "function ", "func ", "fn ",
+        "async ", "export ", "const ", "let ", "var ",
+        "model ", "interface ", "enum ", "struct ", "impl ",
+        "pub fn ", "public ", "private ", "protected ",
+    )
+    if not any(kw in line for line in code_lines for kw in _DEF_KEYWORDS):
         return ArtifactError(
             check="empty",
             message="Content has no function or class definitions",
@@ -248,34 +254,47 @@ def _check_not_implemented(content: str) -> ArtifactError | None:
     return None
 
 
+def _is_python_file(filename: str) -> bool:
+    """True if the filename looks like a Python source file."""
+    return filename.endswith(".py") or not any(
+        filename.endswith(ext) for ext in (".ts", ".js", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".rb", ".prisma")
+    )
+
+
 def validate(content: str, ctx: ArtifactContext) -> list[ArtifactError]:
     """Run all validation checks. Empty list = valid artifact.
 
     Checks are ordered by severity — parseable first (blocks everything),
-    then structural checks, then semantic checks.
+    then structural checks, then semantic checks. For non-Python files,
+    Python AST checks are skipped (parseable, fabrication) and only
+    language-agnostic text heuristics apply (empty, not_implemented).
     """
     errors: list[ArtifactError] = []
+    is_python = _is_python_file(ctx.filename)
 
     # Hard fails
-    err = _check_parseable(content)
-    if err:
-        errors.append(err)
-        return errors  # can't check anything else if unparseable
+    if is_python:
+        err = _check_parseable(content)
+        if err:
+            errors.append(err)
+            return errors
 
     err = _check_empty(content)
     if err:
         errors.append(err)
         return errors
 
-    # Structural checks
-    errors.extend(_check_fabrication(content, ctx))
+    # Structural checks (Python AST-based — skip for non-Python)
+    if is_python:
+        errors.extend(_check_fabrication(content, ctx))
 
-    # Semantic checks (streaming-specific)
-    err = _check_yield(content, ctx)
-    if err:
-        errors.append(err)
+    # Semantic checks (streaming-specific, Python AST-based)
+    if is_python:
+        err = _check_yield(content, ctx)
+        if err:
+            errors.append(err)
 
-    err = _check_return_type(content, ctx)
+        err = _check_return_type(content, ctx)
     if err:
         errors.append(err)
 

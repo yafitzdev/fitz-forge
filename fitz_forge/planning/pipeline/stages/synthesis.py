@@ -2258,21 +2258,12 @@ class SynthesisStage(PipelineStage):
         Falls back to template extraction if no source is available.
         """
         needed = context_merged.get("needed_artifacts", [])
-        if not needed:
-            # No needed_artifacts extracted — fall back to template
-            logger.info(
-                "Stage 'synthesis': no needed_artifacts, falling back to template extraction"
-            )
-            return await self._artifacts_template_fallback(
-                client,
-                reasoning,
-                prior_outputs,
-            )
 
         # V2-F7 Fix A: enforce decomposition→synthesis closure.
-        # Any file referenced in 2+ decision evidence entries but absent
-        # from needed_artifacts gets auto-injected with a derived purpose.
-        # Same invariant shape as artifact closure; different pipeline level.
+        # Any file referenced in decision evidence but absent from
+        # needed_artifacts gets auto-injected. This ALSO serves as the
+        # primary fallback when needed_artifacts is empty — resolved
+        # decisions still contain file targets in their evidence entries.
         resolution_output_for_coverage = prior_outputs.get("decision_resolution", {})
         resolutions_for_coverage = resolution_output_for_coverage.get("resolutions", [])
         agent_ctx_for_coverage = prior_outputs.get("_agent_context", {})
@@ -2288,6 +2279,17 @@ class SynthesisStage(PipelineStage):
             resolutions_for_coverage,
             known_files_for_coverage,
         )
+
+        if not needed:
+            logger.info(
+                "Stage 'synthesis': no needed_artifacts and no evidence-source files, "
+                "falling back to template extraction"
+            )
+            return await self._artifacts_template_fallback(
+                client,
+                reasoning,
+                prior_outputs,
+            )
 
         # Parse needed_artifacts into (filename, purpose) pairs.
         # Cap raised slightly to accommodate V2-F7 injections without

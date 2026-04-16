@@ -24,7 +24,8 @@ from .validate import ArtifactError
 logger = logging.getLogger(__name__)
 
 _RAW_CODE_INSTRUCTION = (
-    "Return ONLY the Python code. No JSON wrapping. No markdown fences. No explanation. No prose."
+    "Return ONLY the code (full implementation, not just signatures or stubs). "
+    "No JSON wrapping. No markdown fences. No explanation. No prose."
 )
 
 
@@ -177,7 +178,9 @@ class NewCodeStrategy:
     def _build_prompt(self, ctx: ArtifactContext) -> str:
         rules = (
             "Rules:\n"
-            "- Write ONLY the new or modified code (not the entire file)\n"
+            "- Write ONLY the new or modified code (not the entire file). "
+            "Include the FULL method/function body with implementation logic, "
+            "not just the signature or type declaration\n"
             "- Use exact attribute names from the source code above\n"
             "- When calling self.xxx or self._xxx (the target class's own "
             "methods), use ONLY methods listed in METHODS AVAILABLE ON self "
