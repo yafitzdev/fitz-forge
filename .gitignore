@@ -28,7 +28,9 @@ htmlcov/
 # Large assets (excluded from repo)
 benchmarks/results/
 benchmarks/traces/
+benchmarks/challenges/*/results/
 benchmarks/**/*.log
 benchmarks/**/__pycache__/
 benchmarks/test_*.py
+.claude/
 docs/qwen3-coder-next-assessment/

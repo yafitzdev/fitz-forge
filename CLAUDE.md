@@ -14,7 +14,7 @@
 
 ## The Fixer Loop
 
-Benchmark-improvement methodology lives in [`FIXER_LOOP.md`](./FIXER_LOOP.md).
+Benchmark-improvement methodology lives in [`benchmarks/FIXER_LOOP.md`](./benchmarks/FIXER_LOOP.md).
 When plan quality on a specific task needs to go up, use that workflow.
 Every fix must be codebase and programming language agnostic — no task-
 specific hacks. Tasks live under `benchmarks/challenges/<task_name>/`

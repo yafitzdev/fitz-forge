@@ -64,17 +64,45 @@ def _ts() -> str:
     return time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
+def _challenge_from_context_file(context_file: str | Path | None) -> str | None:
+    """Extract the challenge name from a context file path.
+
+    Returns the challenge name if the path is under
+    ``benchmarks/challenges/<name>/``, else None.
+    """
+    if not context_file:
+        return None
+    parts = Path(context_file).resolve().parts
+    try:
+        idx = parts.index("challenges")
+    except ValueError:
+        return None
+    if idx + 1 < len(parts):
+        return parts[idx + 1]
+    return None
+
+
+def _all_run_dirs() -> list[Path]:
+    """Every existing run directory across all challenges + legacy results/."""
+    root = Path(__file__).parent
+    candidates: list[Path] = []
+    challenges_root = root / "challenges"
+    if challenges_root.is_dir():
+        for ch in challenges_root.iterdir():
+            rdir = ch / "results"
+            if rdir.is_dir():
+                candidates.extend(d for d in rdir.iterdir() if d.is_dir())
+    legacy = root / "results"
+    if legacy.is_dir():
+        candidates.extend(d for d in legacy.iterdir() if d.is_dir())
+    return candidates
+
+
 def _next_run_number() -> int:
-    """Find the next run number by scanning existing result directories."""
-    results_root = Path(__file__).parent / "results"
-    if not results_root.is_dir():
-        return 1
+    """Find the next run number across all challenge result directories."""
     max_num = 0
-    for d in results_root.iterdir():
-        if not d.is_dir():
-            continue
+    for d in _all_run_dirs():
         name = d.name
-        # Match pattern: YYYY-MM-DD_HH-MM-SS_run_NNN
         if "_run_" in name:
             try:
                 num = int(name.rsplit("_run_", 1)[1])
@@ -84,9 +112,15 @@ def _next_run_number() -> int:
     return max_num + 1
 
 
-def _results_dir(label: str) -> Path:
+def _results_dir(label: str, context_file: str | Path | None = None) -> Path:
+    """Create a new results directory, routed by challenge when possible."""
+    challenge = _challenge_from_context_file(context_file)
     run_num = _next_run_number()
-    d = Path(__file__).parent / "results" / f"{_ts()}_run_{run_num:03d}"
+    root = Path(__file__).parent
+    if challenge:
+        d = root / "challenges" / challenge / "results" / f"{_ts()}_run_{run_num:03d}"
+    else:
+        d = root / "results" / f"{_ts()}_run_{run_num:03d}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -605,7 +639,7 @@ def decomposed(
 ):
     """Run decomposed pipeline benchmarks with fixed retrieval context."""
     context = json.loads(Path(context_file).read_text())
-    out_dir = _results_dir("decomposed")
+    out_dir = _results_dir("decomposed", context_file=context_file)
     logger.info(f"Running {runs} decomposed benchmarks -> {out_dir}")
     if parallel_runs > 1:
         logger.info(
