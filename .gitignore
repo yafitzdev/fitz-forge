@@ -33,4 +33,7 @@ benchmarks/**/*.log
 benchmarks/**/__pycache__/
 benchmarks/test_*.py
 .claude/
-docs/qwen3-coder-next-assessment/
+docs/roadmap
+docs/archive
+CLAUDE.md
+
