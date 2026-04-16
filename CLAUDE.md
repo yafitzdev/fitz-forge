@@ -79,6 +79,7 @@ print(r.deterministic_score)
 |------|----------|----------|----------|------------|------|
 | Streaming | fitz-sage | Python | 68.85 | 97.70 | 30 |
 | Ranking explanations | fitz-sage | Python | 68.85 | 97.08 | 10 |
+| Collection sharing | hoppscotch | TypeScript | 71.86 | 79.50 | 10 |
 
 ## What This Is
 
