@@ -26,5 +26,9 @@ htmlcov/
 .fitz-forge
 
 # Large assets (excluded from repo)
-benchmarks
+benchmarks/results/
+benchmarks/traces/
+benchmarks/**/*.log
+benchmarks/**/__pycache__/
+benchmarks/test_*.py
 docs/qwen3-coder-next-assessment/

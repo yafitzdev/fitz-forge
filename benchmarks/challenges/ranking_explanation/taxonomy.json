@@ -1,0 +1,202 @@
+{
+  "task_name": "ranking_explanations",
+  "task_description": "Add query result ranking explanations so users can see why each source was ranked in its position — showing the retrieval method used, relevance signals, and reranking rationale for each source in the response",
+  "required_files": {
+    "engine.py": "required",
+    "ranker.py": "required",
+    "reranker.py": "required",
+    "synthesizer.py": "recommended",
+    "provenance.py": "recommended",
+    "schemas.py": "recommended",
+    "routes/query.py": "optional",
+    "router.py": "optional",
+    "services/__init__.py": "optional",
+    "sdk/fitz.py": "optional"
+  },
+  "architecture_taxonomy": {
+    "name": "architecture",
+    "entries": [
+      {
+        "id": "A1",
+        "pattern": "Full signal preservation (base + rerank + composite scores + method + bonuses)",
+        "quality": "BEST",
+        "score": 100,
+        "description": "Preserves scores at each ranking stage (base embedding/BM25, cross-encoder rerank, composite) in Address.metadata. Records retrieval_method (strategy class name), entity_bonus, keyword_boost. Propagates all signals through _build_provenance() into Provenance.metadata or typed fields. Per-source ranking breakdown in QueryResponse."
+      },
+      {
+        "id": "A2",
+        "pattern": "Partial signal (method + final score only)",
+        "quality": "GOOD",
+        "score": 75,
+        "description": "Tags retrieval_method and propagates final addr.score into Provenance, but loses intermediate signals (pre-rerank score, entity bonus breakdown, strategy weight). Users see which strategy found the source and its final score, but can't see why it moved up/down during reranking."
+      },
+      {
+        "id": "A3",
+        "pattern": "LLM post-hoc explanation",
+        "quality": "POOR",
+        "score": 30,
+        "description": "Adds an LLM call after generation to explain ranking — the LLM has no access to actual scores and fabricates plausible-sounding reasons. Expensive, slow, and misleading."
+      },
+      {
+        "id": "A4",
+        "pattern": "Static labels / aggregate only",
+        "quality": "BAD",
+        "score": 10,
+        "description": "Adds a static string like 'retrieved by code search' or an aggregate score to Answer.metadata without per-source breakdown. No differentiation between sources, no actual ranking signals."
+      },
+      {
+        "id": "A5",
+        "pattern": "NotImplementedError / absent",
+        "quality": "FAIL",
+        "score": 0,
+        "description": "Gives up or raises NotImplementedError."
+      }
+    ]
+  },
+  "file_taxonomies": {
+    "engine.py": {
+      "name": "engine.py",
+      "entries": [
+        {
+          "id": "E1",
+          "pattern": "Orchestrates ranking signal collection, passes enriched addresses downstream",
+          "quality": "BEST",
+          "score": 100,
+          "description": "answer() orchestrates retrieval and ensures ranking signals from CrossStrategyRanker and AddressReranker are preserved in Address.metadata before passing to synthesizer. May add rank_position after final sort."
+        },
+        {
+          "id": "E2",
+          "pattern": "Passes addresses but doesn't enrich metadata",
+          "quality": "PARTIAL",
+          "score": 60,
+          "description": "answer() passes addresses to synthesizer as-is. Ranking data may or may not survive depending on what ranker/reranker do. No explicit orchestration of signal preservation."
+        },
+        {
+          "id": "E3",
+          "pattern": "Adds ranking explanation at answer level only",
+          "quality": "POOR",
+          "score": 30,
+          "description": "Adds ranking info to Answer.metadata as an aggregate (e.g. 'used BM25 retrieval') without per-source breakdown. Pipeline unchanged."
+        },
+        {
+          "id": "E4",
+          "pattern": "NotImplementedError / absent",
+          "quality": "FAIL",
+          "score": 0,
+          "description": "Engine not modified or raises NotImplementedError."
+        }
+      ]
+    },
+    "ranker.py": {
+      "name": "ranker.py",
+      "entries": [
+        {
+          "id": "K1",
+          "pattern": "Records score breakdown in Address.metadata (base, weight, bonus)",
+          "quality": "BEST",
+          "score": 100,
+          "description": "_compute_score() records base_score, strategy_weight, entity_bonus, keyword_boost, composite_score in Address.metadata. Signals survive for downstream consumption."
+        },
+        {
+          "id": "K2",
+          "pattern": "Records final composite score only",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Records composite score in metadata but not the breakdown components. Users see a number but can't decompose it."
+        },
+        {
+          "id": "K3",
+          "pattern": "No metadata enrichment",
+          "quality": "BAD",
+          "score": 10,
+          "description": "Ranker unchanged — scores computed and discarded as before."
+        },
+        {
+          "id": "K4",
+          "pattern": "Absent from plan",
+          "quality": "FAIL",
+          "score": 0,
+          "description": "Ranker not included in plan artifacts."
+        }
+      ]
+    },
+    "reranker.py": {
+      "name": "reranker.py",
+      "entries": [
+        {
+          "id": "RR1",
+          "pattern": "Preserves pre-rerank score, records cross-encoder score separately",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Before overwriting addr.score with cross-encoder result, saves the original as metadata['pre_rerank_score']. Records metadata['rerank_score'] = new score. Position change (pre-rerank rank vs post-rerank rank) is derivable."
+        },
+        {
+          "id": "RR2",
+          "pattern": "Records cross-encoder score but loses pre-rerank",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Saves cross-encoder score in metadata but still overwrites addr.score, losing the pre-rerank baseline. No position-change visibility."
+        },
+        {
+          "id": "RR3",
+          "pattern": "Absent from plan",
+          "quality": "ABSENT",
+          "score": 0,
+          "description": "Reranker not included in plan artifacts."
+        }
+      ]
+    },
+    "synthesizer.py": {
+      "name": "synthesizer.py",
+      "entries": [
+        {
+          "id": "S1",
+          "pattern": "_build_provenance() propagates all ranking signals into Provenance.metadata",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Copies addr.score, addr.metadata ranking fields into Provenance.metadata['ranking'] dict. Per-source ranking data reaches the API layer intact."
+        },
+        {
+          "id": "S2",
+          "pattern": "Propagates score only",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Copies addr.score into Provenance but not the metadata breakdown. Partial signal."
+        },
+        {
+          "id": "S3",
+          "pattern": "Absent from plan",
+          "quality": "ABSENT",
+          "score": 0,
+          "description": "Synthesizer not included in plan artifacts."
+        }
+      ]
+    },
+    "routes/query.py": {
+      "name": "routes/query.py",
+      "entries": [
+        {
+          "id": "R1",
+          "pattern": "Maps ranking data from Provenance to typed SourceInfo fields",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Route handler maps ranking breakdown from Provenance.metadata into typed SourceInfo response fields. Schema is self-documenting."
+        },
+        {
+          "id": "R2",
+          "pattern": "Passes metadata through as-is",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Copies Provenance.metadata dict without creating typed fields. Data reaches client but untyped."
+        },
+        {
+          "id": "R3",
+          "pattern": "Absent from plan",
+          "quality": "ABSENT",
+          "score": 0,
+          "description": "Route not included in plan artifacts."
+        }
+      ]
+    }
+  }
+}

@@ -650,7 +650,26 @@ def check_cross_artifact_consistency(
                 "dict",
                 "set",
                 "Path",
+                "app",
+                "router",
+                "request",
+                "response",
             ):
+                continue
+            # Skip stdlib/framework methods that commonly appear on
+            # variables whose name collides with an artifact filename.
+            # E.g. `provenance_list.append()` shouldn't flag provenance.py,
+            # and `router.post()` shouldn't flag retrieval/router.py.
+            _STDLIB_METHODS = {
+                "append", "extend", "pop", "insert", "remove", "clear",
+                "copy", "sort", "reverse", "update", "keys", "values",
+                "items", "get", "post", "put", "delete", "patch",
+                "head", "options", "add", "discard", "union",
+                "intersection", "difference", "format", "encode",
+                "decode", "strip", "split", "join", "replace",
+                "startswith", "endswith", "lower", "upper",
+            }
+            if method_name in _STDLIB_METHODS:
                 continue
             # Check if any artifact defines this method
             if method_name not in all_defined:

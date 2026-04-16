@@ -1,0 +1,1 @@
+Add collection sharing via public link so users can share a read-only view of their API collections with anyone who has the link

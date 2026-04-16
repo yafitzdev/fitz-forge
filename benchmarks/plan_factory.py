@@ -597,6 +597,11 @@ def decomposed(
         "-p",
         help="Run N plans concurrently (requires LM Studio --parallel N)",
     ),
+    taxonomy: str = typer.Option(
+        "",
+        "--taxonomy",
+        help="Path to taxonomy JSON (default: challenges/streaming_implementation/taxonomy.json)",
+    ),
 ):
     """Run decomposed pipeline benchmarks with fixed retrieval context."""
     context = json.loads(Path(context_file).read_text())
@@ -645,7 +650,7 @@ def decomposed(
 
     if score_v2:
         structural_index = context.get("synthesized", "")
-        _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir)
+        _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir, taxonomy_file=taxonomy)
 
 
 # ------------------------------------------------------------------
@@ -708,6 +713,7 @@ def _prepare_scoring_v2(
     query: str,
     structural_index: str,
     source_dir: str = "",
+    taxonomy_file: str = "",
 ) -> None:
     """Run Scorer V2: deterministic checks + taxonomy prompts."""
     from .eval_v2 import _find_plan_files, format_batch_report, score_batch_deterministic
@@ -715,7 +721,7 @@ def _prepare_scoring_v2(
     from .eval_v2_taxonomy import build_taxonomy_prompt, load_taxonomy
 
     plan_dir = Path(results_dir)
-    taxonomy_path = Path(__file__).parent / "streaming_taxonomy.json"
+    taxonomy_path = Path(taxonomy_file) if taxonomy_file else Path(__file__).parent / "challenges" / "streaming_implementation" / "taxonomy.json"
 
     tax_files = None
     if taxonomy_path.exists():
@@ -962,7 +968,7 @@ def replay_cmd(
             from .eval_v2_deterministic import run_deterministic_checks
             from .eval_v2_taxonomy import load_taxonomy
 
-            taxonomy_path = Path(__file__).parent / "streaming_taxonomy.json"
+            taxonomy_path = Path(__file__).parent / "challenges" / "streaming_implementation" / "taxonomy.json"
             tax_files = None
             if taxonomy_path.exists():
                 tax_files = load_taxonomy(taxonomy_path).required_files or None

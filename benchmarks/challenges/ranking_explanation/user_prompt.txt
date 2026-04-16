@@ -1,0 +1,1 @@
+Add query result ranking explanations so users can see why each source was ranked in its position — showing the retrieval method used, relevance signals, and reranking rationale for each source in the response

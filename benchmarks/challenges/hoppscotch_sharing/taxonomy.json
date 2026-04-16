@@ -1,0 +1,108 @@
+{
+  "task_name": "collection_sharing",
+  "task_description": "Add collection sharing via public link so users can share a read-only view of their API collections with anyone who has the link",
+  "required_files": {
+    "team-collection.service.ts": "required",
+    "schema.prisma": "required",
+    "app.module.ts": "recommended",
+    "team-collection.resolver.ts": "recommended",
+    "team-collection.controller.ts": "recommended",
+    "errors.ts": "optional",
+    "team-collection.model.ts": "optional",
+    "team-collection.module.ts": "optional"
+  },
+  "architecture_taxonomy": {
+    "name": "architecture",
+    "entries": [
+      {
+        "id": "A1",
+        "pattern": "New CollectionShare module + Shortcode-style token + public REST endpoint",
+        "quality": "BEST",
+        "score": 100,
+        "description": "New CollectionShare Prisma model with token + expiry. Dedicated NestJS module. Authenticated GQL mutation to create/revoke links. Unauthenticated REST GET to resolve by token. Uses existing exportCollectionToJSONObject. Mirrors Shortcode pattern."
+      },
+      {
+        "id": "A2",
+        "pattern": "ShareToken field on TeamCollection + mutations",
+        "quality": "GOOD",
+        "score": 75,
+        "description": "Adds nullable shareToken field directly to TeamCollection Prisma model. New enable/disable mutations. Public REST endpoint. Simpler but couples sharing into collection entity."
+      },
+      {
+        "id": "A3",
+        "pattern": "Re-use Shortcode mechanism for collections",
+        "quality": "POOR",
+        "score": 30,
+        "description": "Stores serialized collection JSON as a Shortcode request field. No new schema. Pollutes Shortcode concept, breaks pagination, no per-collection revocation."
+      },
+      {
+        "id": "A4",
+        "pattern": "Public GQL query with raw collectionID",
+        "quality": "BAD",
+        "score": 10,
+        "description": "Exposes collection by raw ID without auth. Enumeration risk, no revocation, no access control."
+      },
+      {
+        "id": "A5",
+        "pattern": "NotImplementedError / absent",
+        "quality": "FAIL",
+        "score": 0,
+        "description": "No implementation."
+      }
+    ]
+  },
+  "file_taxonomies": {
+    "team-collection.service.ts": {
+      "name": "team-collection.service.ts",
+      "entries": [
+        {
+          "id": "S1",
+          "pattern": "createShareLink + resolveShareLink + revokeShareLink methods with Either returns",
+          "quality": "BEST",
+          "score": 100,
+          "description": "New methods following fp-ts Either pattern. Creates random token, stores in DB, resolves by token with collection export. Proper error handling."
+        },
+        {
+          "id": "S2",
+          "pattern": "Methods exist but wrong patterns",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Methods exist but don't use Either pattern, or don't validate ownership, or don't use PrismaService properly."
+        },
+        {
+          "id": "S3",
+          "pattern": "Absent from plan",
+          "quality": "FAIL",
+          "score": 0,
+          "description": "Service not modified."
+        }
+      ]
+    },
+    "schema.prisma": {
+      "name": "schema.prisma",
+      "entries": [
+        {
+          "id": "P1",
+          "pattern": "New CollectionShare model with token, collectionID FK, createdBy, expiresAt",
+          "quality": "BEST",
+          "score": 100,
+          "description": "Dedicated model with unique token field, foreign key to TeamCollection, audit fields, optional expiry."
+        },
+        {
+          "id": "P2",
+          "pattern": "ShareToken field added to existing TeamCollection model",
+          "quality": "PARTIAL",
+          "score": 50,
+          "description": "Simpler but couples sharing into collection entity."
+        },
+        {
+          "id": "P3",
+          "pattern": "No schema changes",
+          "quality": "FAIL",
+          "score": 0,
+          "description": "Schema not modified."
+        }
+      ]
+    }
+  }
+}

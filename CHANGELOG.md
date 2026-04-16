@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.2] - 2026-04-16
+
+### 🎉 Highlights
+
+**Closure catches fabricated classes in every type position** — existence check now fires on parameter/return/variable annotations, `raise`, `except`, `isinstance`, `cast`, and instantiation — not just `ClassName(...)` calls.
+
+**Target class's real method list injected into artifact prompts** — surgical and new-code strategies stop the retry loop where the model invents plausible-sounding helper names like `self._execute_pipeline`.
+
+**Evidence-source artifact injection** — when synthesis produces an empty `needed_artifacts`, files cited as evidence in resolved decisions are auto-injected so plans still produce real artifacts.
+
+### 🚀 Added
+
+- **Evidence-source injection** (`synthesis.py:_enforce_decision_coverage`) — second injection criterion at min_refs=1 for files that are direct evidence sources in a resolved decision.
+- **Protocol widening** (`closure.py:_owner_is_protocol`, `_method_exists_anywhere`) — accepts method calls on `Protocol`-typed receivers when the method exists anywhere in the codebase.
+- **Enum standard attrs** (`closure.py:_ENUM_STANDARD_ATTRS`, `_is_enum_class`) — `Enum`/`IntEnum`/`StrEnum`/`Flag` subclasses accept `.value`, `.name`, `_value_`, `_name_` automatically.
+- **TypeVar detection** (`closure.py:_find_module_typevars`) — skips `T = TypeVar("T")`, `P = ParamSpec("P")`, `Ts = TypeVarTuple("Ts")` bindings plus single-letter uppercase names.
+- **Target class self-methods prompt block** (`context.py:_extract_target_self_methods`, `strategy.py:_surgical_grounding_block`) — real method list of the target class is injected into both surgical and new-code prompts.
+- **Import-split parse recovery** (`inference.py:try_parse`) — 4th recovery step for outputs that mix top-level imports (indent 0) with indented method bodies.
+- **Exact-duplicate closure violation dedup** (`closure.py:_dedupe_exact`) — prevents the same `(artifact, kind, ref)` from firing twice when an annotation walk and a field cascade both flag it.
+- **Data-model class validation** (`validate.py:_is_data_class`) — `_check_empty` accepts files with Pydantic `BaseModel`, `dataclass`, `Enum`, `TypedDict`, or any class with annotated fields. Schema/DTO files no longer fail as "empty".
+- **Language-aware validation dispatch** (`validate.py:_is_python_file`) — Python AST-based checks skip for `.ts`/`.js`/`.go`/`.rs`/`.java`/`.prisma` files (no alternative structural validation yet — those artifacts pass through unchecked).
+- **Cross-language `_check_empty` keywords** — broadened from `def`/`class` to include `function`, `async`, `export`, `const`, `let`, `var`, `model`, `interface`, `enum`, `struct`, `fn`, `pub`. This is the only validation check that currently works across languages.
+
+### 🔄 Changed
+
+- **Generalized class fabrication check** (`closure.py:_iter_annotation_class_names`, `_emit_annotation_types`) — existence check now fires in every type position, not just `ClassName(...)` instantiation.
+- **Container-type annotation** (`inference.py:extract_type_name`, `_CONTAINER_TYPES`) — `list[X]`, `dict[K,V]`, `set[X]`, etc. return the container name (skipped via `_SKIP_NAMES`), preventing `items.append()` from being flagged as `Foo.append()`.
+- **`_strip_fences` preserves leading indentation** (`strategy.py`) — no longer calls `.strip()` on raw output. Strips blank lines and fences only. Fixes multi-method surgical outputs with mixed indent levels.
+- **`_RAW_CODE_INSTRUCTION`** (`strategy.py`) — no longer says "Python code". Now reads "code (full implementation, not just signatures or stubs)".
+- **NewCodeStrategy prompt** (`strategy.py`) — explicitly requests "FULL method/function body with implementation logic, not just the signature or type declaration".
+- **Grounding uses full-codebase index** (`grounding/check.py:check_all_artifacts`, `grounding/llm.py:validate_grounding`, `orchestrator.py`) — `source_dir` threaded through so `augment_from_source_dir` runs, eliminating false-positive "missing class" on classes outside the retrieval subset.
+- **Grounding parser uses `try_parse`** (`grounding/check.py`) — with class-wrap + import-split fallback instead of raw `ast.parse`. Surgical artifacts no longer silently skipped.
+
+### 🐛 Fixed
+
+- **Grounding arity check false positive** (`grounding/index.py`, `grounding/check.py`) — `augment_from_source_dir` now indexes all parameter kinds (positional + keyword-only + `*args` + `**kwargs`), and skips the arity check entirely for variadic callees. Previously triggered `wrong_arity` on any function with keyword-only params.
+- **Iterator kind propagation through variable bindings** (`closure.py:_iter_kinds_stack`, `_propagate_var_usage`) — `stream = service.query_stream(...); async for x in stream` now flags as a usage violation when `query_stream` returns a sync iterator. Previously only fired on direct-call usage.
+- **Fabricated-owner field cascades** (`closure.py:_dedupe_fabricated_owner_cascades`) — when a parameter type annotation is a fabricated class, every `param.field` access previously fired an independent missing violation. Now collapsed into one root "missing class" violation per `(artifact, owner)`.
+- **Regen prompts show real signatures** (`generator.py:_build_repair_hint_block`) — Strategy 2 retries now include sibling method signatures and target class fields, not just error messages.
+- **Synthesis `needed_artifacts` empty → 0-artifact plans** — evidence-source injection now fires before the template fallback. Empty `needed_artifacts` plans still produce real artifacts from resolved decisions.
+
+---
+
+## [0.6.1] - 2026-04-13
+
+### 🎉 Highlights
+
+**Artifact Closure Principle** — Five set-level invariants on generated artifacts (Existence, Usage, Kwargs, Imports, Fields) with two repair strategies (expand the set or regenerate the violator). Cross-file inconsistency is a property of the set, not any individual artifact — per-artifact validation can never catch it alone.
+
+**Artifact Black Box** — `generate_artifact(filename, purpose, ctx, ...)` produces one validated artifact; `generate_artifact_set(specs, ctx, ...)` produces a closed artifact set. Pluggable strategies: `SurgicalRewriteStrategy` when a reference method exists, `NewCodeStrategy` otherwise.
+
+**Raw Code Output** — Model outputs Python directly, no JSON wrapping. Eliminated the entire class of quote-mangling bugs from JSON extraction of embedded code. Artifact success rate to 100%.
+
+**Grounding Package Split** — Monolithic `grounding.py` split into `inference.py` (codebase knowledge — return types, fields, MRO), `index.py` (`StructuralIndexLookup` + `augment_from_source_dir`), `check.py` (per-artifact AST check), `llm.py` (LLM gap detection + repair). One home per concern.
+
+### 🚀 Added
+
+- `fitz_forge/planning/artifact/` package — `context.py` (input assembly), `strategy.py` (pluggable strategies), `validate.py` (parseable, fabrication, yield, return-type checks), `closure.py` (five invariants + repair), `generator.py` (entry points).
+- `SurgicalRewriteStrategy` + `NewCodeStrategy` with retry loop (up to 3 attempts, each retry includes specific error messages from validation).
+- `ArtifactSetResult` with `closed=True/False` and remaining violations.
+- Repair strategies: Strategy 1 (expand — add sibling artifact for missing symbol), Strategy 2 (regenerate violator with sibling signature feedback).
+- Type tracking for closure checks: function param annotations, `var = ClassName(...)`, service locator return types, and `self._attr` types parsed from the target class's `__init__` in disk source.
+- Dedent fallback for fabrication check — surgical artifacts with mixed indent now parse via `textwrap.dedent`.
+
+### 🔄 Changed
+
+- `grounding.py` (monolithic) → `grounding/` package: `inference.py`, `index.py`, `check.py`, `llm.py` with re-exports in `__init__.py` for backwards compatibility.
+- Artifact generation no longer asks the model to emit JSON wrapping the code — the filename and purpose are already known, so the model outputs raw code directly.
+
+### 🐛 Fixed
+
+- JSON repair: triple-quoted docstrings in code artifacts (`extract_json` handles them correctly now).
+- Subprocess patching scoped so `platform.system()` still works on Windows.
+- `tomli` fallback on Python 3.10 for TOML config parsing.
+- OpenAI test imports skipped when the `openai` package is absent.
+- Orchestrator imports moved to top of file (E402).
+- Fixed sleep replaced with terminal-state polling in `test_worker_fifo_order` and other worker tests — faster, deterministic.
+
+### 📊 Stats
+
+- 938 tests
+
+---
+
 ## [0.6.0] - 2026-04-09
 
 ### 🎉 Highlights
@@ -386,7 +470,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 391 tests
 
-[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/yafitzdev/fitz-forge/compare/v0.4.0...v0.4.1

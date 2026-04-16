@@ -14,72 +14,11 @@
 
 ## The Fixer Loop
 
-Autonomous benchmark-improvement cycle. Use when plan quality needs
-to go up on a specific task. Every fix must be **codebase and programming
-language agnostic** — no task-specific hacks.
-
-### Setup
-
-1. Pick a target codebase + task description
-2. Create `benchmarks/<task>/taxonomy.json` (architecture tiers + per-file quality tiers)
-3. Create `benchmarks/<task>/ideal_context.json` (file_list of ~30 relevant files)
-4. Create `docs/v2-scoring/<task>/BUG_REGISTER.md`
-5. Run a baseline benchmark: `plan_factory decomposed --runs 10 --taxonomy <path>`
-
-### Loop (each cycle)
-
-1. **Score** — compute deterministic scores using the task's taxonomy
-2. **Triage** — read all failure patterns from the run, add to BUG_REGISTER.md with impact scores (1–10)
-3. **Pick** — select the single highest-impact open bug
-4. **Fix** — implement the fix, generalized to every variant of the failure shape (rule 10). Ask: "does this fix apply to any codebase/language, or is it specific to fitz-sage?" If specific, don't ship it
-5. **Replay-validate** — replay a snapshot from the baseline run (~5 min). Only promote to full benchmark if replay shows improvement
-6. **Regression-check** — re-score ALL previous task benchmarks with the new code. If any regress, revert
-7. **Mark done** — update BUG_REGISTER.md, loop to step 1
-
-### Exit criteria
-
-- 10 runs with 90+ average, at most 1 dud below 90
-- OR: all open bugs have impact ≤ 3 and no fix is available without regressing other tasks
-
-### Commands
-
-```bash
-# Baseline run
-.venv/Scripts/python -m benchmarks.plan_factory decomposed \
-    --runs 10 --source-dir <codebase> \
-    --context-file benchmarks/<task>/ideal_context.json \
-    --query "<task description>" \
-    --taxonomy benchmarks/<task>/taxonomy.json \
-    --score-v2
-
-# Replay (fast validation, ~5 min)
-.venv/Scripts/python -m benchmarks.plan_factory replay \
-    --snapshot benchmarks/results/<run>/traces_01/snapshot_after_decision_resolution.json \
-    --source-dir <codebase> \
-    --context-file benchmarks/<task>/ideal_context.json \
-    --query "<task description>" \
-    --score-v2
-
-# Manual scoring with correct taxonomy
-python -c "
-from benchmarks.eval_v2_deterministic import run_deterministic_checks
-from benchmarks.eval_v2_taxonomy import load_taxonomy
-tax = load_taxonomy(Path('benchmarks/<task>/taxonomy.json'))
-r = run_deterministic_checks(plan, structural_index='',
-    task_requires_streaming=False,
-    taxonomy_files=tax.required_files,
-    source_dir='<codebase>')
-print(r.deterministic_score)
-"
-```
-
-### Track record
-
-| Task | Codebase | Language | Baseline | After loop | Runs |
-|------|----------|----------|----------|------------|------|
-| Streaming | fitz-sage | Python | 68.85 | 97.70 | 30 |
-| Ranking explanations | fitz-sage | Python | 68.85 | 97.08 | 10 |
-| Collection sharing | hoppscotch | TypeScript | 71.86 | 79.50 | 10 |
+Benchmark-improvement methodology lives in [`FIXER_LOOP.md`](./FIXER_LOOP.md).
+When plan quality on a specific task needs to go up, use that workflow.
+Every fix must be codebase and programming language agnostic — no task-
+specific hacks. Tasks live under `benchmarks/challenges/<task_name>/`
+with their own taxonomy, ideal context, user prompt, and bug register.
 
 ## What This Is
 
