@@ -1,0 +1,15 @@
+{
+  "query": "Add collection sharing via public link so users can share a read-only view of their API collections with anyone who has the link",
+  "codebase": "hoppscotch",
+  "critical_files": [
+    "packages/hoppscotch-backend/src/team-collection/team-collection.service.ts",
+    "packages/hoppscotch-backend/src/team-collection/team-collection.resolver.ts",
+    "packages/hoppscotch-backend/src/team-collection/team-collection.controller.ts",
+    "packages/hoppscotch-backend/src/team-collection/team-collection.model.ts",
+    "packages/hoppscotch-backend/src/team-collection/team-collection.module.ts",
+    "packages/hoppscotch-backend/prisma/schema.prisma",
+    "packages/hoppscotch-backend/src/app.module.ts",
+    "packages/hoppscotch-backend/src/errors.ts",
+    "packages/hoppscotch-backend/src/shortcode/shortcode.service.ts"
+  ]
+}

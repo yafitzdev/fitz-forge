@@ -1,0 +1,15 @@
+{
+  "query": "Add query result ranking explanations so users can see why each source was ranked in its position \u2014 showing the retrieval method used, relevance signals, and reranking rationale for each source in the response",
+  "codebase": "fitz-sage",
+  "critical_files": [
+    "fitz_sage/engines/fitz_krag/retrieval/ranker.py",
+    "fitz_sage/engines/fitz_krag/retrieval/reranker.py",
+    "fitz_sage/engines/fitz_krag/retrieval/router.py",
+    "fitz_sage/engines/fitz_krag/engine.py",
+    "fitz_sage/engines/fitz_krag/generation/synthesizer.py",
+    "fitz_sage/core/provenance.py",
+    "fitz_sage/core/answer.py",
+    "fitz_sage/api/models/schemas.py",
+    "fitz_sage/api/routes/query.py"
+  ]
+}
