@@ -117,6 +117,98 @@ Test suite: 964 pass, 1 skipped.
 
 Version in `pyproject.toml`: still `0.6.1`. Not bumped.
 
+## Repo restructure (happened late in the session)
+
+After the experiments we cleaned up the benchmark area into a proper
+shape. Everything task-specific now lives under
+`benchmarks/challenges/<task_name>/`:
+
+```
+benchmarks/
+├── FIXER_LOOP.md                             # methodology doc (moved from repo root)
+├── plan_factory.py                           # _results_dir derives challenge from --context-file path
+├── eval_v2*.py                               # kept
+├── eval_retrieval.py                         # KEPT but CURRENTLY BROKEN (see Pending)
+├── eval_retrieval_run.py                     # KEPT but depends on eval_retrieval.py
+└── challenges/
+    ├── streaming_implementation/
+    │   ├── user_prompt.txt
+    │   ├── taxonomy.json
+    │   ├── ideal_context.json
+    │   ├── retrieval_ground_truth.json       # NEW: per-challenge
+    │   ├── bug_register/                     # 12 bugs, one md file each
+    │   └── results/                          # run dirs moved here (gitignored)
+    ├── ranking_explanation/
+    │   └── (same layout, 5 bugs, 2 runs)
+    └── hoppscotch_sharing/
+        └── (same layout, 5 bugs, 4 runs)
+```
+
+Also deleted this session:
+- Legacy V1 scorer scripts: `eval_deterministic.py`, `eval_plans.py`,
+  `eval_prompt.py`, `eval_schemas.py` (all 0 refs; superseded by eval_v2).
+- Specialty dev tools: `haiku_subagent_bench.py`, `replay_artifact.py`.
+- Ad-hoc test scripts: 14x `benchmarks/test_*.py` (one-shot verification
+  scripts from F1…F25 fix cycles).
+- Pre-session run dirs 001-018 (no clear challenge owner).
+- Stale logs: `bench_seeds5*.log`.
+- Old `docs/v2-scoring/BUG_REGISTER.md` (split into bug_register/ folders).
+- Old `docs/v2-scoring/V2-F*.md` + `TRACKER.md` moved to
+  `docs/archive/failure-patterns-v1/`.
+
+Commits this reorg:
+- `7528278` — challenges folder structure + bug_register/ split
+- `e8323c4` — run dirs moved into per-challenge results/
+- `39a6c0d` — legacy script prune + retrieval_ground_truth.json split
+
+## ⚠️ Things broken / pending — FIX FIRST NEXT SESSION
+
+### 1. `eval_retrieval.py` + `eval_retrieval_run.py` are broken
+
+They reference `benchmarks/retrieval_ground_truth.json` which was deleted
+when we split it into per-challenge files. They need an update:
+
+- Walk `benchmarks/challenges/*/retrieval_ground_truth.json` at startup,
+  load each as a single-entry record, use the challenge folder name as
+  the entry's ID (replaces the old numeric `id`).
+- Replace `--ids` / `--category` CLI filters with `--challenge <name>`
+  (can repeat or comma-separate).
+- Write results into `benchmarks/challenges/<name>/results/retrieval_eval_<ts>.json`
+  to match plan_factory's layout.
+- `eval_retrieval_run.py` updates its defaults from `CATEGORY`/`IDS` to
+  `CHALLENGES = None` (all).
+
+**Open call:** the old schema also had `relevant_files` (softer signal —
+nice-to-have files). Our new per-challenge files only have
+`critical_files`. Either add `relevant_files` back or drop that signal
+from the scorer. User deferred to next session.
+
+About 20-30 LOC across the two files. No new deps.
+
+### 2. Retrieval ground truth coverage is tiny
+
+Central file had 40 entries covering many potential tasks. Per-challenge
+split kept only 3 (streaming, ranking, hoppscotch). The other 37 task
+definitions are gone. If you want those back, they each need to become
+their own challenge folder with the full set of files (user_prompt,
+taxonomy, ideal_context, retrieval_ground_truth, bug_register). The
+original list is in git history before `39a6c0d` if needed.
+
+### 3. Release v0.6.2 paused
+
+From earlier in the session. Status:
+- `CHANGELOG.md` has 0.6.1 (retro) and 0.6.2 entries, user-approved
+  trim (3 highlight items, product-only, honest about what TS
+  support actually is — "stop rejecting non-Python files", not
+  "cross-language validation").
+- `pyproject.toml` still says 0.6.1. **Not bumped yet.**
+- No git tag yet.
+- `README.md` cleanup still pending (user said "readme is still absolute
+  shit" earlier — user wants it cleaned as part of the release).
+
+DO NOT bump the version or tag without explicit GO — user wants to
+review the changelog first.
+
 ## What's next (in priority order)
 
 ### 1. Release v0.6.2 (in-flight, paused)
@@ -198,6 +290,9 @@ Three live bug registers:
 ## Recent commits (for grep-ability)
 
 ```
+39a6c0d chore: prune legacy scripts + per-challenge retrieval ground truth
+e8323c4 chore: move runs into per-challenge results/ dirs
+7528278 chore: reorganize benchmark challenges into self-contained folders
 e8698db docs: update fixer loop track record with Hoppscotch TS results
 e2a96f6 feat: cross-language artifact generation — Hoppscotch TS avg 79.50
 e7c41c1 docs: add fixer loop methodology to CLAUDE.md
