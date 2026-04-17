@@ -1,5 +1,5 @@
 # fitz_forge/llm/retry.py
-"""Retry logic for Ollama API calls with exponential backoff."""
+"""Unified retry logic for OpenAI-compatible LLM providers."""
 
 import logging
 
@@ -15,144 +15,23 @@ from tenacity import (
 logger = logging.getLogger(__name__)
 
 
-def is_retryable(exception: BaseException) -> bool:
-    """
-    Returns True if the exception should be retried.
-
-    Retryable conditions:
-    - ConnectionError (server unavailable)
-    - ResponseError with status in (408, 429, 500, 502, 503, 504)
-      BUT NOT status 500 with "requires more system memory" (that's OOM, handled by fallback)
-    """
-    if isinstance(exception, ConnectionError):
-        return True
-
-    try:
-        from ollama import ResponseError
-    except ImportError:
-        return False
-
-    if isinstance(exception, ResponseError):
-        status = exception.status_code
-        # Retryable HTTP status codes (transient errors)
-        retryable_statuses = {408, 429, 500, 502, 503, 504}
-
-        if status not in retryable_statuses:
-            return False
-
-        # Special case: 500 with OOM message should NOT be retried (fallback handles it)
-        if status == 500:
-            error_msg = str(exception).lower()
-            if "requires more system memory" in error_msg:
-                return False
-
-        return True
-
-    return False
-
-
-# Tenacity retry decorator for Ollama API calls
-ollama_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception(is_retryable),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-
-
-def is_lm_studio_retryable(exception: BaseException) -> bool:
-    """
-    Returns True if the LM Studio exception should be retried.
-
-    Retryable conditions:
-    - ConnectionError (server unavailable)
-    - httpx transport errors (connection refused, timeout)
-    - openai APIConnectionError / APITimeoutError (model loading, server restart)
-    """
-    if isinstance(exception, ConnectionError):
-        return True
-
-    # httpx transport-level errors
-    try:
-        import httpx
-
-        if isinstance(exception, (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout)):
-            return True
-    except ImportError:
-        pass
-
-    # openai SDK errors
-    try:
-        from openai import APIConnectionError, APIStatusError, APITimeoutError
-
-        if isinstance(exception, (APIConnectionError, APITimeoutError)):
-            return True
-        if isinstance(exception, APIStatusError):
-            return exception.status_code in {408, 429, 502, 503, 504}
-    except ImportError:
-        pass
-
-    return False
-
-
-# Tenacity retry decorator for LM Studio API calls
-lm_studio_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=5, max=60),
-    retry=retry_if_exception(is_lm_studio_retryable),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-
-
-def is_llama_cpp_retryable(exception: BaseException) -> bool:
-    """
-    Returns True if the llama.cpp exception should be retried.
-
-    Same as LM Studio retryable conditions, plus 503 (model loading/swapping)
-    and RuntimeError from server crashes (auto-restart may have failed).
-    """
-    # Reuse LM Studio logic for shared error types
-    if is_lm_studio_retryable(exception):
-        return True
-
-    # Additionally handle 500 from llama-server during model loading
-    try:
-        from openai import APIStatusError
-
-        if isinstance(exception, APIStatusError) and exception.status_code == 500:
-            return True
-    except ImportError:
-        pass
-
-    # Server crash/restart failures
-    if isinstance(exception, RuntimeError):
-        msg = str(exception).lower()
-        if "llama-server" in msg or "crashed" in msg or "exited" in msg:
-            return True
-
-    return False
-
-
-# Tenacity retry decorator for llama.cpp API calls
-# More attempts + shorter waits to handle model swap latency
-llama_cpp_retry = retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
-    retry=retry_if_exception(is_llama_cpp_retryable),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-
-
 def is_openai_api_retryable(exception: BaseException) -> bool:
-    """Unified retryable predicate for all OpenAI-compatible providers.
+    """Return True if the exception should trigger a retry.
 
-    Covers:
-        - ConnectionError
-        - httpx transport errors (ConnectError, ReadTimeout, ConnectTimeout)
-        - openai SDK: APIConnectionError, APITimeoutError
-        - openai SDK: APIStatusError with status in {408, 429, 500, 502, 503, 504}
-        - RuntimeError with message containing "llama-server" / "crashed" / "exited"
-          (for llama.cpp subprocess crash-restart failures)
+    Covers every transient failure mode that can happen on the three
+    providers that share the OpenAI-compatible chat completion API
+    (LM Studio, llama.cpp, Ollama):
+
+    - ``ConnectionError``
+    - httpx transport errors (``ConnectError``, ``ReadTimeout``,
+      ``ConnectTimeout``) raised during TCP setup
+    - openai SDK ``APIConnectionError`` / ``APITimeoutError``
+    - openai SDK ``APIStatusError`` with a transient HTTP status
+      (408, 429, 500, 502, 503, 504) — includes 503s from model
+      loading/swapping and 500s from llama-server under load
+    - ``RuntimeError`` whose message mentions
+      ``llama-server``/``crashed``/``exited`` (subprocess crash-restart
+      failures surfaced by ``LlamaCppClient._ensure_alive``)
     """
     if isinstance(exception, ConnectionError):
         return True
@@ -179,7 +58,7 @@ def is_openai_api_retryable(exception: BaseException) -> bool:
 
 
 # Unified retry decorator for all OpenAI-compatible providers.
-# 5 attempts (matching old llama_cpp_retry — most permissive) with
+# 5 attempts (most permissive of the three legacy decorators) with
 # exponential backoff sized to tolerate model-swap latency.
 openai_api_retry = retry(
     stop=stop_after_attempt(5),

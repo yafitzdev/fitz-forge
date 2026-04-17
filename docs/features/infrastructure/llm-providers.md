@@ -4,136 +4,144 @@
 
 Local LLM inference has no standard runtime. Users run Ollama, LM Studio, or
 raw llama-server depending on their hardware, OS, and model preferences. Each
-runtime has different APIs, model management commands, failure modes, and
-performance characteristics. The planning pipeline should not care which
-backend is running -- it needs to send messages and receive completions.
+runtime has its own model management story, failure modes, and performance
+characteristics. The planning pipeline should not care which backend is
+running -- it needs to send messages and receive completions.
 
 ## Solution
 
-Three provider implementations behind a common interface. All providers expose
-`generate()`, `generate_with_tools()`, and `health_check()`. The configuration
-file specifies the provider, and the worker instantiates the correct client at
-startup. The pipeline stages call the client without knowing which backend is
-active.
+All three backends speak an OpenAI-compatible `/v1/chat/completions` endpoint,
+so a single `OpenAIApiClient` base class implements streaming generation,
+tool calling, monitoring, and metric tracking once. Each provider is a thin
+subclass adding only its own lifecycle (CLI or subprocess management) and
+context-window preflight.
 
 ## How It Works
 
-### Common Interface
+### Shared Base: `OpenAIApiClient`
 
-Every provider implements:
+`llm/openai_api.py` implements:
 
-- **`generate(messages, temperature, max_tokens, model)`** -- standard chat
-  completion. Returns the response text as a string. Default `max_tokens=16384`
-  on all providers prevents infinite generation from context-shift loops.
+- **`generate(messages, temperature, max_tokens=16384, model=None)`** --
+  streaming chat completion via `AsyncOpenAI`. Applies `_strip_thinking()`
+  post-processing, records per-call metrics, and triggers the optional
+  `GPUTemperatureGuard.preflight()` / `maybe_throttle()` hooks.
+- **`generate_with_tools(messages, tools, tool_choice="auto")`** -- one-shot
+  tool/function call. Accepts Python callables and builds OpenAI tool schemas
+  from their signatures via `_callable_to_openai_tool`.
+- **`generate_with_fallback(messages)`** -- calls `generate()` and returns
+  `(text, model)`. No OOM fallback -- providers either handle their own
+  memory or do not.
+- **`generate_with_monitoring(messages, monitor)`** -- runs `MemoryMonitor`
+  in parallel and raises `MemoryError` if the RAM threshold trips.
+- **`health_check()`** -- GET `/v1/models`; returns True on 200. Subclasses
+  override to add context-window preflight or CLI-based auto-load.
+- **`ensure_model(model_name, context_size=None)`** -- default no-op.
+  Subclasses override to drive CLI/subprocess lifecycle.
+- **`tool_result_message(tool_call_id, content)`** -- standard OpenAI
+  `role=tool` dict.
+- **`drain_call_metrics()`** -- returns and clears accumulated call metrics.
 
-- **`generate_with_tools(messages, tools, tool_choice, model)`** -- chat
-  completion with tool/function calling support. Returns the full response
-  including any tool call requests.
+All callers see this interface, irrespective of provider.
 
-- **`generate_with_fallback(messages)`** -- attempts generation with the
-  primary model; on OOM or failure, retries with a fallback model. Returns
-  `(response_text, model_used)`.
+### Thinking Mode Suppression
 
-- **`health_check()`** -- verifies the backend is reachable and the configured
-  model is available. Returns `True`/`False`.
+`OpenAIApiClient.__init__` takes `disable_thinking: bool = True` (default).
+When true, every chat request is sent with
+`extra_body={"chat_template_kwargs": {"enable_thinking": False}}` — this
+suppresses the Qwen3 family's internal reasoning mode, which would otherwise
+burn output tokens without producing useful content. Set `disable_thinking=
+False` for providers that do not tolerate the Qwen chat-template extension
+(vanilla vLLM, for example).
 
-- **`drain_call_metrics()`** -- returns and clears accumulated call metrics
-  (timing, token counts) from `generate()` calls. Used for plan diagnostics.
+### Provider 1: Ollama (`llm/ollama.py`)
 
-### Provider 1: Ollama
+Trivial subclass. Ollama exposes an OpenAI-compatible endpoint at
+`<base>/v1/chat/completions`. `OllamaClient` normalises the configured
+`base_url` so the `/v1` suffix is always present, inherits the default
+`health_check` (GET `/v1/models`), and leaves `ensure_model` as the base
+no-op — Ollama pulls on demand.
 
-`OllamaClient` in `llm/client.py` wraps the native `ollama` Python package.
+There is no `ollama` Python SDK dependency. There is no OOM fallback path
+(if the model does not fit, the user switches models externally).
 
-- **Simplest setup**: `ollama pull model && fitz-forge plan "..."`
-- **OOM fallback**: if the primary model triggers OOM (status 500 with
-  `"requires more system memory"`), auto-retries with `fallback_model`.
-- **Memory threshold**: aborts if system RAM exceeds threshold.
-- **Retry**: `ollama_retry` (tenacity) retries on ConnectionError and transient
-  HTTP statuses (408, 429, 500, 502, 503, 504), but NOT on OOM 500s.
+### Provider 2: LM Studio (`llm/lm_studio.py`)
 
-### Provider 2: LM Studio
+Inherits the base and implements `ensure_model`, `switch_model`, `unload_model`,
+`reload_model`, `is_model_loaded`, and `get_loaded_model` on top of the `lms`
+CLI. The overridden `health_check` adds a minimum context-window preflight
+(`_MIN_CONTEXT_TOKENS = 8_192`) and auto-loads the smart model when nothing
+is loaded.
 
-`LMStudioClient` in `llm/lm_studio.py` uses the OpenAI-compatible API via the
-`openai` Python SDK.
+Switching models goes through `switch_model`, which first checks
+`get_loaded_model()` and skips the unload+load pair if the target is already
+live — this avoids CUDA context destruction on WDDM consumer GPUs.
 
-- **Model switching**: `switch_model()` uses `lms load`/`lms unload` CLI
-  commands. Checks `get_loaded_model()` first to avoid unnecessary restarts.
-- **Tiered models**: `smart_model` and `fast_model` config fields for
-  different pipeline phases.
-- **Retry**: `lm_studio_retry` decorator retries on ConnectionError, httpx
-  transport errors, and OpenAI SDK errors (APIConnectionError, APITimeoutError,
-  and status codes 408/429/502/503/504).
-- **Thinking mode**: `enable_thinking: false` is set in
-  `extra_body.chat_template_kwargs` for Qwen3 models, preventing the thinking
-  mode from consuming output tokens.
+### Provider 3: llama.cpp (`llm/llama_cpp.py`)
 
-### Provider 3: llama.cpp
+Inherits the base and wraps a `llama-server` subprocess. The client owns
+`start` / `stop` / `_ensure_tier` / `_ensure_alive` plus the WDDM-aware
+`TokSecBaseline` (tracks prefill tok/s across runs, triggers
+`_auto_reset_gpu` via Ctrl+Win+Shift+B when degradation is detected).
 
-`LlamaCppClient` in `llm/llama_cpp.py` manages a `llama-server` subprocess
-directly -- the most control over inference but the most operational complexity.
-
-- **Subprocess management**: starts `llama-server` with configurable flags
-  (flash attention, KV cache types, context size, GPU layers). Health checks
-  poll the HTTP endpoint.
-- **WDDM degradation mitigation**: on Windows consumer GPUs, each CUDA
-  context create/destroy permanently degrades perf until reboot. The client
-  compares model file paths before restarting -- same GGUF means no restart.
-- **Tok/s baseline tracking**: warns on degradation. Only tracks outputs
-  of 200+ characters (short calls have noisy measurements).
-- **Flash attention + KV cache**: configurable quantization (q8_0, f16).
-  Mixed KV types break flash attention -- validated at startup.
-- **Retry**: `llama_cpp_retry` (5 attempts, shorter waits) handles server
-  crashes, model loading latency, and transient HTTP 500s.
+`generate()` is an override — not because of the chat protocol, but because
+the prefill-vs-generate timing split feeds `TokSecBaseline`. The base's
+`_strip_thinking` and `_extra_body` helpers are reused verbatim. Tier-
+switching (`ensure_model`) compares model *file paths*, not tier names, so
+pointing several tiers at the same GGUF leaves the server running and CUDA
+context intact.
 
 ### Retry Logic
 
-`llm/retry.py` defines three tenacity decorators, one per provider:
+`llm/retry.py` defines one decorator, `openai_api_retry`, applied in
+`OpenAIApiClient.generate`. Five attempts with exponential backoff
+(2-30s). `is_openai_api_retryable` classifies as retryable:
 
-| Decorator | Attempts | Wait | Special Handling |
-|-----------|----------|------|------------------|
-| `ollama_retry` | 3 | 4-60s exponential | Skips OOM 500 (fallback handles it) |
-| `lm_studio_retry` | 3 | 5-60s exponential | Retries httpx and OpenAI SDK errors |
-| `llama_cpp_retry` | 5 | 2-30s exponential | Retries server crashes, HTTP 500 |
+- `ConnectionError`
+- `httpx.ConnectError`, `httpx.ReadTimeout`, `httpx.ConnectTimeout`
+- `openai.APIConnectionError`, `openai.APITimeoutError`
+- `openai.APIStatusError` with status in `{408, 429, 500, 502, 503, 504}`
+- `RuntimeError` whose message mentions `llama-server`, `crashed`, or
+  `exited` (covers `LlamaCppClient._ensure_alive` restart failures).
 
-All decorators use `retry_if_exception()` with provider-specific predicates
-that classify each exception as retryable or not.
+One decorator is used for all three providers because, once the transport
+is OpenAI-compatible, the transient-failure taxonomy is the same.
 
 ### Infinite Generation Prevention
 
-All providers default to `max_tokens=16384` on `generate()`. Without this cap,
-llama-server enters context-shift loops: generation fills the context window,
-the server discards ~10K old tokens, the model loses its stop signal, and
-output repeats forever. The 16384 default accommodates the longest legitimate
-stage output while preventing runaway generation. Individual calls override
-this where appropriate (4096 for focused extractions and investigations).
+`generate()` defaults to `max_tokens=16384`. Without this cap, llama-server
+enters context-shift loops: generation fills the context window, the server
+discards ~10K old tokens, the model loses its stop signal, and output
+repeats forever. The 16384 default accommodates the longest legitimate
+stage output; individual calls override this where appropriate (4096 for
+focused extractions and investigations).
 
 ## Key Design Decisions
 
-1. **No abstract base class** -- the three clients share a method signature
-   convention but do not inherit from a common ABC. This avoids forcing
-   provider-specific features (OOM fallback, subprocess management) into a
-   generic interface that would become leaky.
+1. **Single base class over duck-typed siblings** -- previously each client
+   re-implemented ~300 LOC of identical streaming/tool/monitoring code.
+   Unifying on `OpenAIApiClient` makes each subclass responsible only for
+   its own lifecycle, and guarantees that a bug fix in streaming applies
+   everywhere.
 
-2. **Retry at the provider level** -- each provider has its own retry decorator
-   with tuned parameters. Ollama's OOM errors need fallback, not retry.
-   llama-server needs more attempts with shorter waits because server restart
-   is slower. A single generic retry policy would be wrong for at least one
-   provider.
+2. **One retry predicate** -- the three legacy per-provider retry decorators
+   converged on the same exception types once Ollama moved off its SDK.
+   Keeping them separate would have been pure duplication.
 
-3. **Same model path = no restart** -- the WDDM workaround is specific to
-   Windows consumer GPUs but critical for usability. Without it, every tier
-   switch destroys inference performance until reboot. Comparing file paths
-   (not tier names) is the key insight -- if all tiers point to the same GGUF,
-   the server never restarts.
+3. **No OOM fallback path** -- Ollama's old OOM-to-fallback-model dance was
+   the only reason OOM 500s were special-cased. Users control which model
+   loads at the runtime level (`ollama run`, `lms load`, llama-server
+   arguments); a second in-process fallback added no value.
 
-4. **max_tokens default over per-call enforcement** -- setting the default on
-   the generate method rather than requiring every caller to specify it
-   prevents the failure mode where a single missing `max_tokens` causes
-   infinite generation. Callers that need a different limit can override.
+4. **Same model path = no restart (llama.cpp)** -- the WDDM workaround is
+   specific to Windows consumer GPUs but critical for usability. Without it,
+   every tier switch destroys inference performance until reboot. Comparing
+   file paths (not tier names) is the key insight.
 
-5. **Thinking mode disabled globally** -- `enable_thinking: false` for Qwen3
-   prevents the model from entering its internal reasoning mode, which
-   consumes output tokens without producing useful content for extraction.
+5. **Thinking mode disabled globally** -- Qwen3's thinking mode consumes
+   output tokens without producing extractable content. `disable_thinking`
+   is a constructor arg so providers that cannot parse the extension can
+   opt out.
 
 ## Configuration
 
@@ -143,30 +151,35 @@ Provider configuration lives in `config.yaml`:
 provider: llama_cpp  # or: ollama, lm_studio
 
 # Ollama-specific
-model: qwen3-coder-30b
-fallback_model: qwen3-8b
-memory_threshold: 0.9
+ollama:
+  base_url: http://localhost:11434
+  model: qwen3-coder-30b
+  fallback_model: qwen3-8b   # kept for interface parity; no in-process OOM path
 
 # LM Studio-specific
-smart_model: qwen3.5-35b
-fast_model: qwen3.5-4b
+lm_studio:
+  smart_model: qwen3.5-35b
+  fast_model: qwen3.5-4b
 
 # llama.cpp-specific
-llama_server_path: /path/to/llama-server
-model_path: /path/to/model.gguf
-context_length: 65536
-flash_attention: true
-kv_cache_type: q8_0
+llama_cpp:
+  server_path: /path/to/llama-server
+  models_dir: /path/to/models
+  fast_model:
+    path: model.gguf
+    context_size: 65536
+    gpu_layers: -1
 ```
 
 ## Files
 
 | File | Role |
 |------|------|
-| `fitz_forge/llm/client.py` | `OllamaClient` -- Ollama native client wrapper |
-| `fitz_forge/llm/lm_studio.py` | `LMStudioClient` -- LM Studio OpenAI-compatible client |
-| `fitz_forge/llm/llama_cpp.py` | `LlamaCppClient` -- llama-server subprocess manager |
-| `fitz_forge/llm/retry.py` | `ollama_retry`, `lm_studio_retry`, `llama_cpp_retry` decorators |
+| `fitz_forge/llm/openai_api.py` | `OpenAIApiClient` base: streaming, tool calling, monitoring, metrics |
+| `fitz_forge/llm/ollama.py` | `OllamaClient` -- passthrough to Ollama's `/v1` endpoint |
+| `fitz_forge/llm/lm_studio.py` | `LMStudioClient` -- `lms` CLI lifecycle |
+| `fitz_forge/llm/llama_cpp.py` | `LlamaCppClient` -- llama-server subprocess + tok/s baseline + GPU reset |
+| `fitz_forge/llm/retry.py` | `openai_api_retry` decorator + `is_openai_api_retryable` |
 | `fitz_forge/llm/gpu_monitor.py` | GPU temperature preflight check before generate calls |
 
 ## Related Features
