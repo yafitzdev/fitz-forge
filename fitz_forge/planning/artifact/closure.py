@@ -25,23 +25,38 @@ knowledge in one place.
 
 from __future__ import annotations
 
-import ast
 import logging
 import re
-from collections.abc import Iterator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fitz_forge.planning.validation.grounding import (
     _SKIP_NAMES as _GROUNDING_SKIP_NAMES,
 )
 from fitz_forge.planning.validation.grounding import (
     StructuralIndexLookup,
+)
+from fitz_forge.planning.validation.grounding._ts_inference import (
+    _callable_of,
+    _class_body,
+    _function_is_async,
+    _function_name,
+    _rightmost_attribute_name,
+    _unwrap_decorated,
     extract_init_self_attrs,
     extract_type_name,
-    try_parse,
+    iter_all_classes,
+    iter_class_methods,
+    unparse_annotation,
 )
+from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from tree_sitter import Node
 
 logger = logging.getLogger(__name__)
 
@@ -262,56 +277,64 @@ def _method_exists_anywhere(method_name: str, lookup: StructuralIndexLookup) -> 
 # ---------------------------------------------------------------------------
 
 
-def _iter_annotation_class_names(ann: ast.expr | None) -> Iterator[tuple[str, int]]:
-    """Yield (class_name, line) for every class-shaped Name in an annotation subtree.
+def _iter_annotation_class_names(type_node: "Node | None") -> "Iterator[tuple[str, int]]":
+    """Yield (class_name, line) for class-shaped identifiers in an annotation.
 
     Walks nested generics (List[Foo], Dict[str, Bar], Foo | None, Optional[X])
-    and emits one tuple per capitalized Name that isn't in _SKIP_NAMES.
+    and emits one tuple per capitalized identifier that isn't in _SKIP_NAMES.
 
     Single-letter uppercase names (T, K, V, P, R, ...) are skipped: they're
     conventionally TypeVars, and fabricated schema classes are never that
     short. Longer TypeVar names are handled by per-artifact detection in
     `_find_module_typevars`.
     """
-    if ann is None:
+    if type_node is None:
         return
-    for node in ast.walk(ann):
-        if isinstance(node, ast.Name):
-            name = node.id
-            if not name[:1].isupper():
-                continue
-            if name in _SKIP_NAMES:
-                continue
-            if len(name) == 1:
-                # Single-letter uppercase — TypeVar convention, skip.
-                continue
-            yield (name, getattr(node, "lineno", 0))
+    stack: list[Node] = [type_node]
+    while stack:
+        n = stack.pop()
+        if n.type == "identifier":
+            name = n.text.decode("utf-8")
+            if name[:1].isupper() and name not in _SKIP_NAMES and len(name) != 1:
+                yield name, n.start_point[0] + 1
+        stack.extend(n.children)
 
 
-def _find_module_typevars(tree: ast.AST) -> set[str]:
+def _find_module_typevars(root: "Node") -> set[str]:
     """Collect names assigned to TypeVar/ParamSpec/TypeVarTuple calls.
 
     Catches `T = TypeVar("T")`, `P = ParamSpec("P")`, `Ts = TypeVarTuple("Ts")`
     at any scope. These names act as type-level placeholders and must not be
     checked as if they were concrete class references.
     """
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        rhs = node.value
-        if not isinstance(rhs, ast.Call):
-            continue
-        func = rhs.func
-        if isinstance(func, ast.Name) and func.id in (
-            "TypeVar",
-            "ParamSpec",
-            "TypeVarTuple",
-        ):
-            names.add(node.targets[0].id)
-    return names
+    out: set[str] = set()
+    stack: list[Node] = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "assignment":
+            target = next((c for c in n.children if c.is_named), None)
+            if target is None or target.type != "identifier":
+                stack.extend(n.children)
+                continue
+            rhs = None
+            seen_eq = False
+            for c in n.children:
+                if not c.is_named and c.type == "=":
+                    seen_eq = True
+                    continue
+                if seen_eq and c.is_named:
+                    rhs = c
+                    break
+            if rhs is not None and rhs.type == "call":
+                callee = _callable_of(rhs)
+                if (
+                    callee is not None
+                    and callee.type == "identifier"
+                    and callee.text.decode("utf-8") in ("TypeVar", "ParamSpec", "TypeVarTuple")
+                ):
+                    out.add(target.text.decode("utf-8"))
+        stack.extend(n.children)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -349,13 +372,6 @@ def load_target_self_attrs(
     lookup: StructuralIndexLookup,
 ) -> dict[str, str]:
     """Locate the file on disk, find the primary class, parse its __init__."""
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        from ._ts_closure import load_target_self_attrs as _ts
-
-        return _ts(filename, source_dir, lookup)
-
     if not source_dir:
         return {}
     disk = Path(source_dir) / filename
@@ -365,19 +381,17 @@ def load_target_self_attrs(
         source = disk.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    tree = parse_python(source)
+    if tree is None:
         return {}
-
     target = _target_class_for_file(filename, lookup)
     if not target:
         return {}
-
     known = set(lookup._all_class_names) if hasattr(lookup, "_all_class_names") else None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == target:
-            return extract_init_self_attrs(node, known_classes=known)
+    for cls in iter_all_classes(tree.root_node):
+        name_node = next((c for c in cls.children if c.type == "identifier"), None)
+        if name_node is not None and name_node.text.decode("utf-8") == target:
+            return extract_init_self_attrs(cls, known_classes=known)
     return {}
 
 
@@ -395,11 +409,11 @@ def _target_class_for_file(filename: str, lookup: StructuralIndexLookup) -> str 
 
 
 # ---------------------------------------------------------------------------
-# Reference collector — walks an artifact AST, emits Reference objects
+# Reference collector — walks an artifact tree-sitter tree, emits Reference objects
 # ---------------------------------------------------------------------------
 
 
-class _ReferenceCollector(ast.NodeVisitor):
+class _ReferenceCollector:
     """Walks one artifact and collects cross-file Reference objects.
 
     Type tracking scope:
@@ -425,13 +439,12 @@ class _ReferenceCollector(ast.NodeVisitor):
         self.refs: list[Reference] = []
         self._scope_stack: list[dict[str, str]] = [{}]
         # Iterator/awaitable kind tracked per variable for async-for/await
-        # propagation. Maps var name → (kind, originating_ref) where kind is
-        # one of {"sync_iter", "async_iter", "awaitable"} and originating_ref
-        # is the SymbolRef of the call that produced the value. Cleared on
-        # function scope pop alongside type bindings.
+        # propagation. Maps var name → (kind, originating_ref, context) where
+        # kind ∈ {"sync_iter", "async_iter", "awaitable"}. Cleared on function
+        # scope pop alongside type bindings.
         self._iter_kinds_stack: list[dict[str, tuple[str, SymbolRef, str]]] = [{}]
 
-    # -- scope helpers ------------------------------------------------------
+    # ---- scope ------------------------------------------------------------
 
     def _push_scope(self) -> None:
         self._scope_stack.append({})
@@ -459,25 +472,27 @@ class _ReferenceCollector(ast.NodeVisitor):
     def _bind_iter_kind(self, name: str, kind: str, ref: SymbolRef, context: str) -> None:
         self._iter_kinds_stack[-1][name] = (kind, ref, context)
 
-    # -- emit helpers -------------------------------------------------------
-
-    def _kwargs_of(self, call: ast.Call) -> frozenset[str]:
-        return frozenset(k.arg for k in call.keywords if k.arg)
+    # ---- emit -------------------------------------------------------------
 
     def _emit(self, ref: Reference) -> None:
         self.refs.append(ref)
 
-    def _emit_annotation_types(self, ann: ast.expr | None, context_desc: str) -> None:
-        """Emit a class Reference for every class-shaped Name in an annotation.
+    def _kwargs_of(self, call: "Node") -> frozenset[str]:
+        args_list = next((c for c in call.children if c.type == "argument_list"), None)
+        if args_list is None:
+            return frozenset()
+        names: set[str] = set()
+        for c in args_list.children:
+            if c.type == "keyword_argument":
+                ident = next((x for x in c.children if x.type == "identifier"), None)
+                if ident is not None:
+                    names.add(ident.text.decode("utf-8"))
+        return frozenset(names)
 
-        Catches fabricated classes in every type position: parameter annotations,
-        return annotations, variable annotations, except-handler types, cast/
-        isinstance type args, raise type args. Existence is the only check that
-        fires (usage="call" falls through _check_usage untouched).
-        """
-        if ann is None:
+    def _emit_annotation_types(self, type_node: "Node | None", context_desc: str) -> None:
+        if type_node is None:
             return
-        for name, line in _iter_annotation_class_names(ann):
+        for name, line in _iter_annotation_class_names(type_node):
             if name in self.local_skip:
                 continue
             self._emit(
@@ -489,19 +504,20 @@ class _ReferenceCollector(ast.NodeVisitor):
                 )
             )
 
-    def _emit_call(self, node: ast.Call, usage: str) -> None:
-        """Emit a Reference for a Call node with the given usage kind."""
-        line = getattr(node, "lineno", 0)
-        kwargs = self._kwargs_of(node)
-        func = node.func
+    def _emit_call(self, call: "Node", usage: str) -> None:
+        """Emit Reference for a call node."""
+        line = call.start_point[0] + 1
+        kwargs = self._kwargs_of(call)
+        callee = _callable_of(call)
+        if callee is None:
+            return
 
-        # Case: obj.method() where obj has a known type
-        if isinstance(func, ast.Attribute):
-            attr = func.attr
-            if isinstance(func.value, ast.Name):
-                obj_name = func.value.id
-                if obj_name == "self":
-                    return  # self.method() — grounding handles it
+        if callee.type == "attribute":
+            idents = [c for c in callee.children if c.type == "identifier"]
+            # obj.method()
+            if len(idents) == 2 and idents[0].text.decode("utf-8") != "self":
+                obj_name = idents[0].text.decode("utf-8")
+                attr = idents[1].text.decode("utf-8")
                 t = self._lookup_type(obj_name)
                 if t and t not in _SKIP_NAMES:
                     self._emit(
@@ -513,27 +529,35 @@ class _ReferenceCollector(ast.NodeVisitor):
                             kwargs=kwargs,
                         )
                     )
-            elif (
-                isinstance(func.value, ast.Attribute)
-                and isinstance(func.value.value, ast.Name)
-                and func.value.value.id == "self"
-            ):
-                # self._attr.method()
-                attr_name = func.value.attr
-                t = self.self_attrs.get(attr_name)
-                if t and t not in _SKIP_NAMES:
-                    self._emit(
-                        Reference(
-                            ref=SymbolRef(owner=t, name=attr, kind="method"),
-                            line=line,
-                            context=f"self.{attr_name}.{attr}()",
-                            usage=usage,
-                            kwargs=kwargs,
+                return
+            # self._attr.method() — attribute of attribute
+            if len(idents) == 0:
+                inner_attr = next((c for c in callee.children if c.type == "attribute"), None)
+                if inner_attr is not None:
+                    inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+                    if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
+                        attr_name = inner_idents[1].text.decode("utf-8")
+                        t = self.self_attrs.get(attr_name)
+                        method_ident = next(
+                            (c for c in callee.children if c.type == "identifier"), None
                         )
-                    )
-        # Case: ClassName(...) — class instantiation
-        elif isinstance(func, ast.Name):
-            name = func.id
+                        if t and t not in _SKIP_NAMES and method_ident is not None:
+                            method = method_ident.text.decode("utf-8")
+                            self._emit(
+                                Reference(
+                                    ref=SymbolRef(owner=t, name=method, kind="method"),
+                                    line=line,
+                                    context=f"self.{attr_name}.{method}()",
+                                    usage=usage,
+                                    kwargs=kwargs,
+                                )
+                            )
+                return
+            # self.method() — grounding handles; do not emit here
+            return
+
+        if callee.type == "identifier":
+            name = callee.text.decode("utf-8")
             if name not in _SKIP_NAMES and name[:1].isupper():
                 self._emit(
                     Reference(
@@ -545,179 +569,255 @@ class _ReferenceCollector(ast.NodeVisitor):
                     )
                 )
 
-    def _walk_call_args(self, call: ast.Call) -> None:
-        """Walk args/kwargs without re-visiting .func (already handled)."""
-        for arg in call.args:
-            self.visit(arg)
-        for kw in call.keywords:
-            self.visit(kw.value)
+    # ---- main visitor -----------------------------------------------------
 
-    # -- visitors -----------------------------------------------------------
+    def visit(self, node: "Node") -> None:
+        t = node.type
+        if t == "function_definition":
+            self._visit_func(node)
+            return
+        if t == "decorated_definition":
+            inner = _unwrap_decorated(node)
+            if inner.type == "function_definition":
+                self._visit_func(inner)
+                return
+            # Class — descend into body
+            for c in node.children:
+                if c.is_named and c.type != "decorator":
+                    self.visit(c)
+            return
+        if t == "assignment":
+            self._visit_assign(node)
+            return
+        if t == "call":
+            self._visit_call(node)
+            return
+        if t == "raise_statement":
+            self._visit_raise(node)
+            return
+        if t == "except_clause":
+            self._visit_except(node)
+            return
+        if t == "for_statement":
+            self._visit_for(node, is_async=False)
+            return
+        if t == "for_in_clause":
+            self._visit_for(node, is_async=False)
+            return
+        if t == "await":
+            self._visit_await(node)
+            return
+        if t == "attribute":
+            self._visit_attribute(node)
+            return
+        if t == "import_from_statement":
+            self._visit_import_from(node)
+            return
+        # Default: descend
+        for c in node.children:
+            self.visit(c)
 
-    def _visit_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+    # ---- specific visitors -----------------------------------------------
+
+    def _visit_func(self, node: "Node") -> None:
         self._push_scope()
-        # Positional args
-        for arg in node.args.args:
-            if arg.annotation is None:
-                continue
-            self._emit_annotation_types(arg.annotation, f"param {arg.arg}")
-            t = extract_type_name(arg.annotation)
-            if t and t not in _SKIP_NAMES:
-                self._bind(arg.arg, t)
-        # Keyword-only args
-        for arg in node.args.kwonlyargs:
-            if arg.annotation is None:
-                continue
-            self._emit_annotation_types(arg.annotation, f"kwonly {arg.arg}")
-            t = extract_type_name(arg.annotation)
-            if t and t not in _SKIP_NAMES:
-                self._bind(arg.arg, t)
-        # *args and **kwargs annotations
-        if node.args.vararg and node.args.vararg.annotation:
-            self._emit_annotation_types(node.args.vararg.annotation, "vararg")
-        if node.args.kwarg and node.args.kwarg.annotation:
-            self._emit_annotation_types(node.args.kwarg.annotation, "kwarg")
+        params_node = next((c for c in node.children if c.type == "parameters"), None)
+        if params_node is not None:
+            for p in params_node.children:
+                ann_node: Node | None = None
+                arg_name: str | None = None
+                if p.type == "typed_parameter":
+                    ident = next((x for x in p.children if x.type == "identifier"), None)
+                    ann_node = next((x for x in p.children if x.type == "type"), None)
+                    if ident is not None:
+                        arg_name = ident.text.decode("utf-8")
+                elif p.type == "typed_default_parameter":
+                    ident = next((x for x in p.children if x.type == "identifier"), None)
+                    ann_node = next((x for x in p.children if x.type == "type"), None)
+                    if ident is not None:
+                        arg_name = ident.text.decode("utf-8")
+                if ann_node is not None:
+                    desc = f"param {arg_name}" if arg_name else "param"
+                    self._emit_annotation_types(ann_node, desc)
+                    if arg_name is not None:
+                        t = extract_type_name(ann_node)
+                        if t and t not in _SKIP_NAMES:
+                            self._bind(arg_name, t)
+
         # Return annotation
-        if node.returns is not None:
-            self._emit_annotation_types(node.returns, "return type")
-        for stmt in node.body:
-            self.visit(stmt)
+        ret = _returns_annotation_node(node)
+        if ret is not None:
+            self._emit_annotation_types(ret, "return type")
+
+        body = next((c for c in node.children if c.type == "block"), None)
+        if body is not None:
+            for stmt in body.children:
+                self.visit(stmt)
         self._pop_scope()
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
-        self._visit_func(node)
+    def _visit_assign(self, node: "Node") -> None:
+        target = next((c for c in node.children if c.is_named), None)
+        has_type = any(c.type == "type" for c in node.children)
+        if has_type:
+            ann = next((c for c in node.children if c.type == "type"), None)
+            desc = (
+                target.text.decode("utf-8")
+                if (target and target.type == "identifier")
+                else "var"
+            )
+            self._emit_annotation_types(ann, f"annotation on {desc}")
+            if target is not None and target.type == "identifier":
+                t = extract_type_name(ann)
+                if t and t not in _SKIP_NAMES:
+                    self._bind(target.text.decode("utf-8"), t)
+            # Value (if any)
+            seen_eq = False
+            value = None
+            for c in node.children:
+                if not c.is_named and c.type == "=":
+                    seen_eq = True
+                    continue
+                if seen_eq and c.is_named:
+                    value = c
+                    break
+            if value is not None:
+                self.visit(value)
+            return
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
-        self._visit_func(node)
-
-    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            var_name = node.targets[0].id
-            t = self._infer_rhs_type(node.value)
+        # Plain assignment
+        seen_eq = False
+        value: Node | None = None
+        for c in node.children:
+            if not c.is_named and c.type == "=":
+                seen_eq = True
+                continue
+            if seen_eq and c.is_named:
+                value = c
+                break
+        if target is not None and target.type == "identifier" and value is not None:
+            var_name = target.text.decode("utf-8")
+            t = self._infer_rhs_type(value)
             if t:
                 self._bind(var_name, t)
-            # Track iterator/awaitable kind for async-for/await propagation:
-            # when `var = typed_obj.method(...)` and method's return type is
-            # an Iterator/AsyncIterator/Coroutine, record it so a later
-            # `async for x in var` or `await var` can resolve back to the
-            # originating call.
-            kind_info = self._infer_rhs_iter_kind(node.value)
-            if kind_info:
+            kind_info = self._infer_rhs_iter_kind(value)
+            if kind_info is not None:
                 kind, ref, context = kind_info
                 self._bind_iter_kind(var_name, kind, ref, context)
-        self.generic_visit(node)
+        if value is not None:
+            self.visit(value)
 
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
-        target_desc = node.target.id if isinstance(node.target, ast.Name) else "var"
-        self._emit_annotation_types(node.annotation, f"annotation on {target_desc}")
-        if isinstance(node.target, ast.Name):
-            t = extract_type_name(node.annotation)
-            if t and t not in _SKIP_NAMES:
-                self._bind(node.target.id, t)
-        self.generic_visit(node)
-
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-        # Special-case type-introspection calls: the type argument is a class
-        # position, even though syntactically it's a call arg. Emit class refs
-        # for any fabricated classes used there.
-        func = node.func
-        if isinstance(func, ast.Name):
-            fname = func.id
-            if fname in ("isinstance", "issubclass") and len(node.args) >= 2:
-                self._emit_annotation_types(node.args[1], f"{fname} type")
-            elif fname == "cast" and len(node.args) >= 1:
-                self._emit_annotation_types(node.args[0], "cast type")
+    def _visit_call(self, node: "Node") -> None:
+        callee = _callable_of(node)
+        # isinstance/issubclass/cast special case
+        if callee is not None and callee.type == "identifier":
+            fname = callee.text.decode("utf-8")
+            args_list = next((c for c in node.children if c.type == "argument_list"), None)
+            if args_list is not None:
+                named_args = [
+                    c for c in args_list.children
+                    if c.is_named and c.type != "keyword_argument"
+                ]
+                if fname in ("isinstance", "issubclass") and len(named_args) >= 2:
+                    self._emit_annotation_types(named_args[1], f"{fname} type")
+                elif fname == "cast" and len(named_args) >= 1:
+                    self._emit_annotation_types(named_args[0], "cast type")
         self._emit_call(node, usage="call")
-        self._walk_call_args(node)
+        # Descend into args (not callee — already handled)
+        args_list = next((c for c in node.children if c.type == "argument_list"), None)
+        if args_list is not None:
+            for c in args_list.children:
+                if c.is_named:
+                    self.visit(c)
 
-    def visit_Raise(self, node: ast.Raise) -> None:  # noqa: N802
-        # `raise Foo` — bare Name exception class. `raise Foo(...)` falls
-        # through to generic_visit which hits visit_Call and already catches
-        # capitalized-name instantiation. Here we only handle the Name case.
-        if isinstance(node.exc, ast.Name):
-            name = node.exc.id
+    def _visit_raise(self, node: "Node") -> None:
+        body = next((c for c in node.children if c.is_named), None)
+        if body is not None and body.type == "identifier":
+            name = body.text.decode("utf-8")
             if name[:1].isupper() and name not in _SKIP_NAMES:
                 self._emit(
                     Reference(
                         ref=SymbolRef(owner=name, name=None, kind="class"),
-                        line=getattr(node, "lineno", 0),
+                        line=node.start_point[0] + 1,
                         context=f"raise {name}",
                         usage="call",
                     )
                 )
-        self.generic_visit(node)
+        for c in node.children:
+            if c.is_named:
+                self.visit(c)
 
-    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
-        if node.type is not None:
-            self._emit_annotation_types(node.type, "except")
-        self.generic_visit(node)
+    def _visit_except(self, node: "Node") -> None:
+        for c in node.children:
+            if c.is_named:
+                if c.type in ("identifier", "attribute", "tuple"):
+                    self._emit_annotation_types(c, "except")
+                    continue
+                self.visit(c)
 
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # noqa: N802
-        if isinstance(node.iter, ast.Call):
-            self._emit_call(node.iter, usage="async_iter")
-            self._walk_call_args(node.iter)
-        elif isinstance(node.iter, ast.Name):
-            # Propagate usage back to the originating call when iterating a
-            # variable that was bound to a method call result. Catches:
-            #     stream = service.query_stream(...)   # bound as sync_iter
-            #     async for x in stream: ...           # ← usage mismatch
+    def _visit_for(self, node: "Node", is_async: bool) -> None:
+        async_kw = any(c.type == "async" for c in node.children)
+        is_async = is_async or async_kw
+        saw_in = False
+        target_node: Node | None = None
+        iter_node: Node | None = None
+        body_node: Node | None = None
+        for c in node.children:
+            if not c.is_named and c.type == "in":
+                saw_in = True
+                continue
+            if c.is_named and target_node is None and not saw_in:
+                target_node = c
+                continue
+            if saw_in and iter_node is None and c.is_named and c.type != "block":
+                iter_node = c
+                continue
+            if c.type == "block":
+                body_node = c
+
+        usage = "async_iter" if is_async else "iter"
+        if iter_node is not None:
+            if iter_node.type == "call":
+                self._emit_call(iter_node, usage=usage)
+                args_list = next((c for c in iter_node.children if c.type == "argument_list"), None)
+                if args_list is not None:
+                    for c in args_list.children:
+                        if c.is_named:
+                            self.visit(c)
+            elif iter_node.type == "identifier":
+                self._propagate_var_usage(
+                    iter_node.text.decode("utf-8"),
+                    used_as=usage,
+                    line=iter_node.start_point[0] + 1,
+                )
+            else:
+                self.visit(iter_node)
+        if target_node is not None:
+            self.visit(target_node)
+        if body_node is not None:
+            for stmt in body_node.children:
+                self.visit(stmt)
+
+    def _visit_await(self, node: "Node") -> None:
+        body = next((c for c in node.children if c.is_named), None)
+        if body is None:
+            return
+        if body.type == "call":
+            self._emit_call(body, usage="await")
+            args_list = next((c for c in body.children if c.type == "argument_list"), None)
+            if args_list is not None:
+                for c in args_list.children:
+                    if c.is_named:
+                        self.visit(c)
+        elif body.type == "identifier":
             self._propagate_var_usage(
-                node.iter.id,
-                used_as="async_iter",
-                line=getattr(node.iter, "lineno", 0),
-            )
-        else:
-            self.visit(node.iter)
-        self.visit(node.target)
-        for stmt in node.body:
-            self.visit(stmt)
-        for stmt in node.orelse:
-            self.visit(stmt)
-
-    def visit_For(self, node: ast.For) -> None:  # noqa: N802
-        if isinstance(node.iter, ast.Call):
-            self._emit_call(node.iter, usage="iter")
-            self._walk_call_args(node.iter)
-        elif isinstance(node.iter, ast.Name):
-            self._propagate_var_usage(
-                node.iter.id,
-                used_as="iter",
-                line=getattr(node.iter, "lineno", 0),
-            )
-        else:
-            self.visit(node.iter)
-        self.visit(node.target)
-        for stmt in node.body:
-            self.visit(stmt)
-        for stmt in node.orelse:
-            self.visit(stmt)
-
-    def visit_Await(self, node: ast.Await) -> None:  # noqa: N802
-        if isinstance(node.value, ast.Call):
-            self._emit_call(node.value, usage="await")
-            self._walk_call_args(node.value)
-        elif isinstance(node.value, ast.Name):
-            self._propagate_var_usage(
-                node.value.id,
+                body.text.decode("utf-8"),
                 used_as="await",
-                line=getattr(node.value, "lineno", 0),
+                line=body.start_point[0] + 1,
             )
         else:
-            self.visit(node.value)
+            self.visit(body)
 
-    def _propagate_var_usage(
-        self,
-        var_name: str,
-        used_as: str,
-        line: int,
-    ) -> None:
-        """Emit a Reference if `var_name` was bound to a call with a mismatched iter kind.
-
-        When `var = obj.method(...)` was recorded with a return type kind
-        (sync_iter / async_iter / awaitable), a later `async for`, `for`, or
-        `await` on that variable re-emits the original call's SymbolRef with
-        the new usage context so `_check_usage` catches the mismatch.
-        """
+    def _propagate_var_usage(self, var_name: str, used_as: str, line: int) -> None:
         info = self._lookup_iter_kind(var_name)
         if info is None:
             return
@@ -731,77 +831,99 @@ class _ReferenceCollector(ast.NodeVisitor):
             )
         )
 
-    def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
-        # Bare attribute reads (not the .func of a Call).
-        if isinstance(node.value, ast.Name):
-            obj = node.value.id
-            if obj == "self":
-                self.generic_visit(node)
-                return
-            t = self._lookup_type(obj)
-            if t and t not in _SKIP_NAMES:
-                self._emit(
-                    Reference(
-                        ref=SymbolRef(owner=t, name=node.attr, kind="field"),
-                        line=getattr(node, "lineno", 0),
-                        context=f"{obj}.{node.attr}",
-                        usage="field_access",
+    def _visit_attribute(self, node: "Node") -> None:
+        idents = [c for c in node.children if c.type == "identifier"]
+        if len(idents) == 2:
+            obj = idents[0].text.decode("utf-8")
+            attr = idents[1].text.decode("utf-8")
+            if obj != "self":
+                t = self._lookup_type(obj)
+                if t and t not in _SKIP_NAMES:
+                    self._emit(
+                        Reference(
+                            ref=SymbolRef(owner=t, name=attr, kind="field"),
+                            line=node.start_point[0] + 1,
+                            context=f"{obj}.{attr}",
+                            usage="field_access",
+                        )
                     )
-                )
-        self.generic_visit(node)
+        for c in node.children:
+            if c.is_named and c.type == "attribute":
+                self.visit(c)
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
-        if not node.module:
+    def _visit_import_from(self, node: "Node") -> None:
+        module_node = next(
+            (c for c in node.children if c.type in ("dotted_name", "relative_import")),
+            None,
+        )
+        if module_node is None:
             return
-        top = node.module.split(".")[0]
+        module_text = module_node.text.decode("utf-8")
+        if not module_text:
+            return
+        top = module_text.split(".")[0]
         if top in _STDLIB_PACKAGES:
             return
-        for alias in node.names:
-            if alias.name == "*":
+        saw_import = False
+        imported_identifiers: list[str] = []
+        for c in node.children:
+            if not c.is_named and c.type == "import":
+                saw_import = True
+                continue
+            if not saw_import:
+                continue
+            if c.type == "dotted_name":
+                imported_identifiers.append(c.text.decode("utf-8"))
+            elif c.type == "aliased_import":
+                orig = next((x for x in c.children if x.type == "dotted_name"), None)
+                if orig is not None:
+                    imported_identifiers.append(orig.text.decode("utf-8"))
+            elif c.type == "wildcard_import":
+                return
+        for name in imported_identifiers:
+            if name == "*":
                 continue
             self._emit(
                 Reference(
-                    ref=SymbolRef(owner=node.module, name=alias.name, kind="import_name"),
-                    line=getattr(node, "lineno", 0),
-                    context=f"from {node.module} import {alias.name}",
+                    ref=SymbolRef(owner=module_text, name=name, kind="import_name"),
+                    line=node.start_point[0] + 1,
+                    context=f"from {module_text} import {name}",
                     usage="import",
                 )
             )
 
-    def _infer_rhs_type(self, value: ast.expr) -> str | None:
-        """Infer the type of an RHS expression for simple cases."""
-        if isinstance(value, ast.Call):
-            func = value.func
-            if isinstance(func, ast.Name):
-                if func.id[:1].isupper() and func.id not in _SKIP_NAMES:
-                    return func.id
-                rt = _locator_return_type(func.id, self.lookup)
-                if rt:
-                    return rt
-            elif isinstance(func, ast.Attribute):
-                if func.attr[:1].isupper() and func.attr not in _SKIP_NAMES:
-                    return func.attr
+    # ---- RHS type inference ----------------------------------------------
+
+    def _infer_rhs_type(self, value: "Node") -> str | None:
+        if value.type != "call":
+            return None
+        callee = _callable_of(value)
+        if callee is None:
+            return None
+        if callee.type == "identifier":
+            fid = callee.text.decode("utf-8")
+            if fid[:1].isupper() and fid not in _SKIP_NAMES:
+                return fid
+            rt = _locator_return_type(fid, self.lookup)
+            if rt:
+                return rt
+        elif callee.type == "attribute":
+            attr_name = _rightmost_attribute_name(callee)
+            if attr_name and attr_name[:1].isupper() and attr_name not in _SKIP_NAMES:
+                return attr_name
         return None
 
-    def _infer_rhs_iter_kind(self, value: ast.expr) -> tuple[str, SymbolRef, str] | None:
-        """If RHS is a call whose return type is iterable/awaitable, return
-        (kind, ref, context) for later usage propagation.
-
-        Resolves the callee against sibling_provides first, then the
-        codebase index. Works for:
-            var = typed_obj.method(...)
-            var = self._attr.method(...)
-            var = top_level_func(...)
-        """
-        if not isinstance(value, ast.Call):
+    def _infer_rhs_iter_kind(
+        self, value: "Node"
+    ) -> tuple[str, SymbolRef, str] | None:
+        if value.type != "call":
             return None
-        ref_and_return = self._resolve_call_target(value)
-        if ref_and_return is None:
+        resolved = self._resolve_call_target(value)
+        if resolved is None:
             return None
-        ref, return_type, context = ref_and_return
+        ref, return_type, context = resolved
         if return_type is None:
             return None
-        # Classify the return type into an iterator / awaitable kind.
         if _is_async_iter_type(return_type):
             return ("async_iter", ref, context)
         if _is_awaitable_type(return_type):
@@ -810,66 +932,66 @@ class _ReferenceCollector(ast.NodeVisitor):
             return ("sync_iter", ref, context)
         return None
 
-    def _resolve_call_target(self, call: ast.Call) -> tuple[SymbolRef, str | None, str] | None:
-        """Resolve a Call to (SymbolRef of callee, return_type_string, context).
-
-        Looks up the target method/function via sibling_provides first,
-        then the codebase index. Returns None if the target can't be
-        identified (e.g. bare local call, builtin).
-        """
-        func = call.func
-        # Case: typed_obj.method(...)
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            obj_name = func.value.id
-            attr = func.attr
-            if obj_name == "self":
-                return None  # handled via self._attr case below
-            obj_type = self._lookup_type(obj_name)
-            if not obj_type or obj_type in _SKIP_NAMES:
-                return None
-            ref = SymbolRef(owner=obj_type, name=attr, kind="method")
-            return_type = self._lookup_return_type(ref)
-            return (ref, return_type, f"{obj_name}.{attr}()")
-
-        # Case: self._attr.method(...)
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Attribute)
-            and isinstance(func.value.value, ast.Name)
-            and func.value.value.id == "self"
-        ):
-            attr_name = func.value.attr
-            method = func.attr
-            attr_type = self.self_attrs.get(attr_name)
-            if not attr_type or attr_type in _SKIP_NAMES:
-                return None
-            ref = SymbolRef(owner=attr_type, name=method, kind="method")
-            return_type = self._lookup_return_type(ref)
-            return (ref, return_type, f"self.{attr_name}.{method}()")
-
-        # Case: top_level_func(...)
-        if isinstance(func, ast.Name):
-            if func.id in _SKIP_NAMES or func.id[:1].isupper():
-                return None
-            ref = SymbolRef(owner=None, name=func.id, kind="function")
-            # Check sibling provides
-            sig = self.sibling_provides.get(ref)
-            if sig and sig.return_type:
-                return (ref, sig.return_type, f"{func.id}()")
-            # Fallback to codebase
-            funcs = self.lookup.find_function(func.id)
-            if funcs:
-                return (ref, funcs[0].return_type, f"{func.id}()")
+    def _resolve_call_target(
+        self, call: "Node"
+    ) -> tuple[SymbolRef, str | None, str] | None:
+        callee = _callable_of(call)
+        if callee is None:
             return None
 
+        # typed_obj.method(...)
+        if callee.type == "attribute":
+            idents = [c for c in callee.children if c.type == "identifier"]
+            if len(idents) == 2:
+                obj_name = idents[0].text.decode("utf-8")
+                attr = idents[1].text.decode("utf-8")
+                if obj_name == "self":
+                    return None  # handled via self._attr below
+                obj_type = self._lookup_type(obj_name)
+                if not obj_type or obj_type in _SKIP_NAMES:
+                    return None
+                ref = SymbolRef(owner=obj_type, name=attr, kind="method")
+                return (ref, self._lookup_return_type(ref), f"{obj_name}.{attr}()")
+            # self._attr.method(...)
+            if len(idents) == 0:
+                inner_attr = next((c for c in callee.children if c.type == "attribute"), None)
+                method_ident = next(
+                    (c for c in callee.children if c.type == "identifier"), None
+                )
+                if inner_attr is not None and method_ident is not None:
+                    inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+                    if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
+                        attr_name = inner_idents[1].text.decode("utf-8")
+                        method = method_ident.text.decode("utf-8")
+                        attr_type = self.self_attrs.get(attr_name)
+                        if not attr_type or attr_type in _SKIP_NAMES:
+                            return None
+                        ref = SymbolRef(owner=attr_type, name=method, kind="method")
+                        return (
+                            ref,
+                            self._lookup_return_type(ref),
+                            f"self.{attr_name}.{method}()",
+                        )
+            return None
+
+        # top_level_func(...)
+        if callee.type == "identifier":
+            fid = callee.text.decode("utf-8")
+            if fid in _SKIP_NAMES or fid[:1].isupper():
+                return None
+            ref = SymbolRef(owner=None, name=fid, kind="function")
+            sig = self.sibling_provides.get(ref)
+            if sig and sig.return_type:
+                return (ref, sig.return_type, f"{fid}()")
+            funcs = self.lookup.find_function(fid)
+            if funcs:
+                return (ref, funcs[0].return_type, f"{fid}()")
+            return None
         return None
 
     def _lookup_return_type(self, ref: SymbolRef) -> str | None:
-        """Find return type of a method ref via siblings then codebase."""
-        # Sibling provides (new artifacts being added in this plan)
         sig = self.sibling_provides.get(ref)
         if sig is None:
-            # Try without exact kind match (field vs method)
             for k in ("method", "field", "function"):
                 alt = SymbolRef(owner=ref.owner, name=ref.name, kind=k)
                 sig = self.sibling_provides.get(alt)
@@ -877,12 +999,37 @@ class _ReferenceCollector(ast.NodeVisitor):
                     break
         if sig and sig.return_type:
             return sig.return_type
-        # Codebase lookup via IndexedMethod
         if ref.owner and ref.name:
             for cls in self.lookup.classes.get(ref.owner, []):
                 if ref.name in cls.methods:
                     return cls.methods[ref.name].return_type
         return None
+
+
+def _returns_annotation_node(func_def: "Node") -> "Node | None":
+    """Return the return-type annotation node of a function_definition, or None."""
+    saw_params = False
+    for c in func_def.children:
+        if c.type == "parameters":
+            saw_params = True
+            continue
+        if saw_params and c.type == "type":
+            return c
+    return None
+
+
+def _has_yield(func_def: "Node") -> bool:
+    """True if the function body contains any yield node."""
+    body = next((c for c in func_def.children if c.type == "block"), None)
+    if body is None:
+        return False
+    stack = list(body.children)
+    while stack:
+        n = stack.pop()
+        if n.type == "yield":
+            return True
+        stack.extend(n.children)
+    return False
 
 
 def extract_references(
@@ -898,17 +1045,10 @@ def extract_references(
     return types for variable-binding propagation (so `var = obj.method()`
     followed by `async for x in var` can be checked).
     """
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        from ._ts_closure import extract_references as _ts
-
-        return _ts(content, filename, lookup, self_attrs, sibling_provides)
-
-    tree = try_parse(content)
+    tree = parse_python(content)
     if tree is None:
         return []
-    local_skip = frozenset(_find_module_typevars(tree))
+    local_skip = frozenset(_find_module_typevars(tree.root_node))
     collector = _ReferenceCollector(
         filename,
         lookup,
@@ -916,7 +1056,7 @@ def extract_references(
         sibling_provides=sibling_provides,
         local_skip=local_skip,
     )
-    collector.visit(tree)
+    collector.visit(tree.root_node)
     return collector.refs
 
 
@@ -925,27 +1065,39 @@ def extract_references(
 # ---------------------------------------------------------------------------
 
 
-def _sig_from_funcdef(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> Signature:
-    params = [a.arg for a in node.args.args if a.arg != "self"]
-    if node.args.vararg:
-        params.append(f"*{node.args.vararg.arg}")
-    for a in node.args.kwonlyargs:
-        params.append(a.arg)
-    has_var_kw = node.args.kwarg is not None
+def _sig_from_funcdef(func_def: "Node") -> Signature:
+    params_node = next((c for c in func_def.children if c.type == "parameters"), None)
+    params: list[str] = []
+    has_var_kw = False
+    if params_node is not None:
+        for p in params_node.children:
+            if p.type == "identifier":
+                name = p.text.decode("utf-8")
+                if name != "self":
+                    params.append(name)
+            elif p.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                if ident is None:
+                    continue
+                name = ident.text.decode("utf-8")
+                if name != "self":
+                    params.append(name)
+            elif p.type == "list_splat_pattern":
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                if ident is not None:
+                    params.append(f"*{ident.text.decode('utf-8')}")
+            elif p.type == "dictionary_splat_pattern":
+                has_var_kw = True
+
     ret: str | None = None
-    if node.returns:
-        try:
-            ret = ast.unparse(node.returns)
-        except Exception:
-            pass
-    has_yield = any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node))
+    ret_node = _returns_annotation_node(func_def)
+    if ret_node is not None:
+        ret = unparse_annotation(ret_node)
     return Signature(
         params=params,
         return_type=ret,
-        is_async=isinstance(node, ast.AsyncFunctionDef),
-        is_generator=has_yield,
+        is_async=_function_is_async(func_def),
+        is_generator=_has_yield(func_def),
         has_var_keywords=has_var_kw,
     )
 
@@ -960,47 +1112,69 @@ def extract_provides(
     Returns a dict so usage checks can look up signatures. Class refs map to
     None; method/function refs map to their Signature.
     """
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        from ._ts_closure import extract_provides as _ts
-
-        return _ts(content, filename, lookup)
-
     out: dict[SymbolRef, Signature | None] = {}
-    tree = try_parse(content)
+    tree = parse_python(content)
     if tree is None:
         return out
+    root = tree.root_node
 
-    # Surgical rewrite: indented content where top level is a FunctionDef
-    is_surgical = (
-        content
-        and content.lstrip() != content
-        and any(
-            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for n in ast.iter_child_nodes(tree)
-        )
-    )
+    # Surgical rewrite: indented content whose top-level items include
+    # a function_definition (matches ast's `any(isinstance(n, FunctionDef)
+    # for n in iter_child_nodes(tree))`)
+    is_surgical = False
+    if content and content.lstrip() != content:
+        for c in root.children:
+            inner = _unwrap_decorated(c) if c.type == "decorated_definition" else c
+            if inner.type == "function_definition":
+                is_surgical = True
+                break
+
     target_class = _target_class_for_file(filename, lookup) if is_surgical else None
 
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            sig = _sig_from_funcdef(node)
+    for node in root.children:
+        real = _unwrap_decorated(node) if node.type == "decorated_definition" else node
+        if real.type == "function_definition":
+            name = _function_name(real)
+            if name is None:
+                continue
+            sig = _sig_from_funcdef(real)
             if target_class:
-                out[SymbolRef(owner=target_class, name=node.name, kind="method")] = sig
-                out[SymbolRef(owner=target_class, name=node.name, kind="field")] = sig
+                out[SymbolRef(owner=target_class, name=name, kind="method")] = sig
+                out[SymbolRef(owner=target_class, name=name, kind="field")] = sig
             else:
-                out[SymbolRef(owner=None, name=node.name, kind="function")] = sig
-        elif isinstance(node, ast.ClassDef):
-            out[SymbolRef(owner=node.name, name=None, kind="class")] = None
-            for child in ast.iter_child_nodes(node):
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    sig = _sig_from_funcdef(child)
-                    out[SymbolRef(owner=node.name, name=child.name, kind="method")] = sig
-                    out[SymbolRef(owner=node.name, name=child.name, kind="field")] = sig
-                elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
-                    # Pydantic / dataclass fields
-                    out[SymbolRef(owner=node.name, name=child.target.id, kind="field")] = None
+                out[SymbolRef(owner=None, name=name, kind="function")] = sig
+        elif real.type == "class_definition":
+            cname_node = next((c for c in real.children if c.type == "identifier"), None)
+            if cname_node is None:
+                continue
+            cname = cname_node.text.decode("utf-8")
+            out[SymbolRef(owner=cname, name=None, kind="class")] = None
+            for m in iter_class_methods(real):
+                mname = _function_name(m)
+                if mname is None:
+                    continue
+                sig = _sig_from_funcdef(m)
+                out[SymbolRef(owner=cname, name=mname, kind="method")] = sig
+                out[SymbolRef(owner=cname, name=mname, kind="field")] = sig
+            # Pydantic / dataclass fields at class level
+            body = _class_body(real)
+            if body is not None:
+                for stmt in body.children:
+                    if stmt.type != "expression_statement":
+                        continue
+                    inner = next((c for c in stmt.children if c.is_named), None)
+                    if inner is None or inner.type != "assignment":
+                        continue
+                    target = next((c for c in inner.children if c.is_named), None)
+                    if target is None or target.type != "identifier":
+                        continue
+                    has_type = any(c.type == "type" for c in inner.children)
+                    if has_type:
+                        out[
+                            SymbolRef(
+                                owner=cname, name=target.text.decode("utf-8"), kind="field"
+                            )
+                        ] = None
 
     return out
 
