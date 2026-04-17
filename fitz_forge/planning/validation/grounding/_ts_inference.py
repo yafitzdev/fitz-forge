@@ -731,6 +731,155 @@ def iter_class_methods(class_def: "Node") -> Iterator["Node"]:
                 yield inner
 
 
+# ---------------------------------------------------------------------------
+# Cross-cutting helpers shared by synthesis.py
+# ---------------------------------------------------------------------------
+
+
+_INIT_METHOD_NAMES: tuple[str, ...] = ("__init__", "_init_components", "setup", "_setup")
+
+
+def find_class_by_name(root: "Node", class_name: str) -> "Node | None":
+    """Return the first top-level class_definition matching ``class_name``.
+
+    Iterates module-level children only (matches ``ast.iter_child_nodes(tree)``
+    filtered to ClassDef). Unwraps ``decorated_definition`` wrappers.
+    """
+    for c in root.children:
+        cand: "Node | None" = None
+        if c.type == "class_definition":
+            cand = c
+        elif c.type == "decorated_definition":
+            inner = _unwrap_decorated(c)
+            if inner.type == "class_definition":
+                cand = inner
+        if cand is None:
+            continue
+        if _class_name(cand) == class_name:
+            return cand
+    return None
+
+
+def find_class_anywhere(root: "Node", class_name: str) -> "Node | None":
+    """Return the first class_definition anywhere in ``root`` matching ``class_name``.
+
+    Mirrors ``ast.walk(tree)`` filtered to ``ClassDef`` with a name check. Used
+    when the class may live inside another class or function (rare but real).
+    """
+    for cls in iter_all_classes(root):
+        if _class_name(cls) == class_name:
+            return cls
+    return None
+
+
+def extract_call_class_name(call_node: "Node") -> str | None:
+    """Return the rightmost identifier in a ``call`` node's callee.
+
+    No casing filter — unlike ``class_name_of_expr`` which only accepts
+    uppercase / classmethod-style names. Mirrors the ast pattern:
+
+        if isinstance(node.value, _ast.Call):
+            if isinstance(node.value.func, _ast.Name):
+                rhs = node.value.func.id
+            elif isinstance(node.value.func, _ast.Attribute):
+                rhs = node.value.func.attr
+
+    Other callee shapes (subscript, lambda, etc.) return None.
+    """
+    if call_node is None or call_node.type != "call":
+        return None
+    func = _callable_of(call_node)
+    if func is None:
+        return None
+    if func.type == "identifier":
+        return func.text.decode("utf-8")
+    if func.type == "attribute":
+        return _rightmost_attribute_name(func)
+    return None
+
+
+def iter_init_self_assignments(
+    class_def: "Node",
+    init_names: tuple[str, ...] = _INIT_METHOD_NAMES,
+) -> Iterator[tuple[str, "Node"]]:
+    """Yield ``(attr_name, rhs_value_node)`` for ``self._xxx = <expr>`` lines.
+
+    Only inspects methods whose name is in ``init_names`` (default:
+    ``__init__``, ``_init_components``, ``setup``, ``_setup``). Skips dunder
+    attribute names (``self.__x``). Mirrors ast.walk semantics — descends
+    into nested blocks, but skips nested function definitions via
+    ``_iter_body_skipping_nested``.
+
+    Both plain assignment (``self._x = X()``) and annotated assignment
+    (``self._x: T = X()``) are covered; the value node is the RHS expression
+    (``X()`` in both cases) or None for bare ``self._x: T``.
+    """
+    for method in iter_class_methods(class_def):
+        mname = _function_name(method)
+        if mname not in init_names:
+            continue
+        for stmt in _iter_body_skipping_nested(method):
+            if stmt.type != "assignment":
+                continue
+            target, _type_ann, value = _annotated_assignment_parts(stmt)
+            if target is None or target.type != "attribute":
+                continue
+            attr_name = _attribute_self_target(target)
+            if attr_name is None:
+                continue
+            if attr_name.startswith("__"):
+                continue
+            if not attr_name.startswith("_"):
+                continue
+            yield attr_name, value
+
+
+def format_method_signature(
+    method: "Node",
+    *,
+    skip_self: bool = True,
+) -> str:
+    """Format a function_definition as ``name(p1, p2) -> ReturnType``.
+
+    Mirrors the ast pattern used several times in synthesis.py:
+
+        params = [a.arg for a in child.args.args if a.arg != "self"]
+        sig = f"{child.name}({', '.join(params)})"
+        if child.returns:
+            sig += f" -> {_ast.unparse(child.returns)}"
+
+    Only positional parameter names are emitted (no ``*args``, ``**kwargs``,
+    no kwonly) — matches ast's ``node.args.args`` slice.
+    """
+    name = _function_name(method) or ""
+    params: list[str] = []
+    params_node = next((c for c in method.children if c.type == "parameters"), None)
+    if params_node is not None:
+        for p in params_node.children:
+            # Stop at `*` separator and beyond (matches `node.args.args` slice)
+            if p.type in ("keyword_separator", "list_splat_pattern", "dictionary_splat_pattern"):
+                break
+            if p.type == "identifier":
+                pname = p.text.decode("utf-8")
+            elif p.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                if ident is None:
+                    continue
+                pname = ident.text.decode("utf-8")
+            else:
+                continue
+            if skip_self and pname == "self":
+                continue
+            params.append(pname)
+    sig = f"{name}({', '.join(params)})"
+    ret_node = _returns_annotation(method)
+    if ret_node is not None:
+        ret_text = unparse_annotation(ret_node)
+        if ret_text:
+            sig += f" -> {ret_text}"
+    return sig
+
+
 def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
     """Tree-sitter port of ``StructuralIndexLookup._absorb_file_pass1``.
 

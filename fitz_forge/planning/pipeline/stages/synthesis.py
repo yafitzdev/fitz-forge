@@ -26,6 +26,18 @@ from fitz_forge.planning.pipeline.stages.base import (
     StageResult,
     extract_json,
 )
+from fitz_forge.planning.validation.grounding._ts_inference import (
+    _unwrap_decorated as _ts_unwrap_decorated,
+    extract_call_class_name as _ts_extract_call_class_name,
+    find_class_anywhere as _ts_find_class_anywhere,
+    find_class_by_name as _ts_find_class_by_name,
+    format_method_signature as _ts_format_method_signature,
+    iter_all_classes as _ts_iter_all_classes,
+    iter_class_methods as _ts_iter_class_methods,
+    iter_init_self_assignments as _ts_iter_init_self_assignments,
+    unparse_annotation as _ts_unparse_annotation,
+)
+from fitz_forge.planning.validation.grounding._ts_parser import parse_python as _ts_parse_python
 from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
@@ -547,10 +559,9 @@ def _decompose_multi_handler_artifacts(
     into one artifact per new endpoint so each gets the correct reference
     function.
 
-    Deterministic: uses AST to find route decorators, regex to find new
-    endpoint paths in decisions.
+    Deterministic: uses tree-sitter to find route decorators, regex to
+    find new endpoint paths in decisions.
     """
-    import ast as _ast
     import re as _re
 
     result: list[tuple[str, str]] = []
@@ -575,25 +586,69 @@ def _decompose_multi_handler_artifacts(
             continue
 
         # Find route handlers: functions decorated with @router.post("/path")
-        try:
-            tree = _ast.parse(disk_source)
-        except SyntaxError:
+        tree = _ts_parse_python(disk_source)
+        if tree is None:
             result.append((filename, purpose))
             continue
 
         route_handlers: dict[str, str] = {}  # route_path -> function_name
-        for node in _ast.iter_child_nodes(tree):
-            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+        for top in tree.root_node.children:
+            if top.type != "decorated_definition":
                 continue
-            for dec in node.decorator_list:
-                # Match @router.post("/path") or @router.get("/path")
-                if not isinstance(dec, _ast.Call):
+            inner = _ts_unwrap_decorated(top)
+            if inner.type != "function_definition":
+                continue
+            func_name = None
+            for c in inner.children:
+                if c.type == "identifier":
+                    func_name = c.text.decode("utf-8")
+                    break
+            if func_name is None:
+                continue
+            for dec in top.children:
+                if dec.type != "decorator":
                     continue
-                if not isinstance(dec.func, _ast.Attribute):
+                # Decorator children: '@', then expression (call or attribute)
+                # Find the call node inside the decorator.
+                call = next(
+                    (c for c in dec.children if c.type == "call"),
+                    None,
+                )
+                if call is None:
                     continue
-                if dec.args and isinstance(dec.args[0], _ast.Constant):
-                    route_path = str(dec.args[0].value)
-                    route_handlers[route_path] = node.name
+                func = next(
+                    (c for c in call.children if c.is_named and c.type != "argument_list"),
+                    None,
+                )
+                if func is None or func.type != "attribute":
+                    continue
+                args = next(
+                    (c for c in call.children if c.type == "argument_list"),
+                    None,
+                )
+                if args is None:
+                    continue
+                # First positional arg
+                first_arg = None
+                for a in args.children:
+                    if a.is_named:
+                        first_arg = a
+                        break
+                if first_arg is None:
+                    continue
+                if first_arg.type == "string":
+                    # Decode literal — strip quotes
+                    raw = first_arg.text.decode("utf-8")
+                    for q in ('"""', "'''", '"', "'"):
+                        if raw.startswith(q) and raw.endswith(q) and len(raw) >= 2 * len(q):
+                            route_path = raw[len(q) : -len(q)]
+                            break
+                    else:
+                        route_path = raw
+                    route_handlers[route_path] = func_name
+                elif first_arg.type == "integer":
+                    route_handlers[first_arg.text.decode("utf-8")] = func_name
+                # other constant types are vanishingly rare for routes
 
         if len(route_handlers) < 2:
             # Single or no route handlers — no decomposition needed
@@ -666,48 +721,64 @@ def _extract_pipeline_constraint(reference_body: str) -> str:
     Returns empty string if fewer than 3 pipeline steps found (simple
     methods don't need this constraint).
     """
-    import ast as _ast
+    # Wrap in class to handle indented methods; fall back to raw parse.
+    wrapped = f"class _Wrapper:\n{reference_body}"
+    tree = _ts_parse_python(wrapped)
+    if tree is None:
+        tree = _ts_parse_python(reference_body)
+    if tree is None:
+        return ""
 
-    try:
-        # Wrap in class to handle indented methods
-        wrapped = f"class _Wrapper:\n{reference_body}"
-        tree = _ast.parse(wrapped)
-    except SyntaxError:
-        try:
-            tree = _ast.parse(reference_body)
-        except SyntaxError:
-            return ""
-
-    # Extract self._xxx.method(...) and self._xxx(...) calls sorted by line number
+    # Extract self._xxx.method(...) and self._xxx(...) calls sorted by line number.
     raw_calls: list[tuple[int, str]] = []  # (lineno, call_str)
 
-    for node in _ast.walk(tree):
-        if not isinstance(node, _ast.Call):
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.children)
+        if node.type != "call":
             continue
 
+        # Find callee (first named non-argument_list child).
+        func = None
+        for c in node.children:
+            if c.is_named and c.type != "argument_list":
+                func = c
+                break
+        if func is None:
+            continue
+
+        lineno = node.start_point[0] + 1
         call_str = ""
-        func = node.func
-        lineno = getattr(node, "lineno", 0)
 
-        # self._xxx.method(...)
-        if (
-            isinstance(func, _ast.Attribute)
-            and isinstance(func.value, _ast.Attribute)
-            and isinstance(func.value.value, _ast.Name)
-            and func.value.value.id == "self"
-            and func.value.attr.startswith("_")
-        ):
-            call_str = f"self.{func.value.attr}.{func.attr}()"
+        # self._xxx.method(...) — outer attribute, value is also attribute on self
+        if func.type == "attribute":
+            idents = [c for c in func.children if c.type == "identifier"]
+            inner_attr = next(
+                (c for c in func.children if c.type == "attribute"),
+                None,
+            )
+            if inner_attr is not None and idents:
+                inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+                if (
+                    len(inner_idents) == 2
+                    and inner_idents[0].text.decode("utf-8") == "self"
+                    and inner_idents[1].text.decode("utf-8").startswith("_")
+                ):
+                    method_name = idents[-1].text.decode("utf-8")
+                    inner_attr_name = inner_idents[1].text.decode("utf-8")
+                    call_str = f"self.{inner_attr_name}.{method_name}()"
 
-        # self._xxx(...)
-        elif (
-            isinstance(func, _ast.Attribute)
-            and isinstance(func.value, _ast.Name)
-            and func.value.id == "self"
-            and func.attr.startswith("_")
-            and not func.attr.startswith("__")
-        ):
-            call_str = f"self.{func.attr}()"
+            # self._xxx(...) — attribute directly off self
+            if not call_str and len(idents) == 2:
+                head = idents[0].text.decode("utf-8")
+                tail = idents[1].text.decode("utf-8")
+                if (
+                    head == "self"
+                    and tail.startswith("_")
+                    and not tail.startswith("__")
+                ):
+                    call_str = f"self.{tail}()"
 
         if call_str:
             raw_calls.append((lineno, call_str))
@@ -753,22 +824,31 @@ def _extract_reference_method(
     ones are mentioned in the purpose/decisions text. Pick the longest
     matching method as the reference.
     """
-    import ast as _ast
     import re as _re
 
-    try:
-        tree = _ast.parse(disk_source)
-    except SyntaxError:
+    tree = _ts_parse_python(disk_source)
+    if tree is None:
         return ""
 
-    # Collect all methods from the source file (including private)
+    # Collect all methods from the source file (including private).
     lines = disk_source.split("\n")
     source_methods: dict[str, tuple[int, int]] = {}  # name -> (start, end)
-    for node in _ast.walk(tree):
-        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            start = node.lineno - 1
-            end = node.end_lineno if hasattr(node, "end_lineno") else start + 1
-            source_methods[node.name] = (start, end)
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.children)
+        if node.type != "function_definition":
+            continue
+        name = None
+        for c in node.children:
+            if c.type == "identifier":
+                name = c.text.decode("utf-8")
+                break
+        if name is None:
+            continue
+        start = node.start_point[0]
+        end = node.end_point[0] + 1
+        source_methods[name] = (start, end)
 
     if not source_methods:
         return ""
@@ -850,42 +930,92 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
     Returns lines like:
         engine.py: async def answer_stream(self, query: Query, ...) -> AsyncIterator[str]
     """
-    import ast as _ast
-    import textwrap as _tw
-
-    sigs = []
-    # Try parsing the artifact content
-    for attempt in [
-        content,
-        _tw.dedent(content),
-        "class _:\n    " + content.replace("\n", "\n    "),
-    ]:
-        try:
-            tree = _ast.parse(attempt)
-            break
-        except SyntaxError:
-            continue
-    else:
+    sigs: list[str] = []
+    tree = _ts_parse_python(content)
+    if tree is None:
         return sigs
 
     short = filename.split("/")[-1]
-    for node in _ast.walk(tree):
-        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            if node.name.startswith("_") and node.name != "__init__":
+
+    stack = [tree.root_node]
+    seen_ids: set[int] = set()
+    while stack:
+        node = stack.pop()
+        stack.extend(node.children)
+        if node.type == "decorated_definition":
+            # Unwrapping happens below when we encounter the inner function_definition
+            continue
+        if node.type != "function_definition":
+            continue
+        if node.id in seen_ids:
+            continue
+        seen_ids.add(node.id)
+
+        # Function name
+        name = None
+        for c in node.children:
+            if c.type == "identifier":
+                name = c.text.decode("utf-8")
+                break
+        if name is None:
+            continue
+        if name.startswith("_") and name != "__init__":
+            continue
+
+        is_async = any(c.type == "async" for c in node.children)
+        prefix = "async def" if is_async else "def"
+
+        # Parameters (positional only, matching ast's node.args.args)
+        args: list[str] = []
+        params_node = next((c for c in node.children if c.type == "parameters"), None)
+        if params_node is not None:
+            for p in params_node.children:
+                if p.type in (
+                    "keyword_separator",
+                    "list_splat_pattern",
+                    "dictionary_splat_pattern",
+                ):
+                    break
+                if p.type == "identifier":
+                    args.append(p.text.decode("utf-8"))
+                elif p.type in (
+                    "typed_parameter",
+                    "default_parameter",
+                    "typed_default_parameter",
+                ):
+                    ident = next(
+                        (c for c in p.children if c.type == "identifier"), None
+                    )
+                    if ident is None:
+                        continue
+                    pname = ident.text.decode("utf-8")
+                    type_node = next(
+                        (c for c in p.children if c.type == "type"), None
+                    )
+                    if type_node is not None:
+                        ann = _ts_unparse_annotation(type_node)
+                        if ann:
+                            args.append(f"{pname}: {ann}")
+                            continue
+                    args.append(pname)
+
+        ret = ""
+        ret_node = None
+        saw_params = False
+        for c in node.children:
+            if c.type == "parameters":
+                saw_params = True
                 continue
-            prefix = "async def" if isinstance(node, _ast.AsyncFunctionDef) else "def"
-            # Reconstruct signature from AST
-            args = []
-            for arg in node.args.args:
-                ann = ""
-                if arg.annotation:
-                    ann = f": {_ast.unparse(arg.annotation)}"
-                args.append(f"{arg.arg}{ann}")
-            ret = ""
-            if node.returns:
-                ret = f" -> {_ast.unparse(node.returns)}"
-            sig = f"{prefix} {node.name}({', '.join(args)}){ret}"
-            sigs.append(f"{short}: {sig}")
+            if saw_params and c.type == "type":
+                ret_node = c
+                break
+        if ret_node is not None:
+            ret_text = _ts_unparse_annotation(ret_node)
+            if ret_text:
+                ret = f" -> {ret_text}"
+
+        sig = f"{prefix} {name}({', '.join(args)}){ret}"
+        sigs.append(f"{short}: {sig}")
 
     return sigs
 
@@ -973,7 +1103,6 @@ def _extract_class_fields(
     Returns list of field names like ['question', 'source', 'top_k'].
     Works by finding the class in source and extracting annotated assignments.
     """
-    import ast as _ast
     from pathlib import Path as _Path
 
     # Find source containing this class
@@ -1004,22 +1133,43 @@ def _extract_class_fields(
     if not src:
         return []
 
-    try:
-        tree = _ast.parse(src)
-    except SyntaxError:
+    tree = _ts_parse_python(src)
+    if tree is None:
         return []
 
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.ClassDef) and node.name == class_name:
-            fields = []
-            for child in _ast.iter_child_nodes(node):
-                if isinstance(child, _ast.AnnAssign) and isinstance(child.target, _ast.Name):
-                    name = child.target.id
-                    if not name.startswith("_"):
-                        fields.append(name)
-            return fields
+    cls = _ts_find_class_anywhere(tree.root_node, class_name)
+    if cls is None:
+        return []
 
-    return []
+    fields: list[str] = []
+    body = next((c for c in cls.children if c.type == "block"), None)
+    if body is None:
+        return []
+    for stmt in body.children:
+        if stmt.type != "expression_statement":
+            continue
+        inner = next((c for c in stmt.children if c.is_named), None)
+        if inner is None or inner.type != "assignment":
+            continue
+        # Annotated assignment: target is identifier, has `:` + type
+        target = None
+        saw_colon = False
+        has_type = False
+        for c in inner.children:
+            if not c.is_named and c.type == ":":
+                saw_colon = True
+                continue
+            if target is None and c.is_named:
+                target = c
+                continue
+            if saw_colon and c.type == "type":
+                has_type = True
+        if not has_type or target is None or target.type != "identifier":
+            continue
+        name = target.text.decode("utf-8")
+        if not name.startswith("_"):
+            fields.append(name)
+    return fields
 
 
 def _build_type_attr_map(
@@ -1031,44 +1181,25 @@ def _build_type_attr_map(
     and returns {ClassName: _xxx}. Used by type-aware repair to resolve
     semantic renames like _governance_decider -> _governor (via GovernanceDecider).
     """
-    import ast as _ast
-
     if not source:
         return {}
 
-    try:
-        tree = _ast.parse(source)
-    except SyntaxError:
+    tree = _ts_parse_python(source)
+    if tree is None:
         return {}
 
     result: dict[str, str] = {}  # type_name -> attr_name
-    for cls_node in _ast.iter_child_nodes(tree):
-        if not isinstance(cls_node, _ast.ClassDef):
+    for cls_node in tree.root_node.children:
+        if cls_node.type == "decorated_definition":
+            cls_node = _ts_unwrap_decorated(cls_node)
+        if cls_node.type != "class_definition":
             continue
-        for method in _ast.iter_child_nodes(cls_node):
-            if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+        for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+            if value is None or value.type != "call":
                 continue
-            if method.name not in ("__init__", "_init_components", "setup", "_setup"):
-                continue
-            for node in _ast.walk(method):
-                if not isinstance(node, _ast.Assign):
-                    continue
-                for target in node.targets:
-                    if (
-                        isinstance(target, _ast.Attribute)
-                        and isinstance(target.value, _ast.Name)
-                        and target.value.id == "self"
-                        and target.attr.startswith("_")
-                        and not target.attr.startswith("__")
-                    ):
-                        rhs = ""
-                        if isinstance(node.value, _ast.Call):
-                            if isinstance(node.value.func, _ast.Name):
-                                rhs = node.value.func.id
-                            elif isinstance(node.value.func, _ast.Attribute):
-                                rhs = node.value.func.attr
-                        if rhs and rhs[0].isupper():  # Only CamelCase type names
-                            result[rhs] = target.attr
+            rhs = _ts_extract_call_class_name(value)
+            if rhs and rhs[0].isupper():  # Only CamelCase type names
+                result[rhs] = attr_name
 
     return result
 
@@ -1080,37 +1211,21 @@ def _extract_init_attr_names(source: str) -> set[str]:
     this captures every self._xxx assignment regardless of RHS pattern.
     Used to prevent false repairs on real attrs like _chat_factory.
     """
-    import ast as _ast
-
     if not source:
         return set()
 
-    try:
-        tree = _ast.parse(source)
-    except SyntaxError:
+    tree = _ts_parse_python(source)
+    if tree is None:
         return set()
 
     attrs: set[str] = set()
-    for cls_node in _ast.iter_child_nodes(tree):
-        if not isinstance(cls_node, _ast.ClassDef):
+    for cls_node in tree.root_node.children:
+        if cls_node.type == "decorated_definition":
+            cls_node = _ts_unwrap_decorated(cls_node)
+        if cls_node.type != "class_definition":
             continue
-        for method in _ast.iter_child_nodes(cls_node):
-            if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                continue
-            if method.name not in ("__init__", "_init_components", "setup", "_setup"):
-                continue
-            for node in _ast.walk(method):
-                if not isinstance(node, _ast.Assign):
-                    continue
-                for target in node.targets:
-                    if (
-                        isinstance(target, _ast.Attribute)
-                        and isinstance(target.value, _ast.Name)
-                        and target.value.id == "self"
-                        and target.attr.startswith("_")
-                        and not target.attr.startswith("__")
-                    ):
-                        attrs.add(target.attr)
+        for attr_name, _value in _ts_iter_init_self_assignments(cls_node):
+            attrs.add(attr_name)
 
     return attrs
 
