@@ -32,6 +32,28 @@ from .inference import (
 
 logger = logging.getLogger(__name__)
 
+# Parser engine for ``augment_from_source_dir``. ``"ast"`` is the legacy
+# Python-ast walker; ``"tree_sitter"`` routes through the byte-parity
+# implementation in ``_ts_inference``. Flip via ``set_engine()``.
+_ENGINE: str = "ast"
+
+
+def set_engine(engine: str) -> None:
+    """Select the parser backend for ``augment_from_source_dir``.
+
+    Valid values: ``"ast"`` (default), ``"tree_sitter"``. Invalid values
+    raise ``ValueError``.
+    """
+    global _ENGINE
+    if engine not in ("ast", "tree_sitter"):
+        raise ValueError(f"Unknown engine: {engine!r}")
+    _ENGINE = engine
+
+
+def get_engine() -> str:
+    """Return the currently-selected parser backend."""
+    return _ENGINE
+
 
 # ---------------------------------------------------------------------------
 # Indexed dataclasses
@@ -263,6 +285,11 @@ class StructuralIndexLookup:
 
         Returns the number of new classes added.
         """
+        if _ENGINE == "tree_sitter":
+            from ._ts_inference import augment_from_source_dir as _ts_augment
+
+            return _ts_augment(self, source_dir)
+
         root = Path(source_dir)
         if not root.is_dir():
             return 0
