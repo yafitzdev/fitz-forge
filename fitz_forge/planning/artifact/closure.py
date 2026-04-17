@@ -1,7 +1,7 @@
 # fitz_forge/planning/artifact/closure.py
 """Plan-level closure family of invariants on the artifact set.
 
-Five invariants, one architecture:
+Six invariants, one architecture:
 
     1. EXISTENCE  — every cross-file symbol an artifact references must be
                     satisfied by the existing codebase or by a sibling
@@ -14,9 +14,15 @@ Five invariants, one architecture:
     4. IMPORTS    — `from pkg.mod import X` → X must resolve.
     5. FIELDS     — `obj.field` on a typed local → the field must exist on
                     that type.
+    6. STREAMING-SIBLING — when an artifact method claims to stream (has
+                    `yield` or returns Iterator/Generator) and calls a
+                    blocking sibling on a typed local, but a streaming
+                    sibling (`stream_<m>` / `<m>_stream` / iterator-typed
+                    variant) is available on the same class, that
+                    streaming variant must be the one called.
 
 Per-artifact validation in `validate.py` cannot enforce any of these
-because they're properties of the *set*. `check_closure` runs all five.
+because they're properties of the *set*. `check_closure` runs all six.
 
 Reuses `grounding.inference` for type tracking primitives (return type
 inference, self._attr extraction, field parsing), keeping codebase
@@ -121,7 +127,8 @@ class ClosureViolation:
     ref: SymbolRef
     line: int
     context: str = ""
-    kind: str = "missing"  # "missing" | "usage" | "kwargs" | "import" | "field"
+    kind: str = "missing"
+    # "missing" | "usage" | "kwargs" | "import" | "field" | "streaming-sibling"
     detail: str = ""
 
     def pretty(self) -> str:
@@ -393,6 +400,29 @@ def load_target_self_attrs(
         if name_node is not None and name_node.text.decode("utf-8") == target:
             return extract_init_self_attrs(cls, known_classes=known)
     return {}
+
+
+def extract_self_attrs_from_content(
+    content: str,
+    lookup: StructuralIndexLookup,
+) -> dict[str, str]:
+    """Extract self-attr types from every class defined in the artifact itself.
+
+    Parses `content` as Python, walks every class, reads its `__init__`
+    bodies to find `self._x = ...` bindings. Used for in-memory artifacts
+    where the target class is defined by the artifact (no disk source to
+    load from). Returns a merged dict across all classes in the file.
+    """
+    if not content:
+        return {}
+    tree = parse_python(content)
+    if tree is None:
+        return {}
+    known = set(lookup._all_class_names) if hasattr(lookup, "_all_class_names") else None
+    out: dict[str, str] = {}
+    for cls in iter_all_classes(tree.root_node):
+        out.update(extract_init_self_attrs(cls, known_classes=known))
+    return out
 
 
 def _target_class_for_file(filename: str, lookup: StructuralIndexLookup) -> str | None:
@@ -1411,6 +1441,389 @@ def _check_kwargs(
 
 
 # ---------------------------------------------------------------------------
+# Streaming-sibling invariant
+# ---------------------------------------------------------------------------
+#
+# When a method claims to stream (yield in body OR Iterator/Generator return
+# type) and calls a blocking sibling on a typed local whose class also has a
+# streaming variant of that method, the streaming variant is what should have
+# been called. This is a SET-level property: knowing whether a streaming
+# sibling exists requires looking across the whole artifact set + disk
+# source. Per-artifact validation can't see it.
+#
+# Detection is entirely tree-sitter + name-pattern based. No hardcoded class
+# names, no codebase-specific strings. Same node shapes appear in TypeScript
+# / JavaScript tree-sitter grammars, so the pattern transfers — though we
+# only run it for files routed through the Python parser today.
+
+
+def _is_iterator_return_type(return_type: str | None) -> bool:
+    """True if the return type names an iterator-style protocol.
+
+    Includes both sync (Iterator/Generator/Iterable) and async
+    (AsyncIterator/AsyncGenerator/AsyncIterable) forms — anything you'd
+    iterate over instead of awaiting once.
+    """
+    if not return_type:
+        return False
+    return any(
+        x in return_type
+        for x in (
+            "Iterator",
+            "Generator",
+            "Iterable",
+            "AsyncIterator",
+            "AsyncGenerator",
+            "AsyncIterable",
+        )
+    )
+
+
+def _method_claims_to_stream(func_def: "Node") -> bool:
+    """True if the method has yield/yield from OR an iterator-typed return.
+
+    A "claim to stream" is the trigger for the streaming-sibling check —
+    the function is advertising itself (by yield or signature) as
+    producing an iterable rather than a single value, so its calls to
+    sibling APIs on typed locals must prefer the streaming variant when
+    one exists.
+    """
+    if _has_yield(func_def):
+        return True
+    ret_node = _returns_annotation_node(func_def)
+    if ret_node is not None:
+        ret_text = unparse_annotation(ret_node)
+        if _is_iterator_return_type(ret_text):
+            return True
+    return False
+
+
+def _streaming_sibling_for(
+    method_name: str,
+    class_methods: dict[str, Signature | None],
+) -> str | None:
+    """Find a streaming sibling of `method_name` in `class_methods`.
+
+    Three patterns, language-agnostic:
+        1. `stream_<method>` exists.
+        2. `<method>_stream` exists.
+        3. Some other method exists whose name shares the suffix/prefix
+           with `method_name` AND whose return type is iterator-shaped
+           (e.g. `<method>_iter`, `iter_<method>`).
+
+    Returns the sibling's name, or None if none qualifies.
+    """
+    if method_name.startswith("stream_") or method_name.endswith("_stream"):
+        return None  # The method already IS the streaming variant.
+
+    candidates: list[str] = [f"stream_{method_name}", f"{method_name}_stream"]
+    for cand in candidates:
+        if cand in class_methods and cand != method_name:
+            return cand
+
+    # Pattern 3: any method that mentions the same root name and whose
+    # return type is iterator-shaped. Conservative: require the candidate
+    # name to differ AND to contain the original method name as a token,
+    # so we don't pull in unrelated streaming methods on the same class.
+    for cand_name, sig in class_methods.items():
+        if cand_name == method_name:
+            continue
+        if method_name not in cand_name.split("_"):
+            continue
+        if sig is None or not _is_iterator_return_type(sig.return_type):
+            continue
+        return cand_name
+    return None
+
+
+def _build_class_method_set(
+    class_name: str,
+    sibling_provides: dict[SymbolRef, Signature | None],
+    lookup: StructuralIndexLookup,
+) -> dict[str, Signature | None]:
+    """Union of methods on `class_name` from sibling artifacts and disk source.
+
+    Sibling artifacts contribute their `extract_provides` Signatures
+    (which include the real return type). Disk-source methods come from
+    the structural index; we wrap their bare return-type strings in
+    minimal Signatures so the sibling-finder can read them.
+    """
+    out: dict[str, Signature | None] = {}
+    # Sibling artifacts
+    for ref, sig in sibling_provides.items():
+        if ref.kind != "method":
+            continue
+        if ref.owner != class_name or ref.name is None:
+            continue
+        out[ref.name] = sig
+    # Disk source via structural index
+    for cls in lookup.classes.get(class_name, []):
+        for mname, minfo in cls.methods.items():
+            if mname in out:
+                continue
+            out[mname] = Signature(
+                params=[],
+                return_type=minfo.return_type,
+                is_async=False,
+                is_generator=_looks_like_generator(minfo.return_type)
+                or _is_async_iter_type(minfo.return_type),
+                has_var_keywords=True,
+            )
+    return out
+
+
+class _StreamingSiblingScanner:
+    """Walk one artifact and emit streaming-sibling violations.
+
+    Tracks the same type info the reference collector does (function
+    param annotations, `var = ClassName(...)`, locator return types,
+    `self._attr` types from disk). For every method that claims to
+    stream, scans calls of shape `obj.foo(...)` on typed locals (or
+    `self._attr.foo(...)`) and checks whether `foo` has a streaming
+    sibling on the resolved class.
+    """
+
+    def __init__(
+        self,
+        filename: str,
+        lookup: StructuralIndexLookup,
+        self_attrs: dict[str, str],
+        sibling_provides: dict[SymbolRef, Signature | None],
+    ) -> None:
+        self.filename = filename
+        self.lookup = lookup
+        self.self_attrs = self_attrs
+        self.sibling_provides = sibling_provides
+        self.violations: list[ClosureViolation] = []
+        # Cache class method sets so we don't rebuild them per call site.
+        self._class_methods_cache: dict[str, dict[str, Signature | None]] = {}
+
+    def scan(self, root: "Node") -> list[ClosureViolation]:
+        for func in self._iter_top_methods(root):
+            if not _method_claims_to_stream(func):
+                continue
+            offender_name = _function_name(func) or "<anonymous>"
+            self._scan_method(func, offender_name)
+        return self.violations
+
+    def _iter_top_methods(self, root: "Node") -> "Iterator[Node]":
+        """Yield every function_definition in the tree (including class methods)
+        but NOT functions nested inside other functions.
+
+        The streaming-sibling check applies to the surface API of the
+        artifact, not to inner closures. _iter_body_skipping_nested handles
+        the inner-closure exclusion when we walk each method's body.
+        """
+        stack: list[Node] = [root]
+        while stack:
+            n = stack.pop()
+            t = n.type
+            if t == "function_definition":
+                yield n
+                # Don't descend — nested defs are not part of the surface.
+                continue
+            if t == "decorated_definition":
+                inner = _unwrap_decorated(n)
+                if inner.type == "function_definition":
+                    yield inner
+                    continue
+            stack.extend(n.children)
+
+    def _scan_method(self, func_def: "Node", offender_name: str) -> None:
+        # Build the type environment for this method scope
+        type_env: dict[str, str] = {}
+        params_node = next((c for c in func_def.children if c.type == "parameters"), None)
+        if params_node is not None:
+            for p in params_node.children:
+                if p.type in ("typed_parameter", "typed_default_parameter"):
+                    ident = next((x for x in p.children if x.type == "identifier"), None)
+                    ann = next((x for x in p.children if x.type == "type"), None)
+                    if ident is not None and ann is not None:
+                        t = extract_type_name(ann)
+                        if t and t not in _SKIP_NAMES:
+                            type_env[ident.text.decode("utf-8")] = t
+
+        # First sweep: harvest local bindings from `var = ClassName(...)` /
+        # `var = locator()`.
+        for node in self._iter_method_body(func_def):
+            if node.type == "assignment":
+                target = next((c for c in node.children if c.is_named), None)
+                if target is None or target.type != "identifier":
+                    continue
+                seen_eq = False
+                value: Node | None = None
+                for c in node.children:
+                    if not c.is_named and c.type == "=":
+                        seen_eq = True
+                        continue
+                    if seen_eq and c.is_named:
+                        value = c
+                        break
+                if value is None or value.type != "call":
+                    continue
+                callee = _callable_of(value)
+                if callee is None:
+                    continue
+                if callee.type == "identifier":
+                    fid = callee.text.decode("utf-8")
+                    if fid[:1].isupper() and fid not in _SKIP_NAMES:
+                        type_env[target.text.decode("utf-8")] = fid
+                        continue
+                    rt = _locator_return_type(fid, self.lookup)
+                    if rt:
+                        type_env[target.text.decode("utf-8")] = rt
+                elif callee.type == "attribute":
+                    attr_name = _rightmost_attribute_name(callee)
+                    if attr_name and attr_name[:1].isupper() and attr_name not in _SKIP_NAMES:
+                        type_env[target.text.decode("utf-8")] = attr_name
+
+        # Second sweep: inspect call sites
+        for node in self._iter_method_body(func_def):
+            if node.type != "call":
+                continue
+            self._check_call(node, offender_name, type_env)
+
+    def _iter_method_body(self, func_def: "Node") -> "Iterator[Node]":
+        """Yield every descendant of the function body EXCEPT those inside
+        nested function_definition / decorated_definition / lambda nodes.
+
+        The invariant applies only to the method's own surface logic. A
+        call inside a nested helper is that helper's responsibility; the
+        outer method's streaming contract has no claim on it.
+        """
+        body = next((c for c in func_def.children if c.type == "block"), None)
+        if body is None:
+            return
+        stack: list[Node] = list(body.children)
+        while stack:
+            n = stack.pop()
+            # Skip nested functions / lambdas — they have their own scope.
+            if n.type in ("function_definition", "lambda"):
+                continue
+            if n.type == "decorated_definition":
+                inner = _unwrap_decorated(n)
+                if inner.type == "function_definition":
+                    continue
+            yield n
+            stack.extend(n.children)
+
+    def _check_call(
+        self,
+        call: "Node",
+        offender_name: str,
+        type_env: dict[str, str],
+    ) -> None:
+        callee = _callable_of(call)
+        if callee is None or callee.type != "attribute":
+            return
+
+        owner_class: str | None = None
+        method_name: str | None = None
+        context_str: str | None = None
+
+        idents = [c for c in callee.children if c.type == "identifier"]
+        inner_attrs = [c for c in callee.children if c.type == "attribute"]
+        # obj.method()  — plain 2-identifier attribute node
+        if len(idents) == 2 and not inner_attrs:
+            obj_name = idents[0].text.decode("utf-8")
+            method_name = idents[1].text.decode("utf-8")
+            if obj_name == "self":
+                return  # not in scope — no typed local
+            owner_class = type_env.get(obj_name)
+            if not owner_class:
+                logger.debug(
+                    "streaming-sibling: %s call on untyped local %s — skipping",
+                    self.filename,
+                    obj_name,
+                )
+                return
+            context_str = f"{obj_name}.{method_name}()"
+        elif len(idents) == 1 and len(inner_attrs) == 1:
+            # self._attr.method()  — inner attribute `self._attr`, outer
+            # identifier is the method name.
+            inner_attr = inner_attrs[0]
+            method_ident = idents[0]
+            inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+            if len(inner_idents) != 2 or inner_idents[0].text.decode("utf-8") != "self":
+                return
+            attr_name = inner_idents[1].text.decode("utf-8")
+            owner_class = self.self_attrs.get(attr_name)
+            method_name = method_ident.text.decode("utf-8")
+            if not owner_class:
+                logger.debug(
+                    "streaming-sibling: %s call on self.%s with unknown type",
+                    self.filename,
+                    attr_name,
+                )
+                return
+            context_str = f"self.{attr_name}.{method_name}()"
+        else:
+            return
+
+        if owner_class in _SKIP_NAMES or method_name is None:
+            return
+
+        # Skip when the call is already to a streaming variant.
+        if method_name.startswith("stream_") or method_name.endswith("_stream"):
+            return
+
+        class_methods = self._class_methods_cache.get(owner_class)
+        if class_methods is None:
+            class_methods = _build_class_method_set(
+                owner_class, self.sibling_provides, self.lookup
+            )
+            self._class_methods_cache[owner_class] = class_methods
+
+        if not class_methods:
+            return  # owner class has no methods we know about — bail quietly
+
+        sibling = _streaming_sibling_for(method_name, class_methods)
+        if sibling is None:
+            return
+
+        line = call.start_point[0] + 1
+        detail = (
+            f"Your {offender_name} method yields, but at line {line} it calls "
+            f"{owner_class}.{method_name} (blocking). The streaming variant "
+            f"{owner_class}.{sibling} exists on {owner_class} — call it "
+            f"instead. Streaming methods must delegate to streaming siblings."
+        )
+        self.violations.append(
+            ClosureViolation(
+                artifact=self.filename,
+                ref=SymbolRef(owner=owner_class, name=method_name, kind="method"),
+                line=line,
+                context=context_str or "",
+                kind="streaming-sibling",
+                detail=detail,
+            )
+        )
+
+
+def _check_streaming_siblings(
+    artifact: dict,
+    lookup: StructuralIndexLookup,
+    self_attrs: dict[str, str],
+    sibling_provides: dict[SymbolRef, Signature | None],
+) -> list[ClosureViolation]:
+    """Run the streaming-sibling invariant on a single artifact."""
+    content = artifact.get("content", "")
+    filename = artifact.get("filename", "")
+    if not content or not filename:
+        return []
+    tree = parse_python(content)
+    if tree is None:
+        return []
+    scanner = _StreamingSiblingScanner(
+        filename=filename,
+        lookup=lookup,
+        self_attrs=self_attrs,
+        sibling_provides=sibling_provides,
+    )
+    return scanner.scan(tree.root_node)
+
+
+# ---------------------------------------------------------------------------
 # Plan-level closure check (entry point)
 # ---------------------------------------------------------------------------
 
@@ -1443,7 +1856,17 @@ def check_closure(
         filename = art.get("filename", "")
         content = art.get("content", "")
 
-        self_attrs = load_target_self_attrs(filename, source_dir, lookup)
+        disk_self_attrs = load_target_self_attrs(filename, source_dir, lookup)
+        # Also absorb self-attr bindings from the artifact's own content —
+        # matters when the target class is defined by the artifact itself
+        # (so the disk file doesn't exist yet or is stale). Artifact
+        # bindings represent the plan's target state, so they override
+        # any stale disk values for the same attribute.
+        artifact_self_attrs = extract_self_attrs_from_content(content, lookup)
+        self_attrs: dict[str, str] = {}
+        self_attrs.update(disk_self_attrs)
+        self_attrs.update(artifact_self_attrs)
+
         refs = extract_references(
             content,
             filename,
@@ -1465,6 +1888,13 @@ def check_closure(
             # 3. Kwargs (additive)
             violations.extend(_check_kwargs(reference, filename, lookup, provides))
 
+        # 6. Streaming-sibling — set-level invariant: a method that claims
+        # to stream must call a streaming sibling on the target class if
+        # one exists. See the module docstring for the full statement.
+        violations.extend(
+            _check_streaming_siblings(art, lookup, self_attrs, provides)
+        )
+
     # Fix E: collapse cascading violations on fabricated owners.
     # When a parameter type annotation is a fabricated class (not in
     # codebase, not in siblings), every `param.field` access fires an
@@ -1481,7 +1911,14 @@ def check_closure(
     # violations on the same artifact. Dedupe by (artifact, kind, ref).
     violations = _dedupe_exact(violations)
 
-    order = {"missing": 0, "import": 1, "field": 2, "usage": 3, "kwargs": 4}
+    order = {
+        "missing": 0,
+        "import": 1,
+        "field": 2,
+        "usage": 3,
+        "kwargs": 4,
+        "streaming-sibling": 5,
+    }
     violations.sort(key=lambda v: (order.get(v.kind, 99), v.artifact, v.line))
     return violations
 

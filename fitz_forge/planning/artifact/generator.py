@@ -440,7 +440,7 @@ async def generate_artifact_set(
                     and target not in expanded_files
                 ):
                     to_expand.setdefault(target, []).append(v)
-            elif v.kind in ("usage", "kwargs", "field", "import"):
+            elif v.kind in ("usage", "kwargs", "field", "import", "streaming-sibling"):
                 to_regenerate.setdefault(v.artifact, []).append(v)
 
         if not to_expand and not to_regenerate:
