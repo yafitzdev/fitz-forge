@@ -3,6 +3,7 @@
 
 import logging
 
+import httpx
 from tenacity import (
     before_sleep_log,
     retry,
@@ -138,5 +139,51 @@ llama_cpp_retry = retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=2, max=30),
     retry=retry_if_exception(is_llama_cpp_retryable),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+
+
+def is_openai_api_retryable(exception: BaseException) -> bool:
+    """Unified retryable predicate for all OpenAI-compatible providers.
+
+    Covers:
+        - ConnectionError
+        - httpx transport errors (ConnectError, ReadTimeout, ConnectTimeout)
+        - openai SDK: APIConnectionError, APITimeoutError
+        - openai SDK: APIStatusError with status in {408, 429, 500, 502, 503, 504}
+        - RuntimeError with message containing "llama-server" / "crashed" / "exited"
+          (for llama.cpp subprocess crash-restart failures)
+    """
+    if isinstance(exception, ConnectionError):
+        return True
+
+    if isinstance(exception, (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout)):
+        return True
+
+    try:
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
+
+        if isinstance(exception, (APIConnectionError, APITimeoutError)):
+            return True
+        if isinstance(exception, APIStatusError):
+            return exception.status_code in {408, 429, 500, 502, 503, 504}
+    except ImportError:
+        pass
+
+    if isinstance(exception, RuntimeError):
+        msg = str(exception).lower()
+        if "llama-server" in msg or "crashed" in msg or "exited" in msg:
+            return True
+
+    return False
+
+
+# Unified retry decorator for all OpenAI-compatible providers.
+# 5 attempts (matching old llama_cpp_retry — most permissive) with
+# exponential backoff sized to tolerate model-swap latency.
+openai_api_retry = retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception(is_openai_api_retryable),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
