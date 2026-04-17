@@ -323,15 +323,36 @@ class PipelineStage(ABC):
 
     def __init__(self) -> None:
         self._substep_cb: Callable[[str], Coroutine] | None = None
+        # Optional rich-event emitter — orchestrator wires this to the
+        # worker's event_emitter so stages can surface typed events
+        # (e.g. DecisionResolved) distinct from the substep progress
+        # string channel. Signature: (event: Any) -> Coroutine.
+        self._event_cb: Callable[[Any], Coroutine] | None = None
 
     def set_substep_callback(self, cb: Callable[[str], Coroutine] | None) -> None:
         """Set callback for reporting sub-step progress (e.g. 'architecture:reasoning')."""
         self._substep_cb = cb
 
+    def set_event_emitter(self, cb: Callable[[Any], Coroutine] | None) -> None:
+        """Set optional rich-event emitter for typed events.
+
+        Separate from set_substep_callback so stages that only have string
+        progress events aren't forced to know the event type machinery.
+        """
+        self._event_cb = cb
+
     async def _report_substep(self, substep: str) -> None:
         """Report a sub-step if callback is set."""
         if self._substep_cb:
             await self._substep_cb(f"{self.name}:{substep}")
+
+    async def _emit_event(self, event: Any) -> None:
+        """Emit a typed event if an emitter is configured."""
+        if self._event_cb is not None:
+            try:
+                await self._event_cb(event)
+            except Exception as e:  # noqa: BLE001 — consumer failure must not kill the stage
+                logger.warning(f"Stage '{self.name}': event emitter raised: {e}")
 
     @property
     def generation_strategy(self) -> str:

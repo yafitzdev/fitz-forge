@@ -401,6 +401,59 @@ class TestFormatEvent:
         )
         assert "?" in line
 
+    def test_decision_resolved_renders_indented_bullet(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import DecisionResolved
+
+        line = _format_event(
+            DecisionResolved(
+                job_id="j",
+                decision_id="d5",
+                summary="Add StreamingResponse route",
+                target_file="fitz_sage/api/routes/collections.py",
+            )
+        )
+        # Indentation + bullet + id + summary + arrow + target
+        assert "    " in line
+        assert "·" in line
+        assert "d5" in line
+        assert "Add StreamingResponse route" in line
+        assert "fitz_sage/api/routes/collections.py" in line
+        assert "[dim]" in line
+
+    def test_decision_resolved_without_target_file(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import DecisionResolved
+
+        line = _format_event(
+            DecisionResolved(
+                job_id="j",
+                decision_id="d1",
+                summary="Use AsyncGenerator for streaming",
+                target_file=None,
+            )
+        )
+        assert "d1" in line
+        assert "Use AsyncGenerator" in line
+        assert "→" not in line  # no target => no arrow
+
+    def test_hallucination_drop_renders_indented_bullet(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import DecisionHallucinationDropped
+
+        line = _format_event(
+            DecisionHallucinationDropped(
+                job_id="j",
+                decision_id="d7",
+                evidence_snippet="fitz_sage/evaluation/schema.py: GOVERNANCE_LOGS_TABLE",
+            )
+        )
+        assert "    " in line
+        assert "·" in line
+        assert "d7" in line
+        assert "hallucinated" in line
+        assert "[dim]" in line
+
     def test_completed_with_fractional_quality_uses_one_decimal(self):
         from fitz_forge.cli import _format_event
         from fitz_forge.models.events import JobCompleted

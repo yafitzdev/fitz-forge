@@ -352,7 +352,13 @@ class BackgroundWorker:
                         "skipping agent context gathering"
                     )
 
-            result = await self._pipeline.execute(
+            # Rich-event emitter: DecomposedPipeline uses this for typed
+            # events like DecisionResolved. PlanningPipeline (still used by
+            # tests / old configs) accepts the kwarg via **kwargs — we only
+            # pass it when supported to avoid breaking the classic pipeline.
+            import inspect
+
+            pipeline_exec_kwargs: dict[str, Any] = dict(
                 client=self._ollama_client,
                 job_id=job.job_id,
                 job_description=job.description,
@@ -361,6 +367,11 @@ class BackgroundWorker:
                 agent=agent,
                 pre_gathered_context=self._pre_gathered_context,
             )
+            sig = inspect.signature(self._pipeline.execute)
+            if "event_emitter" in sig.parameters:
+                pipeline_exec_kwargs["event_emitter"] = self._emit
+
+            result = await self._pipeline.execute(**pipeline_exec_kwargs)
 
             if not result.success:
                 raise RuntimeError(

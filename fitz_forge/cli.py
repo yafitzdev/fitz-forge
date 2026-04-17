@@ -13,6 +13,8 @@ import time
 import typer
 
 from fitz_forge.models.events import (
+    DecisionHallucinationDropped,
+    DecisionResolved,
     JobAwaitingReview,
     JobCompleted,
     JobFailed,
@@ -112,6 +114,23 @@ def _format_event(event: PlanEvent) -> str:
         pct = f"{event.progress * 100:3.0f}%"
         desc = event.description or event.phase
         return f"[dim]{ts}[/dim] [cyan]{pct}[/cyan]  {desc}"
+    if isinstance(event, DecisionResolved):
+        # Indented dim bullet so it reads as a sub-line under the stage bar.
+        # Format: "    · d5: Add StreamingResponse route → fitz_sage/api/routes/collections.py"
+        line = f"    [dim]· {event.decision_id}: {event.summary}"
+        if event.target_file:
+            line += f" → {event.target_file}"
+        line += "[/dim]"
+        return line
+    if isinstance(event, DecisionHallucinationDropped):
+        snippet = event.evidence_snippet
+        # Keep first ~80 chars for readability
+        if len(snippet) > 80:
+            snippet = snippet[:77].rstrip() + "..."
+        return (
+            f"    [dim]· {event.decision_id}: dropped hallucinated evidence: "
+            f"{snippet}[/dim]"
+        )
     if isinstance(event, JobCompleted):
         # Three renderings:
         #   - n/a (em-dash): plan succeeded but had no artifacts to score

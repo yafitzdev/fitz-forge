@@ -15,6 +15,10 @@ from collections import defaultdict
 from typing import Any
 
 from fitz_forge.llm.generate import generate
+from fitz_forge.models.events import (
+    DecisionHallucinationDropped,
+    DecisionResolved,
+)
 from fitz_forge.planning.pipeline.call_graph import CallGraph
 from fitz_forge.planning.pipeline.stages.base import (
     PipelineStage,
@@ -26,6 +30,24 @@ from fitz_forge.planning.schemas.decisions import (
     DecisionResolution,
     DecisionResolutionOutput,
 )
+
+
+def _summarize_resolution(resolution: dict, decision: dict) -> tuple[str, str | None]:
+    """Build a short summary + primary target file for a resolved decision.
+
+    Summary: the model's committed `decision` string, trimmed to one line and
+    clipped so it fits under the stage progress banner.
+    Target: the first relevant_file from the decision (the call graph pick).
+    """
+    raw = (resolution.get("decision") or decision.get("question") or "").strip()
+    # Take only the first sentence/line so the bullet fits on one line.
+    first_line = raw.splitlines()[0] if raw else ""
+    # Cap at ~120 chars to stay on one visual line in most terminals.
+    if len(first_line) > 120:
+        first_line = first_line[:117].rstrip() + "..."
+    relevant = decision.get("relevant_files") or []
+    target = relevant[0] if relevant else None
+    return first_line, target
 
 logger = logging.getLogger(__name__)
 
@@ -475,9 +497,19 @@ class DecisionResolutionStage(PipelineStage):
                         ):
                             valid_evidence.append(ev)
                         else:
-                            logger.warning(
+                            # Demoted to info so it doesn't bleed into the CLI
+                            # progress view twice — the CLI now renders this as
+                            # an indented dim bullet via DecisionHallucinationDropped.
+                            logger.info(
                                 f"Stage '{self.name}': {d_id} dropping "
                                 f"hallucinated evidence: {ev[:100]}"
+                            )
+                            await self._emit_event(
+                                DecisionHallucinationDropped(
+                                    job_id="",
+                                    decision_id=d_id,
+                                    evidence_snippet=ev[:200],
+                                )
                             )
                     if len(valid_evidence) < len(evidence):
                         resolution["evidence"] = valid_evidence
@@ -487,6 +519,19 @@ class DecisionResolutionStage(PipelineStage):
 
                 # Save partial progress for crash recovery
                 prior_outputs[f"_resolution_partial_{d_id}"] = resolution
+
+                # Surface the resolved decision as a typed event so the CLI
+                # can render it as an indented bullet under the progress line.
+                summary, target = _summarize_resolution(resolution, decision)
+                if summary:
+                    await self._emit_event(
+                        DecisionResolved(
+                            job_id="",
+                            decision_id=d_id,
+                            summary=summary,
+                            target_file=target,
+                        )
+                    )
 
                 await self._report_substep(f"resolved:{d_id} ({i + 1}/{len(sorted_decisions)})")
 

@@ -59,7 +59,46 @@ class JobFailed:
     elapsed_s: float
 
 
-PlanEvent = PhaseChanged | JobCompleted | JobAwaitingReview | JobFailed
+@dataclass(frozen=True)
+class DecisionResolved:
+    """A single atomic decision has been resolved.
+
+    Carries the decision id, a short human-readable summary ('what did the
+    model decide'), and the primary target file if any. Rendered by the CLI
+    as a dim indented bullet under the stage progress line, e.g.::
+
+        · d5: Add StreamingResponse route → fitz_sage/api/routes/collections.py
+    """
+
+    job_id: str
+    decision_id: str
+    summary: str
+    target_file: str | None
+
+
+@dataclass(frozen=True)
+class DecisionHallucinationDropped:
+    """A piece of resolved-decision evidence was dropped as hallucinated.
+
+    The stage detected a file reference in the evidence that does not exist
+    in the known file set. Rendered as a dim indented bullet, e.g.::
+
+        · d7: dropped hallucinated reference to fitz_sage/evaluation/schema.py
+    """
+
+    job_id: str
+    decision_id: str
+    evidence_snippet: str
+
+
+PlanEvent = (
+    PhaseChanged
+    | JobCompleted
+    | JobAwaitingReview
+    | JobFailed
+    | DecisionResolved
+    | DecisionHallucinationDropped
+)
 
 
 _PHASE_DESCRIPTIONS: dict[str, str] = {

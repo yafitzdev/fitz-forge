@@ -699,10 +699,16 @@ class DecomposedPipeline:
         agent: "AgentContextGatherer | None" = None,
         pre_gathered_context: str | None = None,
         _bench_override_files: list[str] | None = None,
+        event_emitter: Callable[[Any], Any] | None = None,
     ) -> PipelineResult:
         """Execute the decomposed planning pipeline.
 
         Same signature as PlanningPipeline.execute() for drop-in replacement.
+
+        event_emitter: optional async callback(event) for typed progress events
+        (e.g. DecisionResolved). When provided, each stage's rich-event
+        emitter is wired through it; ``job_id`` is substituted on the way
+        through so stages don't need to know it.
         """
         start_sha = get_git_sha()
         stage_timings: dict[str, float] = {}
@@ -863,6 +869,31 @@ class DecomposedPipeline:
                         await result_or_coro
 
             stage.set_substep_callback(_substep_cb)
+
+            # Wire rich-event emitter through the orchestrator so stages can
+            # surface typed events (e.g. DecisionResolved). Substitute the
+            # current job_id into the event if it's a dataclass with a
+            # `job_id` attribute.
+            if event_emitter is not None:
+                async def _stage_event_cb(
+                    event: Any,
+                    _job_id=job_id,
+                    _outer=event_emitter,
+                ) -> None:
+                    try:
+                        if hasattr(event, "job_id") and getattr(event, "job_id", "") == "":
+                            # frozen dataclass — use dataclasses.replace
+                            import dataclasses as _dc
+
+                            if _dc.is_dataclass(event):
+                                event = _dc.replace(event, job_id=_job_id)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    result_or_coro = _outer(event)
+                    if hasattr(result_or_coro, "__await__"):
+                        await result_or_coro
+
+                stage.set_event_emitter(_stage_event_cb)
 
             t_stage = time.monotonic()
             result = await stage.execute(client, job_description, prior_outputs)
