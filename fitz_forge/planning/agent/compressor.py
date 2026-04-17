@@ -90,6 +90,13 @@ def compress_python(source: str) -> str:
     Returns compressed source string. If parsing fails (syntax errors,
     non-Python), returns the original source unchanged.
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_compressor import compress_python as _ts
+
+        return _ts(source)
+
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -253,6 +260,13 @@ def compress_file(source: str, path: str) -> str:
 
 def _collapse_all_bodies(source: str) -> str:
     """Collapse all function bodies to `...` regardless of length."""
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_compressor import collapse_all_bodies
+
+        return collapse_all_bodies(source)
+
     try:
         tree = ast.parse(source)
     except SyntaxError:

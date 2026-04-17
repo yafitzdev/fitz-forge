@@ -168,6 +168,12 @@ def _extract_target_self_methods(source: str) -> str:
     """
     if not source:
         return ""
+
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        return _extract_target_self_methods_ts(source)
+
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -205,4 +211,72 @@ def _extract_target_self_methods(source: str) -> str:
             except Exception:
                 pass
         lines.append(f"{async_prefix}{child.name}({', '.join(params)}){ret}")
+    return "\n".join(lines)
+
+
+def _extract_target_self_methods_ts(source: str) -> str:
+    """Tree-sitter port of _extract_target_self_methods."""
+    from fitz_forge.planning.validation.grounding._ts_inference import (
+        _class_body,
+        _function_is_async,
+        _function_name,
+        _returns_annotation,
+        iter_all_classes,
+        iter_class_methods,
+        unparse_annotation,
+    )
+    from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+
+    tree = parse_python(source)
+    if tree is None:
+        return ""
+
+    best_class = None
+    best_count = 0
+    for cls in iter_all_classes(tree.root_node):
+        count = sum(1 for _ in iter_class_methods(cls))
+        if count > best_count:
+            best_count = count
+            best_class = cls
+    if best_class is None:
+        return ""
+
+    name_node = next((c for c in best_class.children if c.type == "identifier"), None)
+    cname = name_node.text.decode("utf-8") if name_node else "?"
+    lines: list[str] = [f"# class {cname}"]
+    for m in iter_class_methods(best_class):
+        mname = _function_name(m)
+        if mname is None:
+            continue
+        async_prefix = "async " if _function_is_async(m) else ""
+        params: list[str] = []
+        params_node = next((c for c in m.children if c.type == "parameters"), None)
+        if params_node is not None:
+            for p in params_node.children:
+                if p.type == "identifier":
+                    n = p.text.decode("utf-8")
+                    if n != "self":
+                        params.append(n)
+                elif p.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
+                    ident = next((c for c in p.children if c.type == "identifier"), None)
+                    if ident is None:
+                        continue
+                    n = ident.text.decode("utf-8")
+                    if n != "self":
+                        params.append(n)
+                elif p.type == "list_splat_pattern":
+                    ident = next((c for c in p.children if c.type == "identifier"), None)
+                    if ident is not None:
+                        params.append(f"*{ident.text.decode('utf-8')}")
+                elif p.type == "dictionary_splat_pattern":
+                    ident = next((c for c in p.children if c.type == "identifier"), None)
+                    if ident is not None:
+                        params.append(f"**{ident.text.decode('utf-8')}")
+        ret = ""
+        ret_node = _returns_annotation(m)
+        if ret_node is not None:
+            unparsed = unparse_annotation(ret_node)
+            if unparsed:
+                ret = f" -> {unparsed}"
+        lines.append(f"{async_prefix}{mname}({', '.join(params)}){ret}")
     return "\n".join(lines)
