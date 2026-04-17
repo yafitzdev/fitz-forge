@@ -587,6 +587,23 @@ def serve():
 
 
 @app.command()
+def prep(
+    base_url: str = typer.Option(None, "--base-url", help="API base URL (skip probe)"),
+    model: str = typer.Option(None, "--model", help="Model identifier (skip model prompt)"),
+):
+    """First-run setup wizard: detect API server, pick model, write config."""
+    from fitz_forge.config.loader import get_config_path
+    from fitz_forge.config.prep import run_wizard
+
+    config_path = get_config_path()
+    try:
+        _run(run_wizard(config_path, base_url=base_url, model=model))
+    except KeyboardInterrupt:
+        typer.echo("\nSetup aborted.", err=True)
+        raise typer.Exit(130) from None
+
+
+@app.command()
 def replay(
     job_id: str = typer.Argument("last", help="Job ID to replay from, or 'last' for most recent"),
 ):
