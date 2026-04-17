@@ -123,18 +123,35 @@ def _check_empty(content: str) -> ArtifactError | None:
             message="Content has no meaningful code (fewer than 2 non-comment lines)",
             suggestion="Write the actual implementation, not just comments or stubs",
         )
-    tree = _try_parse(content)
-    if tree is not None:
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                return None
-            if isinstance(node, ast.ClassDef) and _is_data_class(node):
-                return None
-        return ArtifactError(
-            check="empty",
-            message="Content has no function/method defs and no data-model class",
-            suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
-        )
+
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_validate import check_empty_structural
+
+        result = check_empty_structural(content)
+        if result is None:
+            return None
+        if result != "__parse_failed__":
+            return ArtifactError(
+                check="empty",
+                message=result,
+                suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
+            )
+        # parser failed — fall through to the text-heuristic path below
+    else:
+        tree = _try_parse(content)
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    return None
+                if isinstance(node, ast.ClassDef) and _is_data_class(node):
+                    return None
+            return ArtifactError(
+                check="empty",
+                message="Content has no function/method defs and no data-model class",
+                suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
+            )
     # Unparseable (or non-Python) — use language-agnostic text heuristics.
     # Accept if content has definition-like keywords from any common language.
     _DEF_KEYWORDS = (
@@ -231,6 +248,21 @@ def _check_return_type(content: str, ctx: ArtifactContext) -> ArtifactError | No
     is_streaming = any(ctx.filename.endswith(ind) for ind in _STREAMING_INDICATORS)
     if not is_streaming:
         return None
+
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_validate import check_return_type
+
+        hit = check_return_type(content)
+        if hit is None:
+            return None
+        name, ret_text = hit
+        return ArtifactError(
+            check="return_type",
+            message=f"Method '{name}' returns '{ret_text}' but streaming methods must return Iterator/Generator",
+            suggestion="Change return type to Iterator[str] or Generator[str, None, None]",
+        )
 
     tree = _try_parse(content)
     if tree is None:
