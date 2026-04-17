@@ -62,10 +62,12 @@ class LMStudioClient(OpenAIApiClient):
         model_name: str,
         context_size: int | None = None,
     ) -> None:
-        """Ensure the requested model is loaded in LM Studio."""
-        if await self.is_model_loaded():
-            return
-        await self._load_model_via_cli()
+        """Ensure the requested model is loaded in LM Studio.
+
+        ``lms load`` is a no-op when the target model is already loaded,
+        so we always invoke it and let the CLI decide.
+        """
+        await self._load_model_via_cli(model_name)
 
     async def health_check(self) -> bool:
         """Check LM Studio is reachable and load the configured model.
@@ -89,44 +91,9 @@ class LMStudioClient(OpenAIApiClient):
             logger.error(f"LM Studio health check failed: {e}")
             return False
 
-        # Health check only loads a model if NOTHING is loaded —
-        # never unloads/reloads.
-        if await self.is_model_loaded():
-            return True
-        logger.info(f"No model loaded, auto-loading {self.model}")
+        # ``lms load`` is idempotent — if the model is already loaded
+        # the CLI returns success without restarting it.
         return await self._load_model_via_cli(self.model)
-
-    async def get_loaded_model(self) -> str | None:
-        """Return the identifier of the currently loaded model, or None."""
-        lms = shutil.which("lms")
-        if not lms:
-            return None
-
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [lms, "ps"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                encoding="utf-8",
-                errors="replace",
-            )
-            output = result.stdout + result.stderr
-            if "No models" in output:
-                return None
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or line.startswith("IDENTIFIER") or line.startswith("-"):
-                    continue
-                return line.split()[0]
-            return None
-        except Exception:
-            return None
-
-    async def is_model_loaded(self) -> bool:
-        """Check if any model is currently loaded (not just available)."""
-        return await self.get_loaded_model() is not None
 
     async def _load_model_via_cli(self, model_name: str | None = None) -> bool:
         """Load a model via ``lms load``."""
@@ -171,60 +138,3 @@ class LMStudioClient(OpenAIApiClient):
         except Exception as e:
             logger.error(f"lms load failed: {e}")
             return False
-
-    async def switch_model(self, model_name: str) -> bool:
-        """Unload current model and load the specified one.
-
-        Skips the switch if the target model is already loaded (avoids
-        CUDA context destruction on WDDM consumer GPUs).
-        """
-        loaded = await self.get_loaded_model()
-        if loaded and loaded == model_name:
-            logger.info(f"Model {model_name} already loaded, skipping switch")
-            return True
-        logger.info(f"Switching model: {loaded} -> {model_name}")
-        await self.unload_model()
-        await asyncio.sleep(3)
-        ok = await self._load_model_via_cli(model_name)
-        if not ok:
-            logger.warning("Model load failed, retrying after 10s cooldown...")
-            await asyncio.sleep(10)
-            ok = await self._load_model_via_cli(model_name)
-        if not ok:
-            raise RuntimeError(
-                f"Failed to load model '{model_name}' after retry. "
-                f"Try restarting LM Studio or reducing context_length."
-            )
-        return True
-
-    async def unload_model(self) -> bool:
-        """Unload the current model via ``lms unload`` to free VRAM."""
-        lms = shutil.which("lms")
-        if not lms:
-            logger.warning("lms CLI not found in PATH — cannot unload model")
-            return False
-
-        logger.info(f"Running: {lms} unload --all")
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [lms, "unload", "--all"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                encoding="utf-8",
-                errors="replace",
-            )
-            output = (result.stdout + result.stderr).strip()
-            if result.returncode == 0:
-                logger.info(f"Model unloaded successfully: {output}")
-                return True
-            logger.warning(f"lms unload failed (code {result.returncode}): {output}")
-            return False
-        except Exception as e:
-            logger.warning(f"lms unload failed: {e}")
-            return False
-
-    async def reload_model(self) -> bool:
-        """Reload the model after unloading."""
-        return await self._load_model_via_cli()

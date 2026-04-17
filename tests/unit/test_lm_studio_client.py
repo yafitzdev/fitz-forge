@@ -113,7 +113,7 @@ class TestHealthCheck:
 
         with (
             patch("fitz_forge.llm.lm_studio.httpx.AsyncClient") as mock_http,
-            patch.object(client, "is_model_loaded", AsyncMock(return_value=True)),
+            patch.object(client, "_load_model_via_cli", AsyncMock(return_value=True)),
         ):
             mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)

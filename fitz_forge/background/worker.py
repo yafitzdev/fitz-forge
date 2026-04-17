@@ -306,12 +306,12 @@ class BackgroundWorker:
             else:
                 await self._set_phase(job.job_id, "health_check")
 
-            # For LM Studio: split check into connectivity + model loading
-            # so the GUI shows "Loading model..." during the slow part
+            # For LM Studio: surface a "loading model" phase during the slow
+            # ``lms load`` invocation inside health_check (it's idempotent —
+            # no-op if already loaded).
             if isinstance(self._ollama_client, LMStudioClient):
-                if not await self._ollama_client.is_model_loaded():
-                    await self._set_phase(job.job_id, "loading_model")
-                    logger.info(f"No model loaded — auto-loading {self._ollama_client.model}")
+                await self._set_phase(job.job_id, "loading_model")
+                logger.info(f"Ensuring model is loaded: {self._ollama_client.model}")
 
             healthy = await self._ollama_client.health_check()
             if not healthy:
@@ -569,12 +569,6 @@ class BackgroundWorker:
             progress=0.99,
             file_path=str(file_path),
         )
-
-        # Step 8: Eject model from LM Studio to free VRAM
-        unload = getattr(self._ollama_client, "unload_model", None)
-        if unload is not None:
-            logger.info("Pipeline complete — ejecting model to free VRAM")
-            await unload()
 
         logger.info(f"Job {job.job_id} completed: plan written to {file_path}")
 
