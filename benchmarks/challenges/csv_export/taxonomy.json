@@ -1,0 +1,43 @@
+{
+  "task_name": "csv_export",
+  "task_description": "Add a CSV export endpoint to the admin dashboard that streams governance observability data using FastAPI's StreamingResponse, with data aggregated from existing metrics in the evaluation layer",
+  "source_codebase": "fitz-sage",
+  "required_files": {
+    "fitz_sage/api/routes/collections.py": "required",
+    "fitz_sage/services/fitz_service.py": "required",
+    "fitz_sage/evaluation/stats.py": "required"
+  },
+  "architecture_taxonomy": {
+    "name": "architecture",
+    "entries": [
+      {
+        "id": "A1",
+        "pattern": "Generator-based streaming with reuse of existing aggregation methods",
+        "quality": "BEST",
+        "score": 100,
+        "description": "Service layer method returns Iterator[str] / yields CSV rows. Aggregates via existing statistical methods (get_mode_distribution, get_constraint_frequency, detect_flips, get_abstain_rate_trend, get_total_queries). Route uses FastAPI StreamingResponse with media_type='text/csv'. Error handling localised inside the generator since handle_api_errors can't catch mid-stream exceptions."
+      },
+      {
+        "id": "A2",
+        "pattern": "Streaming transport but re-invents aggregation",
+        "quality": "GOOD",
+        "score": 70,
+        "description": "Uses StreamingResponse correctly but writes new SQL queries/aggregations instead of composing existing stats methods. Violates non-destructive integration constraint."
+      },
+      {
+        "id": "A3",
+        "pattern": "Buffered JSON/CSV generation in memory",
+        "quality": "POOR",
+        "score": 30,
+        "description": "Materialises the whole export in memory before returning. Fails scalability / memory-efficiency constraint in the prompt."
+      },
+      {
+        "id": "A4",
+        "pattern": "Does not address CSV / governance stats at all",
+        "quality": "FAIL",
+        "score": 0,
+        "description": "Plan targets unrelated functionality or never reaches the streaming/generator insight."
+      }
+    ]
+  }
+}
