@@ -332,6 +332,71 @@ class TestDescribePhase:
             assert f"{stage}:reasoning" in _PHASE_DESCRIPTIONS, f"Missing {stage}:reasoning"
 
 
+class TestClassifyPhase:
+    """Tests for top-level phase classification."""
+
+    def test_health_check_is_phase_one(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("health_check") == 1
+
+    def test_loading_model_is_phase_two(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("loading_model") == 2
+
+    def test_agent_substeps_are_phase_three(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("agent:mapping") == 3
+        assert classify_phase("agent:bm25") == 3
+        assert classify_phase("agent:synthesizing") == 3
+
+    def test_checking_existing_is_phase_four(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("agent:checking_existing") == 4
+
+    def test_call_graph_is_phase_five(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("call_graph_extraction") == 5
+
+    def test_decision_phases(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("decision_decomposition") == 6
+        assert classify_phase("decision_resolution") == 7
+        assert classify_phase("decision_resolution:resolving:d1") == 7
+
+    def test_synthesis_is_phase_eight(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("synthesis") == 8
+        assert classify_phase("synthesis:synthesizing") == 8
+
+    def test_grounding_and_coherence_are_phase_nine(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("grounding_validation") == 9
+        assert classify_phase("coherence_check") == 9
+
+    def test_render_and_save_is_phase_ten(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("rendering") == 10
+        assert classify_phase("writing_file") == 10
+        assert classify_phase("finalizing") == 10
+
+    def test_meta_phases_return_none(self):
+        from fitz_forge.models.events import classify_phase
+
+        assert classify_phase("starting") is None
+        assert classify_phase("resuming") is None
+        assert classify_phase("initializing") is None
+        assert classify_phase(None) is None
+
+
 class TestFormatEvent:
     """Tests for cli._format_event rendering each PlanEvent type."""
 
@@ -400,6 +465,53 @@ class TestFormatEvent:
             )
         )
         assert "?" in line
+
+    def test_phase_enter_renders_banner(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import PhaseEnter
+
+        line = _format_event(
+            PhaseEnter(
+                job_id="j",
+                phase_number=3,
+                phase_label="Gather codebase context",
+            )
+        )
+        assert "3/10" in line
+        assert "Gather codebase context" in line
+        assert "━" in line
+
+    def test_phase_changed_agent_substep_renders_as_bullet(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import PhaseChanged
+
+        line = _format_event(
+            PhaseChanged(
+                job_id="j",
+                progress=0.07,
+                phase="agent:bm25",
+                description="BM25 keyword search...",
+            )
+        )
+        assert "    " in line
+        assert "·" in line
+        assert "BM25" in line
+        # Bullet form: no percentage bar
+        assert "7%" not in line
+
+    def test_phase_changed_top_level_keeps_percentage_line(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import PhaseChanged
+
+        line = _format_event(
+            PhaseChanged(
+                job_id="j",
+                progress=0.95,
+                phase="coherence_check",
+                description="Checking cross-stage coherence...",
+            )
+        )
+        assert "95%" in line
 
     def test_decision_resolved_renders_indented_bullet(self):
         from fitz_forge.cli import _format_event

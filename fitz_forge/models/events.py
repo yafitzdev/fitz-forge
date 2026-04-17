@@ -77,6 +77,20 @@ class DecisionResolved:
 
 
 @dataclass(frozen=True)
+class PhaseEnter:
+    """One of the 10 top-level pipeline phases has been entered.
+
+    Rendered by the CLI as a highlighted banner (e.g. Rich title rule).
+    Finer-grained sub-phases (stage substeps, agent: events, etc.) are
+    demoted to indented dim bullets beneath the banner.
+    """
+
+    job_id: str
+    phase_number: int
+    phase_label: str
+
+
+@dataclass(frozen=True)
 class DecisionHallucinationDropped:
     """A piece of resolved-decision evidence was dropped as hallucinated.
 
@@ -96,9 +110,76 @@ PlanEvent = (
     | JobCompleted
     | JobAwaitingReview
     | JobFailed
+    | PhaseEnter
     | DecisionResolved
     | DecisionHallucinationDropped
 )
+
+
+# ---------------------------------------------------------------------------
+# Top-level phase classification
+# ---------------------------------------------------------------------------
+
+# The 10 user-visible top-level phases, in order. Each value is (number, label).
+TOP_LEVEL_PHASES: list[tuple[int, str]] = [
+    (1, "Check connectivity"),
+    (2, "Load model"),
+    (3, "Gather codebase context"),
+    (4, "Check existing implementation"),
+    (5, "Extract call graph"),
+    (6, "Decompose decisions"),
+    (7, "Resolve decisions"),
+    (8, "Synthesize plan"),
+    (9, "Ground & check coherence"),
+    (10, "Render & save"),
+]
+
+
+def classify_phase(phase: str | None) -> int | None:
+    """Map a low-level pipeline phase string to its top-level phase number.
+
+    Used by the worker to decide whether a PhaseEnter banner needs emitting
+    (i.e. has the top-level phase changed?) before the next PhaseChanged.
+
+    Returns None for phases that don't belong to any of the 10 top-level
+    phases (e.g. "starting", "resuming", "initializing" — meta states).
+    """
+    if not phase:
+        return None
+
+    # Exact matches first (faster, unambiguous)
+    exact_map = {
+        "health_check": 1,
+        "loading_model": 2,
+        "agent_exploring_complete": 3,  # in case agent phase is skipped due to resume
+        "agent:checking_existing": 4,
+        "call_graph_extraction": 5,
+        "decision_decomposition": 6,
+        "decision_decomposition_complete": 6,
+        "decision_resolution": 7,
+        "decision_resolution_complete": 7,
+        "synthesis": 8,
+        "synthesis_complete": 8,
+        "grounding_validation": 9,
+        "coherence_check": 9,
+        "rendering": 10,
+        "writing_file": 10,
+        "finalizing": 10,
+    }
+    if phase in exact_map:
+        return exact_map[phase]
+
+    # Prefix matches — any agent:* substep that isn't checking_existing is phase 3
+    if phase.startswith("agent:"):
+        return 3
+    if phase.startswith("decision_decomposition:"):
+        return 6
+    if phase.startswith("decision_resolution:"):
+        return 7
+    if phase.startswith("synthesis:"):
+        return 8
+
+    return None
 
 
 _PHASE_DESCRIPTIONS: dict[str, str] = {

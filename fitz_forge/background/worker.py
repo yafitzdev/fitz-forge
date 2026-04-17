@@ -25,11 +25,14 @@ if _TC:
 from fitz_forge.api_review.client import AnthropicReviewClient
 from fitz_forge.api_review.schemas import ReviewRequest
 from fitz_forge.models.events import (
+    TOP_LEVEL_PHASES,
     JobAwaitingReview,
     JobCompleted,
     JobFailed,
     PhaseChanged,
+    PhaseEnter,
     PlanEvent,
+    classify_phase,
     describe_phase,
 )
 from fitz_forge.models.jobs import JobState
@@ -88,6 +91,9 @@ class BackgroundWorker:
         # process_job_direct when emitting JobCompleted.
         self._last_quality_applicable: bool = True
         self._last_quality_error: str | None = None
+        # Tracks the last emitted top-level phase number (1-10) so we only
+        # emit a PhaseEnter banner when crossing into a new top-level phase.
+        self._last_top_phase: int | None = None
 
         # Initialize pipeline components if config provided
         self._pipeline: PlanningPipeline | None = None
@@ -131,6 +137,33 @@ class BackgroundWorker:
         except Exception as e:  # noqa: BLE001 — consumer failure must not kill the worker
             logger.warning(f"Event emitter raised: {e}")
 
+    async def _maybe_emit_phase_banner(self, job_id: str, phase: str | None) -> None:
+        """Emit a PhaseEnter banner if the top-level phase number changed.
+
+        Phase numbers come from classify_phase(); when a low-level phase
+        doesn't belong to any top-level bucket (e.g. 'starting', 'resuming')
+        we leave the current top phase in place.
+        """
+        top = classify_phase(phase)
+        if top is None:
+            return
+        if top == self._last_top_phase:
+            return
+        # New top-level phase. Look up label.
+        label = ""
+        for num, name in TOP_LEVEL_PHASES:
+            if num == top:
+                label = name
+                break
+        self._last_top_phase = top
+        await self._emit(
+            PhaseEnter(
+                job_id=job_id,
+                phase_number=top,
+                phase_label=label,
+            )
+        )
+
     async def _set_phase(
         self,
         job_id: str,
@@ -143,6 +176,8 @@ class BackgroundWorker:
         if progress is not None:
             update_kwargs["progress"] = progress
         await self._store.update(job_id, **update_kwargs)
+        # Banner before the PhaseChanged so the CLI can render the rule first.
+        await self._maybe_emit_phase_banner(job_id, phase)
         # Use the job's persisted progress when caller didn't specify one
         effective_progress = progress
         if effective_progress is None:
@@ -328,6 +363,7 @@ class BackgroundWorker:
 
             async def progress_callback(progress: float, phase: str) -> None:
                 await self._store.update(job.job_id, progress=progress, current_phase=phase)
+                await self._maybe_emit_phase_banner(job.job_id, phase)
                 await self._emit(
                     PhaseChanged(
                         job_id=job.job_id,
@@ -670,6 +706,7 @@ class BackgroundWorker:
         self._pre_gathered_context = pre_gathered_context
         self._resume_from_checkpoint = resume
         self._run_started = time.monotonic()
+        self._last_top_phase = None
         try:
             if resume:
                 await self._set_phase(job_id, "resuming", state=JobState.RUNNING)

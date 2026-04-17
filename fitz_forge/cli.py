@@ -19,7 +19,9 @@ from fitz_forge.models.events import (
     JobCompleted,
     JobFailed,
     PhaseChanged,
+    PhaseEnter,
     PlanEvent,
+    classify_phase,
 )
 
 __all__ = ["app"]
@@ -107,12 +109,54 @@ async def _gather_context_for_clarification(
     return gathered
 
 
+_PHASE_BULLET_PREFIXES = (
+    "agent:",
+    "decision_decomposition:",
+    "decision_resolution:",
+    "synthesis:",
+)
+
+
+def _is_bullet_phase(phase: str | None) -> bool:
+    """Return True if a PhaseChanged should render as a dim indented bullet.
+
+    Fine-grained stage substeps get demoted to bullets so the top-level
+    phase banner keeps visual prominence. Any phase not in a bullet family
+    keeps its normal time/percentage line.
+    """
+    if not phase:
+        return False
+    if phase in (
+        "agent_exploring_complete",
+        "context_complete",
+        "architecture_design_complete",
+        "roadmap_risk_complete",
+        "synthesis_complete",
+        "decision_resolution_complete",
+        "decision_decomposition_complete",
+    ):
+        return True
+    return phase.startswith(_PHASE_BULLET_PREFIXES)
+
+
 def _format_event(event: PlanEvent) -> str:
     """Render a single PlanEvent as a rich-markup console line."""
     ts = time.strftime("%H:%M:%S")
+    if isinstance(event, PhaseEnter):
+        # Highlighted banner-style rule, distinct from time/percentage lines.
+        total = 10
+        return (
+            f"\n[bold cyan]━━━ {event.phase_number}/{total}  "
+            f"{event.phase_label} ━━━[/bold cyan]"
+        )
     if isinstance(event, PhaseChanged):
+        # Demote sub-phases to indented dim bullets so phase banners stay
+        # visually prominent. Keep the percentage bar advancing via top-level
+        # phases (starting, coherence_check, rendering, writing_file...).
         pct = f"{event.progress * 100:3.0f}%"
         desc = event.description or event.phase
+        if _is_bullet_phase(event.phase):
+            return f"    [dim]· {desc}[/dim]"
         return f"[dim]{ts}[/dim] [cyan]{pct}[/cyan]  {desc}"
     if isinstance(event, DecisionResolved):
         # Indented dim bullet so it reads as a sub-line under the stage bar.
