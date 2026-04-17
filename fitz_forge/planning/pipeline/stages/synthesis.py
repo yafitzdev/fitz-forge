@@ -27,17 +27,16 @@ from fitz_forge.planning.pipeline.stages.base import (
     extract_json,
 )
 from fitz_forge.planning.validation.grounding.inference import (
-    _unwrap_decorated as _ts_unwrap_decorated,
-    extract_call_class_name as _ts_extract_call_class_name,
-    find_class_anywhere as _ts_find_class_anywhere,
-    find_class_by_name as _ts_find_class_by_name,
-    format_method_signature as _ts_format_method_signature,
-    iter_all_classes as _ts_iter_all_classes,
-    iter_class_methods as _ts_iter_class_methods,
-    iter_init_self_assignments as _ts_iter_init_self_assignments,
-    unparse_annotation as _ts_unparse_annotation,
+    _unwrap_decorated,
+    extract_call_class_name,
+    find_class_anywhere,
+    format_method_signature,
+    iter_all_classes,
+    iter_class_methods,
+    iter_init_self_assignments,
+    unparse_annotation,
 )
-from fitz_forge.planning.validation.grounding.parser import parse_python as _ts_parse_python
+from fitz_forge.planning.validation.grounding.parser import parse_python
 from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
@@ -308,7 +307,7 @@ def _resolve_imported_type_apis(
     if not source:
         return ""
 
-    tree = _ts_parse_python(source)
+    tree = parse_python(source)
     if tree is None:
         return ""
 
@@ -446,7 +445,7 @@ def _resolve_imported_type_apis(
                 func_src = func_file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            func_tree = _ts_parse_python(func_src)
+            func_tree = parse_python(func_src)
             if func_tree is None:
                 continue
             f_stack = [func_tree.root_node]
@@ -541,13 +540,13 @@ def _resolve_imported_type_apis(
                     continue
                 if f"class {type_name}" not in src:
                     continue
-                file_tree = _ts_parse_python(src)
+                file_tree = parse_python(src)
                 if file_tree is None:
                     continue
-                cnode = _ts_find_class_anywhere(file_tree.root_node, type_name)
+                cnode = find_class_anywhere(file_tree.root_node, type_name)
                 if cnode is not None:
                     meths: list[str] = []
-                    for child in _ts_iter_class_methods(cnode):
+                    for child in iter_class_methods(cnode):
                         cname = None
                         for c in child.children:
                             if c.type == "identifier":
@@ -555,7 +554,7 @@ def _resolve_imported_type_apis(
                                 break
                         if cname is None or cname.startswith("_"):
                             continue
-                        meths.append(_ts_format_method_signature(child))
+                        meths.append(format_method_signature(child))
                     if meths:
                         lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
                 if type_name in {l.split(" methods:")[0] for l in lines}:
@@ -664,7 +663,7 @@ def _decompose_multi_handler_artifacts(
             continue
 
         # Find route handlers: functions decorated with @router.post("/path")
-        tree = _ts_parse_python(disk_source)
+        tree = parse_python(disk_source)
         if tree is None:
             result.append((filename, purpose))
             continue
@@ -673,7 +672,7 @@ def _decompose_multi_handler_artifacts(
         for top in tree.root_node.children:
             if top.type != "decorated_definition":
                 continue
-            inner = _ts_unwrap_decorated(top)
+            inner = _unwrap_decorated(top)
             if inner.type != "function_definition":
                 continue
             func_name = None
@@ -801,9 +800,9 @@ def _extract_pipeline_constraint(reference_body: str) -> str:
     """
     # Wrap in class to handle indented methods; fall back to raw parse.
     wrapped = f"class _Wrapper:\n{reference_body}"
-    tree = _ts_parse_python(wrapped)
+    tree = parse_python(wrapped)
     if tree is None:
-        tree = _ts_parse_python(reference_body)
+        tree = parse_python(reference_body)
     if tree is None:
         return ""
 
@@ -904,7 +903,7 @@ def _extract_reference_method(
     """
     import re as _re
 
-    tree = _ts_parse_python(disk_source)
+    tree = parse_python(disk_source)
     if tree is None:
         return ""
 
@@ -1009,7 +1008,7 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
         engine.py: async def answer_stream(self, query: Query, ...) -> AsyncIterator[str]
     """
     sigs: list[str] = []
-    tree = _ts_parse_python(content)
+    tree = parse_python(content)
     if tree is None:
         return sigs
 
@@ -1071,7 +1070,7 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
                         (c for c in p.children if c.type == "type"), None
                     )
                     if type_node is not None:
-                        ann = _ts_unparse_annotation(type_node)
+                        ann = unparse_annotation(type_node)
                         if ann:
                             args.append(f"{pname}: {ann}")
                             continue
@@ -1088,7 +1087,7 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
                 ret_node = c
                 break
         if ret_node is not None:
-            ret_text = _ts_unparse_annotation(ret_node)
+            ret_text = unparse_annotation(ret_node)
             if ret_text:
                 ret = f" -> {ret_text}"
 
@@ -1211,11 +1210,11 @@ def _extract_class_fields(
     if not src:
         return []
 
-    tree = _ts_parse_python(src)
+    tree = parse_python(src)
     if tree is None:
         return []
 
-    cls = _ts_find_class_anywhere(tree.root_node, class_name)
+    cls = find_class_anywhere(tree.root_node, class_name)
     if cls is None:
         return []
 
@@ -1262,20 +1261,20 @@ def _build_type_attr_map(
     if not source:
         return {}
 
-    tree = _ts_parse_python(source)
+    tree = parse_python(source)
     if tree is None:
         return {}
 
     result: dict[str, str] = {}  # type_name -> attr_name
     for cls_node in tree.root_node.children:
         if cls_node.type == "decorated_definition":
-            cls_node = _ts_unwrap_decorated(cls_node)
+            cls_node = _unwrap_decorated(cls_node)
         if cls_node.type != "class_definition":
             continue
-        for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+        for attr_name, value in iter_init_self_assignments(cls_node):
             if value is None or value.type != "call":
                 continue
-            rhs = _ts_extract_call_class_name(value)
+            rhs = extract_call_class_name(value)
             if rhs and rhs[0].isupper():  # Only CamelCase type names
                 result[rhs] = attr_name
 
@@ -1292,17 +1291,17 @@ def _extract_init_attr_names(source: str) -> set[str]:
     if not source:
         return set()
 
-    tree = _ts_parse_python(source)
+    tree = parse_python(source)
     if tree is None:
         return set()
 
     attrs: set[str] = set()
     for cls_node in tree.root_node.children:
         if cls_node.type == "decorated_definition":
-            cls_node = _ts_unwrap_decorated(cls_node)
+            cls_node = _unwrap_decorated(cls_node)
         if cls_node.type != "class_definition":
             continue
-        for attr_name, _value in _ts_iter_init_self_assignments(cls_node):
+        for attr_name, _value in iter_init_self_assignments(cls_node):
             attrs.add(attr_name)
 
     return attrs
@@ -1374,10 +1373,10 @@ def _build_attr_methods(
         for _src in all_sources:
             if not remaining:
                 break
-            _tree = _ts_parse_python(_src)
+            _tree = parse_python(_src)
             if _tree is None:
                 continue
-            for _cls in _ts_iter_all_classes(_tree.root_node):
+            for _cls in iter_all_classes(_tree.root_node):
                 cls_name = None
                 for c in _cls.children:
                     if c.type == "identifier":
@@ -1385,7 +1384,7 @@ def _build_attr_methods(
                         break
                 if cls_name not in remaining:
                     continue
-                for _method in _ts_iter_class_methods(_cls):
+                for _method in iter_class_methods(_cls):
                     mname = None
                     for c in _method.children:
                         if c.type == "identifier":
@@ -1467,7 +1466,7 @@ def _repair_fabricated_refs(
     lookup = StructuralIndexLookup(full_index)
 
     # Try parsing — handle code fragments via dedent + class wrapper
-    tree = _ts_parse_python(content)
+    tree = parse_python(content)
     if tree is None:
         return content, 0
 
@@ -1716,13 +1715,13 @@ def _build_attribute_template(
         if not content:
             continue
 
-        tree = _ts_parse_python(content)
+        tree = parse_python(content)
         if tree is None:
             continue
 
         for cls_node in tree.root_node.children:
             if cls_node.type == "decorated_definition":
-                cls_node = _ts_unwrap_decorated(cls_node)
+                cls_node = _unwrap_decorated(cls_node)
             if cls_node.type != "class_definition":
                 continue
             cls_name = None
@@ -1735,10 +1734,10 @@ def _build_attribute_template(
 
             # Extract self._xxx = ... assignments from init/setup methods
             attrs: dict[str, str] = {}  # attr_name -> type_hint
-            for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+            for attr_name, value in iter_init_self_assignments(cls_node):
                 if value is None or value.type != "call":
                     continue
-                rhs = _ts_extract_call_class_name(value)
+                rhs = extract_call_class_name(value)
                 if rhs:
                     attrs[attr_name] = rhs
 
@@ -1816,10 +1815,10 @@ def _build_attribute_template(
             for _src in all_sources:
                 if not missing_types:
                     break
-                _tree = _ts_parse_python(_src)
+                _tree = parse_python(_src)
                 if _tree is None:
                     continue
-                for _cls in _ts_iter_all_classes(_tree.root_node):
+                for _cls in iter_all_classes(_tree.root_node):
                     inner_name = None
                     for c in _cls.children:
                         if c.type == "identifier":
@@ -1828,7 +1827,7 @@ def _build_attribute_template(
                     if inner_name not in missing_types:
                         continue
                     meths = []
-                    for _child in _ts_iter_class_methods(_cls):
+                    for _child in iter_class_methods(_cls):
                         mname = None
                         for c in _child.children:
                             if c.type == "identifier":
@@ -1836,7 +1835,7 @@ def _build_attribute_template(
                                 break
                         if mname is None or mname.startswith("__"):
                             continue
-                        meths.append(_ts_format_method_signature(_child))
+                        meths.append(format_method_signature(_child))
                     if meths:
                         component_methods[inner_name] = meths
                         missing_types.discard(inner_name)
@@ -2839,7 +2838,7 @@ class SynthesisStage(PipelineStage):
         if not source:
             return ""
 
-        tree = _ts_parse_python(source)
+        tree = parse_python(source)
         if tree is None:
             return ""
 
@@ -2847,13 +2846,13 @@ class SynthesisStage(PipelineStage):
         attrs: dict[str, str] = {}  # attr_name -> type_name
         for cls_node in tree.root_node.children:
             if cls_node.type == "decorated_definition":
-                cls_node = _ts_unwrap_decorated(cls_node)
+                cls_node = _unwrap_decorated(cls_node)
             if cls_node.type != "class_definition":
                 continue
-            for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+            for attr_name, value in iter_init_self_assignments(cls_node):
                 if value is None or value.type != "call":
                     continue
-                rhs = _ts_extract_call_class_name(value)
+                rhs = extract_call_class_name(value)
                 if rhs:
                     attrs[attr_name] = rhs
 
@@ -2914,10 +2913,10 @@ class SynthesisStage(PipelineStage):
             for _src in all_sources:
                 if not missing_types:
                     break
-                _tree = _ts_parse_python(_src)
+                _tree = parse_python(_src)
                 if _tree is None:
                     continue
-                for _cls in _ts_iter_all_classes(_tree.root_node):
+                for _cls in iter_all_classes(_tree.root_node):
                     cls_name = None
                     for c in _cls.children:
                         if c.type == "identifier":
@@ -2926,7 +2925,7 @@ class SynthesisStage(PipelineStage):
                     if cls_name not in missing_types:
                         continue
                     meths = []
-                    for _child in _ts_iter_class_methods(_cls):
+                    for _child in iter_class_methods(_cls):
                         mname = None
                         for c in _child.children:
                             if c.type == "identifier":
@@ -2934,7 +2933,7 @@ class SynthesisStage(PipelineStage):
                                 break
                         if mname is None or mname.startswith("__"):
                             continue
-                        meths.append(_ts_format_method_signature(_child))
+                        meths.append(format_method_signature(_child))
                     if meths:
                         component_methods[cls_name] = meths
                         missing_types.discard(cls_name)
@@ -3007,7 +3006,7 @@ class SynthesisStage(PipelineStage):
         # that produces the final output and should be changed.
         output_line = ""
         wrapped = f"class _W:\n{reference_body}"
-        ref_tree = _ts_parse_python(wrapped)
+        ref_tree = parse_python(wrapped)
         if ref_tree is not None:
             # Find the last return statement that has a value.
             return_lines: list[int] = []

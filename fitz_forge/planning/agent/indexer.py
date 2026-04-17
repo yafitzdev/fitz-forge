@@ -165,7 +165,7 @@ def _extract_structure(suffix: str, content: str, rel_path: str) -> str:
     return ""
 
 
-def _ts_name(node: "Node | None") -> str:
+def _node_name(node: "Node | None") -> str:
     """Human-readable name from a tree-sitter node (ast.unparse analogue)."""
     if node is None:
         return ""
@@ -179,7 +179,7 @@ def _ts_name(node: "Node | None") -> str:
             if idents:
                 return ".".join(i.text.decode("utf-8") for i in idents)
             return "?"
-        left = _ts_name(value)
+        left = _node_name(value)
         attr_ident = idents[-1] if idents else None
         if attr_ident is not None:
             return (
@@ -190,11 +190,11 @@ def _ts_name(node: "Node | None") -> str:
         return left or "?"
     if node.type == "subscript":
         value = next((c for c in node.children if c.is_named), None)
-        return _ts_name(value)
+        return _node_name(value)
     return "?"
 
 
-def _extract_ts_key_decorators(class_or_func_node: "Node") -> list[str]:
+def _extract_key_decorators(class_or_func_node: "Node") -> list[str]:
     """Extract recognised decorator names from a decorated_definition wrapper."""
     result: list[str] = []
     parent = class_or_func_node.parent
@@ -339,7 +339,7 @@ def _extract_python(content: str) -> str:
         if args is not None:
             for c in args.children:
                 if c.is_named:
-                    bases.append(_ts_name(c))
+                    bases.append(_node_name(c))
         methods: list[str] = []
         fields: list[str] = []
         for m in iter_class_methods(node):
@@ -372,7 +372,7 @@ def _extract_python(content: str) -> str:
         cls_str = cname_node.text.decode("utf-8")
         if bases:
             cls_str += f"({', '.join(bases)})"
-        decs = _extract_ts_key_decorators(node)
+        decs = _extract_key_decorators(node)
         if decs:
             cls_str += f" [{', '.join(f'@{d}' for d in decs)}]"
         if methods:
@@ -398,7 +398,7 @@ def _extract_python(content: str) -> str:
             ret = unparse_annotation(ret_node)
             if ret:
                 func_str += f" -> {ret}"
-        decs = _extract_ts_key_decorators(node)
+        decs = _extract_key_decorators(node)
         if decs:
             func_str += f" [{', '.join(f'@{d}' for d in decs)}]"
         functions_out.append(func_str)
@@ -1105,7 +1105,7 @@ def _extract_signatures_from_python(content: str) -> str:
             if args is not None:
                 for c in args.children:
                     if c.is_named:
-                        bases.append(_ts_name(c))
+                        bases.append(_node_name(c))
             base_str = f"({', '.join(bases)})" if bases else ""
             lines.append(f"class {cname}{base_str}:")
 
