@@ -607,7 +607,12 @@ def decomposed(
     score_v2: bool = typer.Option(
         False,
         "--score-v2",
-        help="Run Scorer V2 (deterministic + taxonomy prompts)",
+        help="Run Scorer V2 (Tier-1 deterministic + Tier-2 Sonnet taxonomy scoring)",
+    ),
+    no_tier2: bool = typer.Option(
+        False,
+        "--no-tier2",
+        help="Skip Tier-2 Sonnet scoring (Tier-1 deterministic only)",
     ),
     parallel_runs: int = typer.Option(
         1,
@@ -668,7 +673,14 @@ def decomposed(
 
     if score_v2:
         structural_index = context.get("synthesized", "")
-        _prepare_scoring_v2(str(out_dir), query, structural_index, source_dir, taxonomy_file=taxonomy)
+        _prepare_scoring_v2(
+            str(out_dir),
+            query,
+            structural_index,
+            source_dir,
+            taxonomy_file=taxonomy,
+            skip_tier2=no_tier2,
+        )
 
 
 # ------------------------------------------------------------------
@@ -732,16 +744,19 @@ def _prepare_scoring_v2(
     structural_index: str,
     source_dir: str = "",
     taxonomy_file: str = "",
+    skip_tier2: bool = False,
 ) -> None:
-    """Run Scorer V2: deterministic checks + taxonomy prompts."""
+    """Run Scorer V2: deterministic checks + taxonomy prompts + Tier-2 Sonnet scoring."""
     from .eval_v2 import _find_plan_files, format_batch_report, score_batch_deterministic
     from .eval_v2_deterministic import run_deterministic_checks
     from .eval_v2_taxonomy import build_taxonomy_prompt, load_taxonomy
+    from . import score_taxonomy
 
     plan_dir = Path(results_dir)
     taxonomy_path = Path(taxonomy_file) if taxonomy_file else Path(__file__).parent / "challenges" / "streaming_implementation" / "taxonomy.json"
 
     tax_files = None
+    taxonomy_def = None
     if taxonomy_path.exists():
         taxonomy_def = load_taxonomy(taxonomy_path)
         tax_files = taxonomy_def.required_files or None
@@ -749,7 +764,7 @@ def _prepare_scoring_v2(
     # Run deterministic scoring
     batch = score_batch_deterministic(plan_dir, structural_index, query, tax_files, source_dir)
 
-    # Generate taxonomy prompts
+    # Generate taxonomy prompts (input to Tier-2)
     if taxonomy_path.exists():
         for pf in _find_plan_files(plan_dir):
             plan_data = json.loads(pf.read_text(encoding="utf-8"))
@@ -767,14 +782,33 @@ def _prepare_scoring_v2(
             prompt_path.write_text(prompt, encoding="utf-8")
             logger.info(f"Wrote {prompt_path.name} ({len(prompt)} chars)")
 
-    # Write reports
+    # Write Tier-1 reports first so partial results exist even if Tier-2 errors
     report = format_batch_report(batch)
     (plan_dir / "SCORE_V2_SUMMARY.md").write_text(report, encoding="utf-8")
     (plan_dir / "scores_v2.json").write_text(
         json.dumps(batch.model_dump(mode="json"), indent=2, default=str),
         encoding="utf-8",
     )
-    logger.info(f"Scorer V2: {batch.plans_scored} plans, avg {batch.deterministic_average}/100")
+    logger.info(f"Scorer V2 (Tier-1): {batch.plans_scored} plans, avg {batch.deterministic_average}/100")
+
+    # Tier-2 taxonomy scoring via claude -p. Non-fatal on error.
+    if skip_tier2:
+        logger.info("Scorer V2 (Tier-2): skipped via --no-tier2")
+        return
+    if not taxonomy_path.exists():
+        logger.info("Scorer V2 (Tier-2): no taxonomy.json — skipped")
+        return
+    try:
+        raw_tax = json.loads(taxonomy_path.read_text(encoding="utf-8"))
+        tier2_summary = score_taxonomy.run_tier2(plan_dir, raw_tax)
+        if tier2_summary:
+            score_taxonomy.write_outputs(plan_dir, tier2_summary)
+            logger.info(
+                f"Scorer V2 (Tier-2): {tier2_summary.get('plans_scored', 0)} plans, "
+                f"avg {tier2_summary.get('taxonomy_average')}/100"
+            )
+    except Exception as e:
+        logger.warning(f"Scorer V2 (Tier-2) failed: {e}. Tier-1 outputs are still intact.")
 
 
 @app.command("prepare-scoring-v2")
@@ -785,19 +819,61 @@ def prepare_scoring_v2(
         "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="The task query these plans address",
     ),
+    no_tier2: bool = typer.Option(False, "--no-tier2", help="Skip Tier-2 Sonnet scoring"),
 ):
-    """Run Scorer V2 on existing plans.
-
-    Runs deterministic checks instantly and writes taxonomy prompts
-    for Sonnet classification.
-    """
+    """Run Scorer V2 on existing plans (Tier-1 deterministic + Tier-2 taxonomy)."""
     context = json.loads(Path(context_file).read_text())
     structural_index = context.get("synthesized", "")
     if not structural_index:
         logger.error("No 'synthesized' field in context file")
         raise typer.Exit(1)
 
-    _prepare_scoring_v2(results_dir, query, structural_index)
+    _prepare_scoring_v2(results_dir, query, structural_index, skip_tier2=no_tier2)
+
+
+@app.command("score-taxonomy")
+def score_taxonomy_cmd(
+    results_dir: str = typer.Argument(..., help="Run directory containing score_v2_prompt_*.md files"),
+    taxonomy_file: str = typer.Option("", "--taxonomy", help="Path to taxonomy JSON (default: infer from run dir path)"),
+    model: str = typer.Option("claude-sonnet-4-6", "--model", help="Sonnet model id"),
+    concurrency: int = typer.Option(5, "--concurrency", "-j", help="Parallel claude -p invocations"),
+):
+    """Run ONLY Tier-2 Sonnet taxonomy scoring on an existing run dir.
+
+    Expects score_v2_prompt_*.md files to exist (produced by --score-v2 or
+    prepare-scoring-v2). Writes SCORE_V2_TAXONOMY.md + scores_v2_taxonomy.json
+    and merges taxonomy_average into scores_v2.json.
+    """
+    from . import score_taxonomy as st
+
+    plan_dir = Path(results_dir)
+    if not plan_dir.exists():
+        logger.error(f"Run dir does not exist: {plan_dir}")
+        raise typer.Exit(1)
+
+    tpath = Path(taxonomy_file) if taxonomy_file else None
+    if tpath is None:
+        # Infer challenge from path: .../challenges/<name>/results/<run>/
+        for parent in plan_dir.parents:
+            cand = parent / "taxonomy.json"
+            if cand.exists():
+                tpath = cand
+                break
+    if tpath is None or not tpath.exists():
+        logger.error("Could not locate taxonomy.json — pass --taxonomy")
+        raise typer.Exit(1)
+
+    raw_tax = json.loads(tpath.read_text(encoding="utf-8"))
+    summary = st.run_tier2(plan_dir, raw_tax, model=model, concurrency=concurrency)
+    if not summary:
+        logger.error("No plans scored (no score_v2_prompt_*.md files found)")
+        raise typer.Exit(1)
+    st.write_outputs(plan_dir, summary)
+    typer.echo(
+        f"Tier-2: {summary.get('plans_scored', 0)} plans, "
+        f"avg {summary.get('taxonomy_average')}/100. "
+        f"See {plan_dir / 'SCORE_V2_TAXONOMY.md'}"
+    )
 
 
 async def _run_replay_once(

@@ -87,13 +87,28 @@ Plans scored on 3 dimensions (total /100):
 
 Same plan always gets the same score. Source-dir augmentation validates against the full codebase (not just retrieval subset).
 
-### V2 Taxonomy (Tier 2) — Sonnet classification
+### V2 Taxonomy (Tier 2) — Sonnet classification (automated)
 
-Sonnet classifies each plan's architecture and artifacts into a predefined taxonomy:
-- Architecture: A1 (best, full pipeline + streaming) to A5 (fail)
-- Per-file: E1-E6 (engine), R1-R5 (routes), S1-S3 (synthesizer)
+Sonnet classifies each plan's architecture and per-file artifacts into the
+challenge taxonomy (e.g. A1/A2/A3/A4/A5 for architecture; E1-E6 / R1-R5 / S1-S3
+for per-file). Tier-2 runs automatically whenever `--score-v2` is passed,
+calling `claude -p` per plan (no Anthropic SDK — piggybacks on Claude Code auth).
 
-Run via Claude Code subagents on `score_v2_prompt_NN.md` files. Not yet automated.
+Plan score = 50% architecture + 50% mean of per-file scores (when both are
+resolved; falls back to whichever tier is available).
+
+Outputs land in the run dir:
+- `SCORE_V2_TAXONOMY.md` — readable per-plan + distribution summary
+- `scores_v2_taxonomy.json` — full per-plan classifications
+- `scores_v2.json` — merged `taxonomy_average` field sits next to `deterministic_average`
+
+Pass `--no-tier2` to skip Sonnet scoring and keep Tier-1 only (faster).
+
+Retroactive scoring on an existing run dir:
+```bash
+.venv/Scripts/python -m benchmarks.plan_factory score-taxonomy \
+  benchmarks/challenges/streaming_implementation/results/2026-04-16_03-17-29_run_021
+```
 
 ### Scoring workflow
 
