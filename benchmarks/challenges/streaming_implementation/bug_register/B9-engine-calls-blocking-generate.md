@@ -1,8 +1,9 @@
 # B9 — Engine stream method calls blocking `generate()` instead of `stream_generate()`
 
-**Status:** open
+**Status:** open — partial fix landed, blocked by B15
 **Impact:** 10/10
 **Opened:** 2026-04-17
+**Last update:** 2026-04-17 — see "Implementation status" section below
 **Source:** Tier-2 Sonnet scoring of run_021 (30 plans, streaming_implementation)
 
 ## Symptom
@@ -87,5 +88,29 @@ Candidate levers, in order of preference:
 
 - Rerun (replay from `snapshot_after_decision_resolution.json`) on 5 plans.
 - Tier-2 architecture distribution shifts from A4-dominated to A1/A2-dominated.
-- Tier-2 taxonomy average rises from ~37 toward ~70+.
+- Tier-2 taxonomy average rises from current 61.8 baseline toward ~80+.
 - No regression on Tier-1 deterministic (stays ~97).
+
+## Implementation status (2026-04-17)
+
+Two commits landed:
+- `35918a9` — stem-match check (`stream_<X>` / `<X>_stream` siblings).
+  Too narrow — misses real variants where the streaming method has a
+  different verb root (e.g. `stream_query` vs blocking `generate`).
+- `5a15949` — broader any-name check (any sibling on the same class
+  with iterator/generator return type or yield-in-body). 12 new unit
+  tests cover both stem-match and broad cases. False-positive guards:
+  only fires when the call result is yielded (assignment then yield,
+  yield-from, direct yield); suppressed when the streaming sibling is
+  also called somewhere in the body.
+
+**Validation status: blocked.** The replay-validate step produced the
+same broken plan (engine still calls `self._synthesizer.generate()` and
+yields the result). Diagnosis: closure check sees no streaming sibling
+on `Synth` because the synthesizer.py artifact's `stream_query` method
+was registered as a top-level function, not as a method on `Synth`. See
+**B15** — `extract_provides` loses class ownership for dedented surgical
+artifacts. The B9 check is correct in isolation but starves on missing
+metadata in production.
+
+Next cycle: fix B15, then re-replay-validate B9.
