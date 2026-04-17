@@ -138,7 +138,7 @@ class LlamaCppClient(OpenAIApiClient):
         if AsyncOpenAI is None:
             raise ImportError(
                 "openai package required for llama.cpp support. "
-                "Install with: pip install fitz-forge[lm-studio]"
+                "Install with: pip install openai"
             )
 
         super().__init__(

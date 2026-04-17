@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fitz_forge.llm.lm_studio import LMStudioClient
-from fitz_forge.llm.client import OllamaClient
+from fitz_forge.llm.ollama import OllamaClient
 from fitz_forge.planning.pipeline.orchestrator import PipelineResult
 from fitz_forge.planning.pipeline.output import PlanRenderer
 from fitz_forge.planning.schemas.plan_output import PlanOutput
@@ -104,19 +104,19 @@ class TestLMStudioCallMetrics:
 # ---------------------------------------------------------------------------
 
 
+def _make_ollama_client(**kwargs):
+    defaults = dict(base_url="http://localhost:11434", model="test")
+    defaults.update(kwargs)
+    with patch("fitz_forge.llm.openai_api.AsyncOpenAI"):
+        return OllamaClient(**defaults)
+
+
 class TestOllamaCallMetrics:
     @pytest.mark.asyncio
     async def test_generate_records_metrics(self):
-        client = OllamaClient(base_url="http://localhost:11434", model="test")
-
-        async def fake_chat(**kwargs):
-            async def gen():
-                yield {"message": {"content": "Hello"}}
-                yield {"message": {"content": " world"}}
-
-            return gen()
-
-        client.client.chat = AsyncMock(side_effect=fake_chat)
+        client = _make_ollama_client()
+        chunks = _make_stream_chunks(["Hello", " world"])
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         await client.generate([{"role": "user", "content": "hi"}])
 
@@ -128,15 +128,9 @@ class TestOllamaCallMetrics:
 
     @pytest.mark.asyncio
     async def test_drain_clears_metrics(self):
-        client = OllamaClient(base_url="http://localhost:11434", model="test")
-
-        async def fake_chat(**kwargs):
-            async def gen():
-                yield {"message": {"content": "ok"}}
-
-            return gen()
-
-        client.client.chat = AsyncMock(side_effect=fake_chat)
+        client = _make_ollama_client()
+        chunks = _make_stream_chunks(["ok"])
+        client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
         await client.generate([{"role": "user", "content": "hi"}])
         assert len(client.drain_call_metrics()) == 1

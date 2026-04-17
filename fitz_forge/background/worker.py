@@ -21,7 +21,7 @@ from fitz_forge.llm.llama_cpp import LlamaCppClient
 from fitz_forge.llm.lm_studio import LMStudioClient
 
 if _TC:
-    from fitz_forge.llm.client import OllamaClient
+    from fitz_forge.llm.ollama import OllamaClient
 from fitz_forge.api_review.client import AnthropicReviewClient
 from fitz_forge.api_review.schemas import ReviewRequest
 from fitz_forge.models.events import (

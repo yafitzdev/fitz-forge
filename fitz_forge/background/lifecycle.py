@@ -19,7 +19,7 @@ from fitz_forge.llm.lm_studio import LMStudioClient
 from fitz_forge.models.sqlite_store import SQLiteJobStore
 
 if TYPE_CHECKING:
-    from fitz_forge.llm.client import OllamaClient
+    from fitz_forge.llm.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
 

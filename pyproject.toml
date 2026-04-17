@@ -13,7 +13,7 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Yan Fitzer", email = "yan@example.com" }
 ]
-keywords = ["mcp", "planning", "ai", "model-context-protocol", "ollama", "local-llm"]
+keywords = ["mcp", "planning", "ai", "model-context-protocol", "local-llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -30,7 +30,7 @@ dependencies = [
     "platformdirs>=4.0",
     "pyyaml>=6.0",
     "aiosqlite>=0.20",
-    "ollama>=0.4.0",
+    "openai>=1.0.0",
     "tenacity>=9.0.0",
     "psutil>=6.1.0",
     "typer>=0.9",
@@ -47,7 +47,6 @@ api-review = [
     "anthropic>=0.40",
     "CurrencyConverter>=0.17",
 ]
-lm-studio = ["openai>=1.0.0"]
 retrieval = ["sentence-transformers>=3.0", "einops>=0.7"]
 dev = [
     "pytest>=8.0",

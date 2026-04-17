@@ -12,7 +12,7 @@ from .llama_cpp import LlamaCppClient
 from .lm_studio import LMStudioClient
 
 if TYPE_CHECKING:
-    from .client import OllamaClient
+    from .ollama import OllamaClient
 
 
 def _create_gpu_guard(config: FitzPlannerConfig) -> GPUTemperatureGuard | None:
@@ -73,7 +73,7 @@ def create_llm_client(
             startup_timeout=cfg.startup_timeout,
             gpu_guard=gpu_guard,
         )
-    from .client import OllamaClient
+    from .ollama import OllamaClient
 
     return OllamaClient(
         base_url=config.ollama.base_url,

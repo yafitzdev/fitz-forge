@@ -125,7 +125,7 @@ class OpenAIApiClient:
     ) -> None:
         if AsyncOpenAI is None:
             raise ImportError(
-                "openai package required. Install with: pip install fitz-forge[lm-studio]"
+                "openai package required. Install with: pip install openai"
             )
 
         self.base_url = base_url
