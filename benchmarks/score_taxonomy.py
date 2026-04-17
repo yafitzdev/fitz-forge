@@ -51,18 +51,26 @@ def _extract_json(raw: str) -> dict[str, Any]:
 
 
 async def _invoke_claude(prompt: str, model: str, timeout: int) -> str:
-    """Run ``claude -p <prompt> --model <model>`` and return stdout."""
+    """Run ``claude -p --model <model>`` with prompt on stdin.
+
+    Prompt is piped via stdin rather than passed as an argv arg — the
+    taxonomy scoring prompts run ~50 KB, well past the Windows command-
+    line length limit (~8 KB argv → WinError 206). Stdin has no such cap.
+    """
     proc = await asyncio.create_subprocess_exec(
         "claude",
         "-p",
-        prompt,
         "--model",
         model,
+        stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=prompt.encode("utf-8")),
+            timeout=timeout,
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
