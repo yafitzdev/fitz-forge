@@ -349,6 +349,13 @@ def load_target_self_attrs(
     lookup: StructuralIndexLookup,
 ) -> dict[str, str]:
     """Locate the file on disk, find the primary class, parse its __init__."""
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_closure import load_target_self_attrs as _ts
+
+        return _ts(filename, source_dir, lookup)
+
     if not source_dir:
         return {}
     disk = Path(source_dir) / filename
@@ -891,6 +898,13 @@ def extract_references(
     return types for variable-binding propagation (so `var = obj.method()`
     followed by `async for x in var` can be checked).
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_closure import extract_references as _ts
+
+        return _ts(content, filename, lookup, self_attrs, sibling_provides)
+
     tree = try_parse(content)
     if tree is None:
         return []
@@ -946,6 +960,13 @@ def extract_provides(
     Returns a dict so usage checks can look up signatures. Class refs map to
     None; method/function refs map to their Signature.
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_closure import extract_provides as _ts
+
+        return _ts(content, filename, lookup)
+
     out: dict[SymbolRef, Signature | None] = {}
     tree = try_parse(content)
     if tree is None:
