@@ -50,8 +50,6 @@ def create_llm_client(
             timeout=config.lm_studio.timeout,
             context_length=config.lm_studio.context_length,
             gpu_guard=gpu_guard,
-            fast_model=config.lm_studio.fast_model,
-            smart_model=config.lm_studio.smart_model,
             api_key=getattr(config.lm_studio, "api_key", None),
         )
     if config.provider == "llama_cpp":

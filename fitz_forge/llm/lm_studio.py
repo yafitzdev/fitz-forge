@@ -31,10 +31,6 @@ class LMStudioClient(OpenAIApiClient):
     # is set to allow split mode on 16K context models.
     _MIN_CONTEXT_TOKENS = 8_192
 
-    # Context length for smart_model (agent retrieval needs large context
-    # for the structural index, even when planning uses small context).
-    _SMART_CONTEXT_LENGTH = 65536
-
     def __init__(
         self,
         base_url: str = "http://localhost:1234/v1",
@@ -43,8 +39,6 @@ class LMStudioClient(OpenAIApiClient):
         timeout: int = 300,
         context_length: int = 32768,
         gpu_guard: "GPUTemperatureGuard | None" = None,
-        fast_model: str | None = None,
-        smart_model: str | None = None,
         api_key: str | None = None,
         disable_thinking: bool = True,
     ):
@@ -57,17 +51,7 @@ class LMStudioClient(OpenAIApiClient):
             gpu_guard=gpu_guard,
             context_length=context_length,
         )
-        self._fast_model = fast_model
-        self._smart_model = smart_model
         self.fallback_model = fallback_model
-
-    @property
-    def fast_model(self) -> str:
-        return self._fast_model or self.model
-
-    @property
-    def smart_model(self) -> str:
-        return self._smart_model or self.model
 
     # ------------------------------------------------------------------
     # lms CLI lifecycle
@@ -105,18 +89,12 @@ class LMStudioClient(OpenAIApiClient):
             logger.error(f"LM Studio health check failed: {e}")
             return False
 
-        # Accept any loaded model. The orchestrator handles switching
-        # to the right model before each stage. Health check only loads
-        # a model if NOTHING is loaded — never unloads/reloads.
+        # Health check only loads a model if NOTHING is loaded —
+        # never unloads/reloads.
         if await self.is_model_loaded():
             return True
-        first_model = (
-            self.smart_model
-            if self._smart_model and self._smart_model != self.model
-            else self.model
-        )
-        logger.info(f"No model loaded, auto-loading {first_model}")
-        return await self._load_model_via_cli(first_model)
+        logger.info(f"No model loaded, auto-loading {self.model}")
+        return await self._load_model_via_cli(self.model)
 
     async def get_loaded_model(self) -> str | None:
         """Return the identifier of the currently loaded model, or None."""
@@ -154,8 +132,6 @@ class LMStudioClient(OpenAIApiClient):
         """Load a model via ``lms load``."""
         model_name = model_name or self.model
         ctx = self._context_length
-        if self._smart_model and model_name == self._smart_model:
-            ctx = max(ctx, self._SMART_CONTEXT_LENGTH)
 
         lms = shutil.which("lms")
         if not lms:
