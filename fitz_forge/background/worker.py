@@ -14,7 +14,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING as _TC
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fitz_forge.config.schema import FitzPlannerConfig
 from fitz_forge.llm.llama_cpp import LlamaCppClient
@@ -24,6 +24,14 @@ if _TC:
     from fitz_forge.llm.client import OllamaClient
 from fitz_forge.api_review.client import AnthropicReviewClient
 from fitz_forge.api_review.schemas import ReviewRequest
+from fitz_forge.models.events import (
+    JobAwaitingReview,
+    JobCompleted,
+    JobFailed,
+    PhaseChanged,
+    PlanEvent,
+    describe_phase,
+)
 from fitz_forge.models.jobs import JobState
 from fitz_forge.models.store import JobStore
 from fitz_forge.planning.agent import AgentContextGatherer
@@ -53,6 +61,7 @@ class BackgroundWorker:
         poll_interval: float = 1.0,
         ollama_client: OllamaClient | LMStudioClient | LlamaCppClient | None = None,
         memory_threshold: float = 80.0,
+        event_emitter: Callable[[PlanEvent], Awaitable[None]] | None = None,
     ) -> None:
         """
         Initialize background worker.
@@ -69,9 +78,11 @@ class BackgroundWorker:
         self._poll_interval = poll_interval
         self._ollama_client = ollama_client
         self._memory_threshold = memory_threshold
+        self._event_emitter = event_emitter
         self._current_job_id: str | None = None
         self._pre_gathered_context: str | None = None
         self._resume_from_checkpoint: bool = False
+        self._run_started: float | None = None
         self._task: asyncio.Task | None = None
 
         # Initialize pipeline components if config provided
@@ -106,6 +117,49 @@ class BackgroundWorker:
     def current_job_id(self) -> str | None:
         """Get the currently processing job ID (None if idle)."""
         return self._current_job_id
+
+    async def _emit(self, event: PlanEvent) -> None:
+        """Forward an event to the emitter if one is configured."""
+        if self._event_emitter is None:
+            return
+        try:
+            await self._event_emitter(event)
+        except Exception as e:  # noqa: BLE001 — consumer failure must not kill the worker
+            logger.warning(f"Event emitter raised: {e}")
+
+    async def _set_phase(
+        self,
+        job_id: str,
+        phase: str,
+        progress: float | None = None,
+        **extra: Any,
+    ) -> None:
+        """Persist a phase transition to SQLite and emit a PhaseChanged event."""
+        update_kwargs: dict[str, Any] = {"current_phase": phase, **extra}
+        if progress is not None:
+            update_kwargs["progress"] = progress
+        await self._store.update(job_id, **update_kwargs)
+        # Use the job's persisted progress when caller didn't specify one
+        effective_progress = progress
+        if effective_progress is None:
+            current = await self._store.get(job_id)
+            effective_progress = (current.progress if current else 0.0) or 0.0
+        await self._emit(
+            PhaseChanged(
+                job_id=job_id,
+                progress=effective_progress,
+                phase=phase,
+                description=describe_phase(phase),
+            )
+        )
+
+    def _elapsed(self) -> float:
+        """Seconds since this run started (0.0 if no run active)."""
+        if self._run_started is None:
+            return 0.0
+        import time
+
+        return max(0.0, time.monotonic() - self._run_started)
 
     async def start(self) -> None:
         """
@@ -238,7 +292,7 @@ class BackgroundWorker:
         """
         if self._ollama_client is None or self._pipeline is None:
             logger.warning(f"No pipeline configured, completing job {job.job_id} with stub")
-            await self._store.update(job.job_id, progress=0.5, current_phase="pending_engine")
+            await self._set_phase(job.job_id, "pending_engine", progress=0.5)
             await asyncio.sleep(0.1)
             return
 
@@ -248,18 +302,15 @@ class BackgroundWorker:
         # Step 1: Health check (skip on second pass)
         if not is_review_confirmed:
             if not self._resume_from_checkpoint:
-                await self._store.update(job.job_id, progress=0.05, current_phase="health_check")
+                await self._set_phase(job.job_id, "health_check", progress=0.05)
             else:
-                await self._store.update(job.job_id, current_phase="health_check")
+                await self._set_phase(job.job_id, "health_check")
 
             # For LM Studio: split check into connectivity + model loading
             # so the GUI shows "Loading model..." during the slow part
             if isinstance(self._ollama_client, LMStudioClient):
                 if not await self._ollama_client.is_model_loaded():
-                    await self._store.update(
-                        job.job_id,
-                        current_phase="loading_model",
-                    )
+                    await self._set_phase(job.job_id, "loading_model")
                     logger.info(f"No model loaded — auto-loading {self._ollama_client.model}")
 
             healthy = await self._ollama_client.health_check()
@@ -273,6 +324,14 @@ class BackgroundWorker:
 
             async def progress_callback(progress: float, phase: str) -> None:
                 await self._store.update(job.job_id, progress=progress, current_phase=phase)
+                await self._emit(
+                    PhaseChanged(
+                        job_id=job.job_id,
+                        progress=progress,
+                        phase=phase,
+                        description=describe_phase(phase),
+                    )
+                )
 
             # Build agent if source_dir is available
             source_dir = job.source_dir or self._config.agent.source_dir or str(Path.cwd())
@@ -352,19 +411,22 @@ class BackgroundWorker:
 
                     import json
 
-                    await self._store.update(
+                    await self._set_phase(
                         job.job_id,
+                        "awaiting_review_confirmation",
+                        progress=0.96,
                         cost_estimate_json=cost_estimate.model_dump_json(),
                         pipeline_state=json.dumps(result.model_dump()),
                         state=JobState.AWAITING_REVIEW,
-                        progress=0.96,
-                        current_phase="awaiting_review_confirmation",
                     )
 
                     logger.info(
                         f"Job {job.job_id} paused at AWAITING_REVIEW. "
                         f"{len(flagged_sections)} sections flagged. "
                         f"Estimated cost: ${cost_estimate.cost_usd:.4f} USD"
+                    )
+                    await self._emit(
+                        JobAwaitingReview(job_id=job.job_id, elapsed_s=self._elapsed())
                     )
                     return  # EARLY RETURN - wait for user confirmation
 
@@ -374,7 +436,7 @@ class BackgroundWorker:
 
             from fitz_forge.api_review.schemas import CostEstimate
 
-            await self._store.update(job.job_id, progress=0.96, current_phase="executing_review")
+            await self._set_phase(job.job_id, "executing_review", progress=0.96)
 
             cost_estimate = CostEstimate.model_validate_json(job.cost_estimate_json)
 
@@ -455,7 +517,7 @@ class BackgroundWorker:
             diagnostics["agent_files"] = agent_ctx["agent_files"]
 
         # Pipeline outputs are dicts from model_dump(), need to reconstruct Pydantic models
-        await self._store.update(job.job_id, progress=0.97, current_phase="rendering")
+        await self._set_phase(job.job_id, "rendering", progress=0.97)
 
         from fitz_forge.planning.schemas.architecture import ArchitectureOutput
         from fitz_forge.planning.schemas.context import ContextOutput
@@ -485,7 +547,7 @@ class BackgroundWorker:
             markdown = "# Plan output\n\n(Renderer not configured)"
 
         # Step 6: Write to file
-        await self._store.update(job.job_id, progress=0.98, current_phase="writing_file")
+        await self._set_phase(job.job_id, "writing_file", progress=0.98)
         plans_dir = Path(self._config.output.plans_dir)
         if not plans_dir.is_absolute():
             base = Path(job.source_dir).resolve() if job.source_dir else Path.cwd()
@@ -501,10 +563,10 @@ class BackgroundWorker:
         file_path.write_text(markdown, encoding="utf-8")
 
         # Step 7: Update job with file path
-        await self._store.update(
+        await self._set_phase(
             job.job_id,
+            "finalizing",
             progress=0.99,
-            current_phase="finalizing",
             file_path=str(file_path),
         )
 
@@ -541,32 +603,47 @@ class BackgroundWorker:
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
+        import time
+
         self._current_job_id = job_id
         self._pre_gathered_context = pre_gathered_context
         self._resume_from_checkpoint = resume
+        self._run_started = time.monotonic()
         try:
             if resume:
-                await self._store.update(job_id, state=JobState.RUNNING, current_phase="resuming")
+                await self._set_phase(job_id, "resuming", state=JobState.RUNNING)
             else:
-                await self._store.update(
-                    job_id, state=JobState.RUNNING, progress=0.0, current_phase="starting"
+                await self._set_phase(
+                    job_id, "starting", progress=0.0, state=JobState.RUNNING
                 )
             await self._process_job(job)
             # Check if job ended at AWAITING_REVIEW (pipeline paused for API review)
             final_job = await self._store.get(job_id)
             if final_job and final_job.state != JobState.AWAITING_REVIEW:
                 await self._store.update(job_id, state=JobState.COMPLETE, progress=1.0)
+                await self._emit(
+                    JobCompleted(
+                        job_id=job_id,
+                        file_path=final_job.file_path if final_job else None,
+                        quality_score=final_job.quality_score if final_job else None,
+                        elapsed_s=self._elapsed(),
+                    )
+                )
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
             try:
                 await self._store.update(job_id, state=JobState.FAILED, error=error_msg)
             except Exception:
                 pass
+            await self._emit(
+                JobFailed(job_id=job_id, error=error_msg, elapsed_s=self._elapsed())
+            )
             raise
         finally:
             self._current_job_id = None
             self._pre_gathered_context = None
             self._resume_from_checkpoint = False
+            self._run_started = None
 
     def _build_messages(self, job) -> list[dict]:
         """

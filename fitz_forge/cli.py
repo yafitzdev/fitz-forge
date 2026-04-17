@@ -9,7 +9,18 @@ All commands delegate to the same functions that MCP wraps.
 import asyncio
 import sys
 import time
-from collections import deque
+
+import typer
+
+from fitz_forge.models.events import (
+    JobAwaitingReview,
+    JobCompleted,
+    JobFailed,
+    PhaseChanged,
+    PlanEvent,
+)
+
+__all__ = ["app"]
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -19,9 +30,6 @@ def _fmt_duration(seconds: float) -> str:
         return f"{s}s"
     m, s = divmod(s, 60)
     return f"{m}m{s:02d}s"
-
-
-import typer
 
 app = typer.Typer(
     name="fitz-forge",
@@ -74,224 +82,6 @@ def _state_color(state: str) -> str:
     return colors.get(state, typer.colors.WHITE)
 
 
-# Stage list for live progress display: (display_name, progress_threshold_for_complete)
-_DISPLAY_STAGES = [
-    ("Health check", 0.05),
-    ("Codebase analysis", 0.09),
-    ("Requirements", 0.25),
-    ("Architecture+Design", 0.65),
-    ("Roadmap+Risk", 0.95),
-    ("Finalizing", 1.00),
-]
-
-
-# ASCII cooking animation frames — cycles during live progress
-_COOKING_FRAMES = [
-    # Frame 0: stir right, steam left
-    [
-        "      ┌──┐       ",
-        "     ╭┤  ├╮      ",
-        "    ( •  • )  ~  ",
-        "     ╰─┬┬─╯ ~   ",
-        "    ╭──┘└─╮      ",
-        "    │  ⟋  │      ",
-        "    │~≈~≈~│      ",
-        "    ╰─────╯      ",
-        "     ═════       ",
-    ],
-    # Frame 1: stir left, steam right
-    [
-        "      ┌──┐       ",
-        "     ╭┤  ├╮      ",
-        "   ~  ( •  • )   ",
-        "    ~  ╰─┬┬─╯    ",
-        "     ╭──┘└──╮    ",
-        "     │  ⟍   │    ",
-        "     │≈~≈~≈ │    ",
-        "     ╰──────╯    ",
-        "      ══════     ",
-    ],
-    # Frame 2: stir right, steam both
-    [
-        "      ┌──┐       ",
-        "     ╭┤  ├╮      ",
-        "    ( °  ° ) ~   ",
-        "   ~  ╰─┬┬─╯    ",
-        "    ╭──┘└─╮      ",
-        "    │  ⟋  │      ",
-        "    │≈~≈~≈│      ",
-        "    ╰─────╯      ",
-        "     ═════       ",
-    ],
-    # Frame 3: stir left, steam up
-    [
-        "      ┌──┐  ~    ",
-        "     ╭┤  ├╮      ",
-        "    ( °  ° )     ",
-        "     ╰─┬┬─╯ ~   ",
-        "     ╭─┘└──╮    ",
-        "     │  ⟍  │    ",
-        "     │~≈~≈~│    ",
-        "     ╰─────╯    ",
-        "      ═════     ",
-    ],
-]
-
-
-_PHASE_DESCRIPTIONS = {
-    "starting": "Starting up...",
-    "initializing": "Initializing...",
-    "health_check": "Checking LLM connectivity...",
-    "loading_model": "Loading LLM model...",
-    "agent:mapping": "Mapping codebase...",
-    "agent:expanding_query": "Expanding search query (LLM)...",
-    "agent:scanning_index": "Scanning structural index (LLM)...",
-    "agent:import_expand": "Expanding imports...",
-    "agent:neighbor_expand": "Expanding to neighboring files...",
-    "agent:reading": "Reading source files...",
-    "agent:screening": "BM25 screening...",
-    "agent:confirming": "Confirming files with LLM...",
-    "agent:selecting": "Selecting relevant files...",
-    "agent:selecting_dirs": "Selecting relevant directories...",
-    "agent:synthesizing": "Synthesizing context...",
-    "agent:checking_existing": "Checking for existing implementation...",
-    "agent_exploring_complete": "Codebase analysis complete",
-    "context:reasoning": "Analyzing requirements and constraints...",
-    "context_complete": "Requirements analysis complete",
-    "architecture_design:reasoning": "Exploring architecture and design...",
-    "architecture_design_complete": "Architecture+Design complete",
-    "roadmap_risk:reasoning": "Planning roadmap and assessing risks...",
-    "roadmap_risk_complete": "Roadmap+Risk complete",
-    "coherence_check": "Checking cross-stage coherence...",
-    "scoring": "Scoring plan quality...",
-    "rendering": "Rendering plan to markdown...",
-    "writing_file": "Saving plan to disk...",
-    "finalizing": "Finalizing...",
-}
-
-
-def _get_phase_description(phase: str | None) -> str:
-    """Map a current_phase string to a human-friendly description."""
-    if not phase:
-        return ""
-    # Direct lookup
-    if phase in _PHASE_DESCRIPTIONS:
-        return _PHASE_DESCRIPTIONS[phase]
-    # Agent confirming: "agent:confirming:3/50 file.py (42 tok/s)" → "Confirming 3/50 file.py (42 tok/s)"
-    if phase.startswith("agent:confirming:"):
-        detail = phase[len("agent:confirming:") :]
-        return f"Confirming {detail}"
-    # Agent summarizing: "agent:summarizing:path/to/file.py" → "Summarizing file.py..."
-    if phase.startswith("agent:summarizing:"):
-        filename = phase.split(":")[-1].rsplit("/", 1)[-1]
-        return f"Summarizing {filename}..."
-    # Self-critique: "architecture_design:critiquing" → "Reviewing analysis..."
-    if phase.endswith(":critiquing"):
-        return "Reviewing analysis for quality..."
-    # Field group extraction: "architecture_design:extracting:approaches" → "Extracting approaches..."
-    if ":extracting:" in phase:
-        group_label = phase.split(":")[-1]
-        return f"Extracting {group_label}..."
-    # Stage name without sub-step
-    if phase in ("context", "architecture_design", "roadmap_risk"):
-        return _PHASE_DESCRIPTIONS.get(f"{phase}:reasoning", f"Working on {phase}...")
-    return phase
-
-
-def _make_live_display(
-    description: str,
-    progress: float,
-    elapsed: float,
-    current_phase: str = "",
-    stage_durations: dict[int, float] | None = None,
-    stage_started: dict[int, float] | None = None,
-    log_lines: list[str] | None = None,
-    tick: int = 0,
-    model_name: str = "",
-):
-    """Build a rich renderable for the live progress display."""
-    from rich.table import Table
-    from rich.text import Text
-
-    stage_durations = stage_durations or {}
-    stage_started = stage_started or {}
-
-    table = Table.grid(padding=(0, 2))
-    table.add_column(width=3)
-    table.add_column()
-    table.add_column(justify="right", style="dim", width=7)
-
-    # Determine previous threshold to detect "active" stage
-    prev_threshold = 0.0
-    for i, (name, threshold) in enumerate(_DISPLAY_STAGES):
-        if progress >= threshold:
-            icon = Text("✓", style="green")
-            row_style = "dim"
-            if i in stage_durations:
-                duration = _fmt_duration(stage_durations[i])
-            else:
-                duration = ""
-        elif progress >= prev_threshold:
-            icon = Text("⟳", style="yellow")
-            row_style = "bold"
-            if i in stage_started:
-                duration = _fmt_duration(time.monotonic() - stage_started[i])
-            else:
-                duration = _fmt_duration(elapsed)
-        else:
-            icon = Text("○", style="dim")
-            row_style = "dim"
-            duration = ""
-
-        table.add_row(icon, Text(name, style=row_style), Text(duration, style="dim"))
-        prev_threshold = threshold
-
-    # Progress bar
-    bar_width = 36
-    filled = int(progress * bar_width)
-    bar = "█" * filled + "░" * (bar_width - filled)
-    pct = f"{progress * 100:.0f}%"
-
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.text import Text as RichText
-
-    title = RichText(f" {description[:60]}{'…' if len(description) > 60 else ''} ", style="bold")
-    bar_text = RichText(f"\n  {bar}  {pct}", style="cyan")
-
-    # Status line: current activity
-    status_desc = _get_phase_description(current_phase)
-    status_text = (
-        RichText(f"\n  {status_desc}", style="dim italic") if status_desc else RichText("")
-    )
-
-    # Left side: progress info
-    left_parts: list = [table, bar_text, status_text]
-    if log_lines:
-        left_parts.append(RichText(""))  # spacer
-        for line in log_lines:
-            left_parts.append(RichText(f"  {line}", style="dim"))
-    left_parts.append(RichText(""))  # bottom padding
-
-    # Right side: cooking animation
-    frame = _COOKING_FRAMES[tick % len(_COOKING_FRAMES)]
-    anim_text = RichText("\n".join(frame), style="bright_black")
-
-    # Combine left + right in a two-column layout
-    layout = Table.grid(padding=(0, 3))
-    layout.add_column()
-    layout.add_column()
-    layout.add_row(Group(*left_parts), anim_text)
-
-    subtitle = RichText(f" {model_name} ", style="dim italic") if model_name else None
-
-    return Panel(
-        layout,
-        title=title,
-        subtitle=subtitle,
-        border_style="bright_black",
-    )
-
 
 async def _gather_context_for_clarification(
     client, config, description: str, source_dir: str, console
@@ -315,6 +105,31 @@ async def _gather_context_for_clarification(
     return gathered
 
 
+def _format_event(event: PlanEvent) -> str:
+    """Render a single PlanEvent as a rich-markup console line."""
+    ts = time.strftime("%H:%M:%S")
+    if isinstance(event, PhaseChanged):
+        pct = f"{event.progress * 100:3.0f}%"
+        desc = event.description or event.phase
+        return f"[dim]{ts}[/dim] [cyan]{pct}[/cyan]  {desc}"
+    if isinstance(event, JobCompleted):
+        quality = (
+            f"{event.quality_score:.2f}" if event.quality_score is not None else "N/A"
+        )
+        return (
+            f"\n[green]✓ Done[/green]  quality: {quality}  "
+            f"time: {_fmt_duration(event.elapsed_s)}"
+        )
+    if isinstance(event, JobAwaitingReview):
+        return (
+            f"\n[magenta]⏸ Awaiting review[/magenta]  "
+            f"Run 'fitz-forge confirm {event.job_id}' to proceed."
+        )
+    if isinstance(event, JobFailed):
+        return f"\n[red]✗ Failed[/red]: {event.error}"
+    return str(event)
+
+
 async def _run_inline(
     job_id: str,
     store,
@@ -322,180 +137,49 @@ async def _run_inline(
     description: str,
     pre_gathered_context: str | None = None,
     resume: bool = False,
-    live=None,
     console=None,
 ) -> None:
-    """Run a job inline with live rich progress display, then print the plan.
-
-    If ``live`` is provided, uses the existing Live display instead of
-    creating a new one (allows the caller to show the GUI before setup).
-    """
+    """Run a job inline, streaming status lines as they arrive."""
     from rich.console import Console
-    from rich.live import Live
 
-    from fitz_forge.background.worker import BackgroundWorker
-    from fitz_forge.llm.factory import create_llm_client
-    from fitz_forge.llm.llama_cpp import LlamaCppClient
-
-    client = create_llm_client(config)
-
-    # LlamaCppClient manages its own subprocess — start it before processing
-    if isinstance(client, LlamaCppClient):
-        await client.start()
-
-    worker = BackgroundWorker(
-        store,
-        config=config,
-        ollama_client=client,
-        memory_threshold=config.ollama.memory_threshold,
-    )
+    from fitz_forge.tools.run_plan import run_plan
 
     if console is None:
         console = Console(stderr=True)
-    start = time.monotonic()
 
-    # Resolve display model name from active provider
-    if config.provider == "lm_studio":
-        model_name = config.lm_studio.model
-    elif config.provider == "llama_cpp":
-        model_name = config.llama_cpp.fast_model.path
-    else:
-        model_name = config.ollama.model
+    heading = description[:80] + ("…" if len(description) > 80 else "")
+    console.print(f"[bold]{heading}[/bold]  [dim]({job_id})[/dim]")
 
-    job_task = asyncio.create_task(
-        worker.process_job_direct(job_id, pre_gathered_context=pre_gathered_context, resume=resume)
-    )
-
-    # Per-stage timing tracking
-    stage_started: dict[int, float] = {}
-    stage_durations: dict[int, float] = {}
-    prev_thresholds = [0.0] + [t for _, t in _DISPLAY_STAGES[:-1]]
-
-    # Activity log
-    log_lines: deque[str] = deque(maxlen=5)
-    last_phase = ""
-    tick = 0
-
-    owns_live = live is None
+    completed_cleanly = False
+    failed_event: JobFailed | None = None
 
     try:
-        if owns_live:
-            live = Live(
-                _make_live_display(description, 0.0, 0.0, model_name=model_name),
-                console=console,
-                refresh_per_second=4,
-            )
-            live.start()
-
-        while not job_task.done():
-            job = await store.get(job_id)
-            if job:
-                elapsed = time.monotonic() - start
-                progress = job.progress or 0.0
-                phase = job.current_phase or ""
-
-                # Track stage transitions for timing
-                for i, (_name, threshold) in enumerate(_DISPLAY_STAGES):
-                    if progress >= threshold and i not in stage_durations:
-                        if i in stage_started:
-                            stage_durations[i] = time.monotonic() - stage_started[i]
-                    elif (
-                        progress >= prev_thresholds[i]
-                        and i not in stage_started
-                        and i not in stage_durations
-                    ):
-                        stage_started[i] = time.monotonic()
-
-                # Track phase changes for activity log
-                if phase and phase != last_phase:
-                    desc = _get_phase_description(phase)
-                    if desc:
-                        log_lines.append(f"{time.strftime('%H:%M:%S')} {desc}")
-                    last_phase = phase
-
-                # Update model name dynamically for llama_cpp
-                if isinstance(client, LlamaCppClient):
-                    model_name = client.active_model
-
-                live.update(
-                    _make_live_display(
-                        description,
-                        progress,
-                        elapsed,
-                        current_phase=phase,
-                        stage_durations=stage_durations,
-                        stage_started=stage_started,
-                        log_lines=list(log_lines),
-                        tick=tick,
-                        model_name=model_name,
-                    )
-                )
-            tick += 1
-            await asyncio.sleep(0.3)
-
-        # Final update
-        job = await store.get(job_id)
-        if job:
-            elapsed = time.monotonic() - start
-            live.update(
-                _make_live_display(
-                    description,
-                    job.progress or 0.0,
-                    elapsed,
-                    current_phase=job.current_phase or "",
-                    stage_durations=stage_durations,
-                    stage_started=stage_started,
-                    log_lines=list(log_lines),
-                    tick=tick,
-                    model_name=model_name,
-                )
-            )
-
+        async for event in run_plan(
+            job_id=job_id,
+            store=store,
+            config=config,
+            pre_gathered_context=pre_gathered_context,
+            resume=resume,
+        ):
+            console.print(_format_event(event))
+            if isinstance(event, JobCompleted):
+                if event.file_path:
+                    console.print(f"[dim]Saved:[/dim] {event.file_path}")
+                    console.print(f"[dim]View :[/dim]  fitz-forge get {job_id}")
+                console.print()
+                completed_cleanly = True
+            elif isinstance(event, JobAwaitingReview):
+                completed_cleanly = True
+            elif isinstance(event, JobFailed):
+                failed_event = event
     except (KeyboardInterrupt, asyncio.CancelledError):
-        job_task.cancel()
-        try:
-            await job_task
-        except (asyncio.CancelledError, Exception):
-            pass
-        if isinstance(client, LlamaCppClient):
-            await client.stop()
-        if owns_live:
-            live.stop()
         raise KeyboardInterrupt from None
-    finally:
-        if owns_live:
-            live.stop()
-        if isinstance(client, LlamaCppClient):
-            await client.stop()
 
-    # Check result
-    exc = job_task.exception()
-    if exc:
-        raise exc
-
-    # Print result
-    final_job = await store.get(job_id)
-    if not final_job:
-        return
-
-    state = final_job.state.value
-    quality = f"{final_job.quality_score:.2f}" if final_job.quality_score else "N/A"
-    elapsed = time.monotonic() - start
-
-    console.print()
-    if state == "complete":
-        console.print(f"[green]✓ Done[/green]  quality: {quality}  time: {_fmt_duration(elapsed)}")
-        if final_job.file_path:
-            console.print(f"[dim]Saved:[/dim] {final_job.file_path}")
-            console.print(f"[dim]View:[/dim]  fitz-forge get {job_id}")
-        console.print()
-    elif state == "awaiting_review":
-        console.print(
-            f"[magenta]⏸ Awaiting review[/magenta]  Run 'fitz-forge confirm {job_id}' to proceed."
-        )
-    else:
-        error = final_job.error or "unknown error"
-        console.print(f"[red]✗ Failed[/red]: {error}")
+    if failed_event is not None:
+        raise typer.Exit(1)
+    if not completed_cleanly:
+        # Worker exited without emitting a terminal event — treat as failure.
+        console.print("[red]✗ Failed[/red]: job ended without terminal event")
         raise typer.Exit(1)
 
 
@@ -519,19 +203,18 @@ def plan(
         import logging as _logging
 
         from rich.console import Console as _Console
-        from rich.live import Live
 
         config = load_config()
         enriched_description = description
         pre_gathered_context: str | None = None
+        console = _Console(stderr=True)
 
-        # Clarification flow needs interactive terminal — runs before GUI
+        # Clarification flow needs interactive terminal — runs before the stream
         if clarify and not detach and sys.stdin.isatty():
             try:
                 from fitz_forge.llm.factory import create_llm_client
                 from fitz_forge.planning.clarification import get_clarifying_questions
 
-                console = _Console(stderr=True)
                 client = create_llm_client(config)
                 if await client.health_check():
                     effective_source_dir = source_dir or config.agent.source_dir or "."
@@ -576,25 +259,8 @@ def plan(
             typer.echo(f"Queued job {result['job_id']}. Run 'fitz-forge run' to start processing.")
             return
 
-        # Resolve model name for display (sync, instant)
-        if config.provider == "lm_studio":
-            model_name = config.lm_studio.model
-        elif config.provider == "llama_cpp":
-            model_name = config.llama_cpp.fast_model.path
-        else:
-            model_name = config.ollama.model
-
-        # Show GUI immediately, do setup in background
-        console = _Console(stderr=True)
-        live = Live(
-            _make_live_display(enriched_description, 0.0, 0.0, model_name=model_name),
-            console=console,
-            refresh_per_second=4,
-        )
-        live.start()
-
+        store = await _get_store()
         try:
-            store = await _get_store()
             result = await create_plan(
                 description=enriched_description,
                 timeline=timeline,
@@ -613,12 +279,8 @@ def plan(
                 config,
                 enriched_description,
                 pre_gathered_context=pre_gathered_context,
-                live=live,
                 console=console,
             )
-        except Exception:
-            live.stop()
-            raise
         finally:
             await store.close()
 

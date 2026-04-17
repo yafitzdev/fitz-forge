@@ -262,149 +262,133 @@ class TestCancel:
 # ---------------------------------------------------------------------------
 
 
-class TestPhaseDescriptions:
-    """Tests for _PHASE_DESCRIPTIONS and _get_phase_description."""
+class TestDescribePhase:
+    """Tests for fitz_forge.models.events.describe_phase."""
 
     def test_known_phase_direct_lookup(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("health_check") == "Checking LLM connectivity..."
+        assert describe_phase("health_check") == "Checking LLM connectivity..."
 
     def test_reasoning_substep(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
         assert (
-            _get_phase_description("architecture_design:reasoning")
+            describe_phase("architecture_design:reasoning")
             == "Exploring architecture and design..."
         )
 
     def test_critiquing_substep(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
         assert (
-            _get_phase_description("architecture_design:critiquing")
+            describe_phase("architecture_design:critiquing")
             == "Reviewing analysis for quality..."
         )
 
     def test_agent_mapping_phase(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("agent:mapping") == "Mapping codebase..."
+        assert describe_phase("agent:mapping") == "Mapping codebase..."
 
     def test_agent_selecting_phase(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("agent:selecting") == "Selecting relevant files..."
+        assert describe_phase("agent:selecting") == "Selecting relevant files..."
 
     def test_agent_summarizing_phase(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        desc = _get_phase_description("agent:summarizing:src/main.py")
+        desc = describe_phase("agent:summarizing:src/main.py")
         assert desc == "Summarizing main.py..."
 
     def test_agent_synthesizing_phase(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("agent:synthesizing") == "Synthesizing context..."
+        assert describe_phase("agent:synthesizing") == "Synthesizing context..."
 
     def test_bare_stage_name_maps_to_reasoning(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        desc = _get_phase_description("context")
+        desc = describe_phase("context")
         assert desc == "Analyzing requirements and constraints..."
 
     def test_empty_phase_returns_empty(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("") == ""
-        assert _get_phase_description(None) == ""
+        assert describe_phase("") == ""
+        assert describe_phase(None) == ""
 
     def test_unknown_phase_returns_as_is(self):
-        from fitz_forge.cli import _get_phase_description
+        from fitz_forge.models.events import describe_phase
 
-        assert _get_phase_description("some_unknown_thing") == "some_unknown_thing"
+        assert describe_phase("some_unknown_thing") == "some_unknown_thing"
 
     def test_all_stages_have_reasoning(self):
         """All 3 pipeline stages should have reasoning descriptions."""
-        from fitz_forge.cli import _PHASE_DESCRIPTIONS
+        from fitz_forge.models.events import _PHASE_DESCRIPTIONS
 
         for stage in ("context", "architecture_design", "roadmap_risk"):
             assert f"{stage}:reasoning" in _PHASE_DESCRIPTIONS, f"Missing {stage}:reasoning"
 
 
-class TestMakeLiveDisplay:
-    """Tests for _make_live_display rendering."""
+class TestFormatEvent:
+    """Tests for cli._format_event rendering each PlanEvent type."""
 
-    def test_basic_rendering(self):
-        from fitz_forge.cli import _make_live_display
+    def test_phase_changed(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import PhaseChanged
 
-        panel = _make_live_display("Test project", 0.5, 30.0)
-        # Should return a rich Panel
-        from rich.panel import Panel
-
-        assert isinstance(panel, Panel)
-
-    def test_with_stage_durations(self):
-        from fitz_forge.cli import _make_live_display
-
-        panel = _make_live_display(
-            "Test project",
-            0.5,
-            45.0,
-            stage_durations={0: 2.0, 1: 38.0, 2: 24.0},
+        line = _format_event(
+            PhaseChanged(
+                job_id="abc",
+                progress=0.42,
+                phase="architecture_design:reasoning",
+                description="Exploring architecture and design...",
+            )
         )
-        from rich.panel import Panel
+        assert "42%" in line
+        assert "Exploring architecture and design" in line
 
-        assert isinstance(panel, Panel)
+    def test_completed(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobCompleted
 
-    def test_with_status_line(self):
-        from fitz_forge.cli import _make_live_display
-
-        panel = _make_live_display(
-            "Test project",
-            0.3,
-            20.0,
-            current_phase="architecture_design:generating",
+        line = _format_event(
+            JobCompleted(
+                job_id="abc",
+                file_path="/tmp/plan.md",
+                quality_score=0.87,
+                elapsed_s=272.0,
+            )
         )
-        from rich.panel import Panel
+        assert "Done" in line
+        assert "0.87" in line
+        assert "4m32s" in line
 
-        assert isinstance(panel, Panel)
+    def test_completed_without_quality(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobCompleted
 
-    def test_with_log_lines(self):
-        from fitz_forge.cli import _make_live_display
-
-        panel = _make_live_display(
-            "Test project",
-            0.6,
-            60.0,
-            log_lines=[
-                "12:04:21 Requirements analysis complete",
-                "12:04:45 Exploring approaches...",
-            ],
+        line = _format_event(
+            JobCompleted(job_id="abc", file_path=None, quality_score=None, elapsed_s=5.0)
         )
-        from rich.panel import Panel
+        assert "N/A" in line
 
-        assert isinstance(panel, Panel)
+    def test_awaiting_review(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobAwaitingReview
 
-    def test_with_active_stage_timer(self):
-        import time
-        from fitz_forge.cli import _make_live_display
+        line = _format_event(JobAwaitingReview(job_id="abc", elapsed_s=10.0))
+        assert "Awaiting review" in line
+        assert "fitz-forge confirm abc" in line
 
-        panel = _make_live_display(
-            "Test project",
-            0.3,
-            15.0,
-            stage_started={3: time.monotonic() - 10},
+    def test_failed(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobFailed
+
+        line = _format_event(
+            JobFailed(job_id="abc", error="boom", elapsed_s=7.0)
         )
-        from rich.panel import Panel
-
-        assert isinstance(panel, Panel)
-
-    def test_long_description_truncated(self):
-        from fitz_forge.cli import _make_live_display
-
-        long_desc = "A" * 100
-        panel = _make_live_display(long_desc, 0.0, 0.0)
-        from rich.panel import Panel
-
-        assert isinstance(panel, Panel)
+        assert "Failed" in line
+        assert "boom" in line
