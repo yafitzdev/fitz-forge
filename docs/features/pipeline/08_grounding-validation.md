@@ -166,9 +166,10 @@ requires a client to be available; AST validation always runs.
 
 | File | Role |
 |------|------|
-| `fitz_forge/planning/validation/grounding/check.py` | `StructuralIndexLookup`, `check_artifact()`, AST walker for `self.method()`, function, class, signature checks |
-| `fitz_forge/planning/validation/grounding/index.py` | `augment_from_source_dir()` — augments the structural index with disk-only classes |
-| `fitz_forge/planning/validation/grounding/inference.py` | `try_parse()` (class-wrap + import-split fallback), `extract_type_name()` |
+| `fitz_forge/planning/validation/grounding/check.py` | `check_artifact()`, tree-sitter walker for `self.method()`, function, class, signature checks |
+| `fitz_forge/planning/validation/grounding/index.py` | `StructuralIndexLookup`, `augment_from_source_dir()` — augments the index with disk-only classes |
+| `fitz_forge/planning/validation/grounding/inference.py` | Tree-sitter helpers: `extract_type_name`, `infer_return_type`, `extract_init_self_attrs`, `augment_from_source_dir` |
+| `fitz_forge/planning/validation/grounding/parser.py` | `parse_python()` — tree-sitter parser with class-wrap + import-split recovery |
 | `fitz_forge/planning/validation/grounding/llm.py` | `repair_violations()`, `validate_grounding()`, `GroundingReport` |
 | `fitz_forge/planning/pipeline/orchestrator.py` | Calls `validate_grounding()` after synthesis |
 | `fitz_forge/planning/pipeline/stages/base.py` | `extract_json()` used by repair to parse LLM responses |
