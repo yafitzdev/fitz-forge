@@ -24,12 +24,22 @@ class PhaseChanged:
 
 @dataclass(frozen=True)
 class JobCompleted:
-    """Terminal event — job finished successfully."""
+    """Terminal event — job finished successfully.
+
+    quality_score is rendered as ``N/{max_quality_score}`` when both are set.
+    When ``quality_applicable=False`` the CLI renders it as an em-dash,
+    signalling "not applicable" (e.g. short-circuit: task already implemented,
+    no artifacts to score). When scoring raised an error but the plan otherwise
+    succeeded, both fields are None and ``quality_error`` carries the message.
+    """
 
     job_id: str
     file_path: str | None
     quality_score: float | None
     elapsed_s: float
+    max_quality_score: int | None = None
+    quality_applicable: bool = True
+    quality_error: str | None = None
 
 
 @dataclass(frozen=True)

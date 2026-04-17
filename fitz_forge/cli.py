@@ -113,9 +113,24 @@ def _format_event(event: PlanEvent) -> str:
         desc = event.description or event.phase
         return f"[dim]{ts}[/dim] [cyan]{pct}[/cyan]  {desc}"
     if isinstance(event, JobCompleted):
-        quality = (
-            f"{event.quality_score:.2f}" if event.quality_score is not None else "N/A"
-        )
+        # Three renderings:
+        #   - n/a (em-dash): plan succeeded but had no artifacts to score
+        #     (e.g. implementation-already-exists short-circuit).
+        #   - ?: scoring raised an error; plan is still fine.
+        #   - 58/70: live deterministic score (artifact_quality + consistency).
+        if not event.quality_applicable:
+            quality = "—"
+        elif event.quality_error is not None:
+            quality = "?"
+        elif event.quality_score is None:
+            quality = "—"
+        else:
+            max_q = event.max_quality_score or 70
+            # Integer display when clean; one decimal when fractional.
+            if float(event.quality_score).is_integer():
+                quality = f"{int(event.quality_score)}/{max_q}"
+            else:
+                quality = f"{event.quality_score:.1f}/{max_q}"
         return (
             f"\n[green]✓ Done[/green]  quality: {quality}  "
             f"time: {_fmt_duration(event.elapsed_s)}"

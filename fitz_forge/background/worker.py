@@ -84,6 +84,10 @@ class BackgroundWorker:
         self._resume_from_checkpoint: bool = False
         self._run_started: float | None = None
         self._task: asyncio.Task | None = None
+        # Per-run live-scoring metadata, set by _process_job, consumed by
+        # process_job_direct when emitting JobCompleted.
+        self._last_quality_applicable: bool = True
+        self._last_quality_error: str | None = None
 
         # Initialize pipeline components if config provided
         self._pipeline: PlanningPipeline | None = None
@@ -562,13 +566,65 @@ class BackgroundWorker:
 
         file_path.write_text(markdown, encoding="utf-8")
 
-        # Step 7: Update job with file path
+        # Step 7: Live quality scoring (deterministic, no LLM — artifact_quality + consistency).
+        # Skipped completely if the pipeline short-circuited with no artifacts.
+        # Never fatal: on error, we log and leave quality_score=None.
+        quality_score: float | None = None
+        quality_applicable = True
+        quality_error: str | None = None
+        try:
+            from fitz_forge.planning.validation.scoring import score_plan_live
+
+            # Build the same plan_data shape score_plan_live expects from
+            # pipeline outputs (design.artifacts and decision_decomposition
+            # would already be there).
+            plan_data_for_scoring: dict[str, Any] = {
+                "design": result.outputs.get("design", {}),
+            }
+            if "decision_decomposition" in result.outputs:
+                plan_data_for_scoring["decision_decomposition"] = result.outputs[
+                    "decision_decomposition"
+                ]
+            agent_ctx = result.outputs.get("_agent_context", {}) or {}
+            full_index = (
+                agent_ctx.get("full_structural_index", "")
+                or result.outputs.get("_gathered_context", "")
+            )
+            source_dir = result.outputs.get("_source_dir", "") or ""
+
+            live_score = score_plan_live(
+                plan_data_for_scoring,
+                structural_index=full_index,
+                source_dir=source_dir,
+            )
+            if live_score.applicable:
+                quality_score = live_score.total
+            else:
+                quality_applicable = False
+            logger.info(
+                f"Live scoring: applicable={live_score.applicable} "
+                f"total={live_score.total}/70 "
+                f"(artifact_quality={live_score.artifact_quality}, "
+                f"consistency={live_score.consistency}, "
+                f"artifacts={live_score.artifact_count})"
+            )
+        except Exception as e:  # noqa: BLE001 — scoring must not kill the run
+            quality_error = f"{type(e).__name__}: {e}"
+            logger.warning(f"Live scoring failed (non-fatal): {quality_error}")
+
+        # Step 8: Update job with file path + quality score
         await self._set_phase(
             job.job_id,
             "finalizing",
             progress=0.99,
             file_path=str(file_path),
+            quality_score=quality_score,
         )
+
+        # Stash live-score metadata on self for process_job_direct to read
+        # when emitting the JobCompleted event.
+        self._last_quality_applicable = quality_applicable
+        self._last_quality_error = quality_error
 
         logger.info(f"Job {job.job_id} completed: plan written to {file_path}")
 
@@ -621,6 +677,9 @@ class BackgroundWorker:
                         file_path=final_job.file_path if final_job else None,
                         quality_score=final_job.quality_score if final_job else None,
                         elapsed_s=self._elapsed(),
+                        max_quality_score=70,
+                        quality_applicable=self._last_quality_applicable,
+                        quality_error=self._last_quality_error,
                     )
                 )
         except Exception as e:
@@ -638,6 +697,8 @@ class BackgroundWorker:
             self._pre_gathered_context = None
             self._resume_from_checkpoint = False
             self._run_started = None
+            self._last_quality_applicable = True
+            self._last_quality_error = None
 
     def _build_messages(self, job) -> list[dict]:
         """

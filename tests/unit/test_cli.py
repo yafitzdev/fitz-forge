@@ -358,22 +358,63 @@ class TestFormatEvent:
             JobCompleted(
                 job_id="abc",
                 file_path="/tmp/plan.md",
-                quality_score=0.87,
+                quality_score=58.0,
                 elapsed_s=272.0,
+                max_quality_score=70,
+                quality_applicable=True,
             )
         )
         assert "Done" in line
-        assert "0.87" in line
+        assert "58/70" in line
         assert "4m32s" in line
 
-    def test_completed_without_quality(self):
+    def test_completed_without_quality_renders_em_dash(self):
+        """applicable=False (e.g. short-circuit: no artifacts) -> em-dash."""
         from fitz_forge.cli import _format_event
         from fitz_forge.models.events import JobCompleted
 
         line = _format_event(
-            JobCompleted(job_id="abc", file_path=None, quality_score=None, elapsed_s=5.0)
+            JobCompleted(
+                job_id="abc",
+                file_path=None,
+                quality_score=None,
+                elapsed_s=5.0,
+                quality_applicable=False,
+            )
         )
-        assert "N/A" in line
+        assert "—" in line
+
+    def test_completed_with_scoring_error_renders_question_mark(self):
+        """Scoring failed but plan succeeded -> ? so user sees something odd."""
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobCompleted
+
+        line = _format_event(
+            JobCompleted(
+                job_id="abc",
+                file_path="/tmp/plan.md",
+                quality_score=None,
+                elapsed_s=5.0,
+                quality_applicable=True,
+                quality_error="boom",
+            )
+        )
+        assert "?" in line
+
+    def test_completed_with_fractional_quality_uses_one_decimal(self):
+        from fitz_forge.cli import _format_event
+        from fitz_forge.models.events import JobCompleted
+
+        line = _format_event(
+            JobCompleted(
+                job_id="abc",
+                file_path="/tmp/plan.md",
+                quality_score=58.3,
+                elapsed_s=10.0,
+                max_quality_score=70,
+            )
+        )
+        assert "58.3/70" in line
 
     def test_awaiting_review(self):
         from fitz_forge.cli import _format_event
