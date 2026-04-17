@@ -234,6 +234,13 @@ def check_artifact(
 
     Returns a list of Violations. Empty list means the artifact is grounded.
     """
+    from .index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_check import check_artifact as _ts_check_artifact
+
+        return _ts_check_artifact(artifact, lookup)
+
     filename = artifact.get("filename", "unknown")
     content = artifact.get("content", "")
 
@@ -494,6 +501,13 @@ def _check_parallel_signatures(
     lookup: StructuralIndexLookup,
 ) -> list[Violation]:
     """Check that parallel methods (e.g. generate_stream) match the original's params."""
+    from .index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_check import check_parallel_signatures
+
+        return check_parallel_signatures(artifacts, lookup)
+
     violations: list[Violation] = []
 
     for artifact in artifacts:
