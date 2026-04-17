@@ -65,7 +65,7 @@ Issues = "https://github.com/yafitzdev/fitz-forge/issues"
 Documentation = "https://github.com/yafitzdev/fitz-forge#readme"
 
 [project.scripts]
-fitz = "fitz_forge.cli:app"
+fitz-forge = "fitz_forge.cli:app"
 
 [tool.pytest.ini_options]
 # -p fitz_forge: forces early import of fitz_forge/__init__.py which
