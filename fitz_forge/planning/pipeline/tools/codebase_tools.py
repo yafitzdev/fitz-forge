@@ -127,16 +127,27 @@ def make_codebase_tools(
         """Look up the full signature of a method on a class in the codebase."""
         class_name = _strip_module(class_name)
         method_name = _strip_module(method_name)
-        # Try AST from source code first (most accurate)
+
+        from fitz_forge.planning.validation.grounding.index import get_engine
+
+        # Try source-based resolution first (most accurate) — tree-sitter
+        # when engine is tree_sitter, ast otherwise.
         src = _find_source(class_name)
         if src:
-            cls_node = _find_class_node(src, class_name)
-            if cls_node:
-                for node in ast.iter_child_nodes(cls_node):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if node.name == method_name:
-                            sig = _format_method_sig(node)
-                            return f"{class_name}.{sig}"
+            if get_engine() == "tree_sitter":
+                from ._ts_codebase_tools import lookup_method as _ts_lookup_method
+
+                hit = _ts_lookup_method(src, class_name, method_name)
+                if hit:
+                    return hit
+            else:
+                cls_node = _find_class_node(src, class_name)
+                if cls_node:
+                    for node in ast.iter_child_nodes(cls_node):
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            if node.name == method_name:
+                                sig = _format_method_sig(node)
+                                return f"{class_name}.{sig}"
 
         # Fall back to structural index
         if lookup.class_has_method(class_name, method_name):
@@ -164,8 +175,17 @@ def make_codebase_tools(
         class_name = _strip_module(class_name)
         parts = []
 
+        from fitz_forge.planning.validation.grounding.index import get_engine
+
         # AST-based (most accurate)
         src = _find_source(class_name)
+        if src and get_engine() == "tree_sitter":
+            from ._ts_codebase_tools import lookup_class as _ts_lookup_class
+
+            hit = _ts_lookup_class(src, class_name)
+            if hit:
+                return hit
+
         if src:
             cls_node = _find_class_node(src, class_name)
             if cls_node:

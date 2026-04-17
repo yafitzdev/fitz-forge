@@ -495,23 +495,60 @@ def ensure_valid_artifacts(
         if not content.strip():
             continue
 
-        # 1. Syntax check
-        try:
-            tree = ast.parse(content)
-        except SyntaxError as e:
-            line_num = e.lineno or 1
-            lines = content.splitlines()
-            if 0 < line_num <= len(lines):
-                lines[line_num - 1] += f"  # [SYNTAX ERROR: {e.msg}]"
-                artifact["content"] = "\n".join(lines)
-                annotated += 1
-            continue
+        from fitz_forge.planning.validation.grounding.index import get_engine
 
-        # 2. Cross-reference method calls
-        if not known_methods:
-            continue
+        calls: list[tuple[str, int]] = []
+        if get_engine() == "tree_sitter":
+            from fitz_forge.planning.validation.grounding._ts_parser import parse_python
 
-        calls = _extract_method_calls_from_ast(tree)
+            tree_ts = parse_python(content)
+            if tree_ts is None:
+                # Parser failure ≈ SyntaxError in ast path. We don't have
+                # line/message detail from tree-sitter's boolean check, so
+                # we tag line 1 as the failure point (ast path reports the
+                # first error line but the annotation shape is identical).
+                lines = content.splitlines()
+                if lines:
+                    lines[0] += "  # [SYNTAX ERROR: unparseable]"
+                    artifact["content"] = "\n".join(lines)
+                    annotated += 1
+                continue
+            if not known_methods:
+                continue
+            # BFS for call nodes whose callee is an attribute
+            stack = [tree_ts.root_node]
+            while stack:
+                n = stack.pop()
+                if n.type == "call":
+                    callee = next(
+                        (c for c in n.children if c.is_named and c.type != "argument_list"),
+                        None,
+                    )
+                    if callee is not None and callee.type == "attribute":
+                        idents = [c for c in callee.children if c.type == "identifier"]
+                        if idents:
+                            calls.append(
+                                (idents[-1].text.decode("utf-8"), n.start_point[0] + 1)
+                            )
+                stack.extend(n.children)
+        else:
+            # 1. Syntax check
+            try:
+                tree = ast.parse(content)
+            except SyntaxError as e:
+                line_num = e.lineno or 1
+                lines = content.splitlines()
+                if 0 < line_num <= len(lines):
+                    lines[line_num - 1] += f"  # [SYNTAX ERROR: {e.msg}]"
+                    artifact["content"] = "\n".join(lines)
+                    annotated += 1
+                continue
+
+            # 2. Cross-reference method calls
+            if not known_methods:
+                continue
+
+            calls = _extract_method_calls_from_ast(tree)
         suspicious: set[int] = set()
         for method_name, line_num in calls:
             if method_name.startswith("_"):
