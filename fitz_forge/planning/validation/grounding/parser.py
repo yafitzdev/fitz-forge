@@ -1,11 +1,10 @@
-# fitz_forge/planning/validation/grounding/_ts_parser.py
+# fitz_forge/planning/validation/grounding/parser.py
 """Tree-sitter parser infrastructure for grounding checks.
 
 Centralises parser construction so callers don't each hold a singleton.
-Exposes ``parse_python(source) -> Tree | None`` with the same recovery
-chain as ``inference.try_parse`` (raw → dedent → class-wrap → import-split
-+ class-wrap), enabling a side-by-side tree-sitter backend alongside the
-existing Python-ast backend.
+Exposes ``parse_python(source) -> Tree | None`` with a recovery chain
+(raw → dedent → class-wrap → import-split + class-wrap) matching the
+shapes produced by the artifact pipeline.
 
 The module is intentionally narrow — tree traversal utilities live next
 to the callers that use them.

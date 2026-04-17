@@ -16,13 +16,13 @@ import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..validation.grounding._ts_inference import (
+from ..validation.grounding.inference import (
     _class_body,
     _rightmost_attribute_name,
     _unwrap_decorated,
     iter_all_classes,
 )
-from ..validation.grounding._ts_parser import parse_python
+from ..validation.grounding.parser import parse_python
 from .context import ArtifactContext
 
 if TYPE_CHECKING:

@@ -26,7 +26,7 @@ from fitz_forge.planning.pipeline.stages.base import (
     StageResult,
     extract_json,
 )
-from fitz_forge.planning.validation.grounding._ts_inference import (
+from fitz_forge.planning.validation.grounding.inference import (
     _unwrap_decorated as _ts_unwrap_decorated,
     extract_call_class_name as _ts_extract_call_class_name,
     find_class_anywhere as _ts_find_class_anywhere,
@@ -37,7 +37,7 @@ from fitz_forge.planning.validation.grounding._ts_inference import (
     iter_init_self_assignments as _ts_iter_init_self_assignments,
     unparse_annotation as _ts_unparse_annotation,
 )
-from fitz_forge.planning.validation.grounding._ts_parser import parse_python as _ts_parse_python
+from fitz_forge.planning.validation.grounding.parser import parse_python as _ts_parse_python
 from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,

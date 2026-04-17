@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._ts_inference import (
+from .inference import (
     _callable_of,
     _function_name,
     _rightmost_attribute_name,
@@ -27,7 +27,7 @@ from ._ts_inference import (
     iter_all_classes,
     iter_class_methods,
 )
-from ._ts_parser import parse_python
+from .parser import parse_python
 from .index import IndexedClass, StructuralIndexLookup
 
 if TYPE_CHECKING:

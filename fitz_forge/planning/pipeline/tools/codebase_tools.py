@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fitz_forge.planning.validation.grounding import StructuralIndexLookup
-from fitz_forge.planning.validation.grounding._ts_inference import (
+from fitz_forge.planning.validation.grounding.inference import (
     _class_body,
     _function_name,
     _returns_annotation,
@@ -25,7 +25,7 @@ from fitz_forge.planning.validation.grounding._ts_inference import (
     iter_class_methods,
     unparse_annotation,
 )
-from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 if TYPE_CHECKING:
     from tree_sitter import Node

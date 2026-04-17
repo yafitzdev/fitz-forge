@@ -24,8 +24,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ..validation.grounding._ts_inference import _unwrap_decorated
-from ..validation.grounding._ts_parser import parse_python
+from ..validation.grounding.inference import _unwrap_decorated
+from ..validation.grounding.parser import parse_python
 
 if TYPE_CHECKING:
     from tree_sitter import Node

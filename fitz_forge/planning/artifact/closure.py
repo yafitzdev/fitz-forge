@@ -38,7 +38,7 @@ from fitz_forge.planning.validation.grounding import (
 from fitz_forge.planning.validation.grounding import (
     StructuralIndexLookup,
 )
-from fitz_forge.planning.validation.grounding._ts_inference import (
+from fitz_forge.planning.validation.grounding.inference import (
     _callable_of,
     _class_body,
     _function_is_async,
@@ -51,7 +51,7 @@ from fitz_forge.planning.validation.grounding._ts_inference import (
     iter_class_methods,
     unparse_annotation,
 )
-from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

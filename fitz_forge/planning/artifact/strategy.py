@@ -336,7 +336,7 @@ def _surgical_grounding_block(ctx: ArtifactContext) -> str:
 
 def _extract_change_hint(reference_body: str) -> str:
     """Find the last return statement in the reference method."""
-    from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+    from fitz_forge.planning.validation.grounding.parser import parse_python
 
     output_line = ""
     wrapped = f"class _W:\n{reference_body}"

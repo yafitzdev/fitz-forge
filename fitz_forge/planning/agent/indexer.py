@@ -22,7 +22,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from ..validation.grounding._ts_inference import (
+from ..validation.grounding.inference import (
     _class_body,
     _function_is_async,
     _function_name,
@@ -32,7 +32,7 @@ from ..validation.grounding._ts_inference import (
     iter_class_methods,
     unparse_annotation,
 )
-from ..validation.grounding._ts_parser import parse_python
+from ..validation.grounding.parser import parse_python
 
 if TYPE_CHECKING:
     from tree_sitter import Node

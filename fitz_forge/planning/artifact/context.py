@@ -168,7 +168,7 @@ def _extract_target_self_methods(source: str) -> str:
     if not source:
         return ""
 
-    from fitz_forge.planning.validation.grounding._ts_inference import (
+    from fitz_forge.planning.validation.grounding.inference import (
         _function_is_async,
         _function_name,
         _returns_annotation,
@@ -176,7 +176,7 @@ def _extract_target_self_methods(source: str) -> str:
         iter_class_methods,
         unparse_annotation,
     )
-    from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+    from fitz_forge.planning.validation.grounding.parser import parse_python
 
     tree = parse_python(source)
     if tree is None:

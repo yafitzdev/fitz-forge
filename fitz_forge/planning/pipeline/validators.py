@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Any
 
-from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, extract_json

@@ -16,44 +16,12 @@ The index tracks classes (methods + fields + bases), top-level functions
 
 from __future__ import annotations
 
-import ast
 import difflib
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-
-from .inference import (
-    extract_class_fields,
-    extract_type_name,
-    infer_return_type,
-    unparse_annotation,
-)
 
 logger = logging.getLogger(__name__)
-
-# Parser engine for ``augment_from_source_dir``. ``"tree_sitter"`` is the
-# default (byte-parity with the legacy ast walker; ~5× faster on a 500-
-# file tree). ``"ast"`` is kept as a rollback path until the migration
-# has soaked. Flip via ``set_engine()``.
-_ENGINE: str = "tree_sitter"
-
-
-def set_engine(engine: str) -> None:
-    """Select the parser backend for ``augment_from_source_dir``.
-
-    Valid values: ``"ast"`` (default), ``"tree_sitter"``. Invalid values
-    raise ``ValueError``.
-    """
-    global _ENGINE
-    if engine not in ("ast", "tree_sitter"):
-        raise ValueError(f"Unknown engine: {engine!r}")
-    _ENGINE = engine
-
-
-def get_engine() -> str:
-    """Return the currently-selected parser backend."""
-    return _ENGINE
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +244,7 @@ class StructuralIndexLookup:
     # ------------------------------------------------------------------
 
     def augment_from_source_dir(self, source_dir: str) -> int:
-        """Walk a source directory and enrich the index from real AST.
+        """Walk a source directory and enrich the index from real source.
 
         Two passes:
             1. Collect all classes and functions (names, structure).
@@ -286,116 +254,6 @@ class StructuralIndexLookup:
 
         Returns the number of new classes added.
         """
-        if _ENGINE == "tree_sitter":
-            from ._ts_inference import augment_from_source_dir as _ts_augment
+        from .inference import augment_from_source_dir as _augment
 
-            return _ts_augment(self, source_dir)
-
-        root = Path(source_dir)
-        if not root.is_dir():
-            return 0
-
-        # Pass 1: collect
-        parsed_files: list[tuple[str, ast.Module]] = []
-        added = 0
-        for py_file in root.rglob("*.py"):
-            rel = str(py_file.relative_to(root)).replace("\\", "/")
-            if ".venv" in rel or "__pycache__" in rel:
-                continue
-            try:
-                text = py_file.read_bytes()[:200_000].decode("utf-8", errors="replace")
-                tree = ast.parse(text)
-            except (SyntaxError, OSError):
-                continue
-            parsed_files.append((rel, tree))
-            added += self._absorb_file_pass1(rel, tree)
-
-        # Pass 2: enrich function return types using full class list
-        known_classes = set(self._all_class_names)
-        for rel, tree in parsed_files:
-            self._absorb_file_pass2(rel, tree, known_classes)
-
-        return added
-
-    def _absorb_file_pass1(self, rel: str, tree: ast.Module) -> int:
-        """Pass 1: add classes (methods + fields + bases) and functions (params only)."""
-        added = 0
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                self._absorb_class(rel, node)
-                added += 1
-            elif isinstance(node, ast.FunctionDef) and getattr(node, "col_offset", 1) == 0:
-                name = node.name
-                if name in self._all_function_names:
-                    continue
-                # Capture all parameter kinds so the downstream arity check
-                # doesn't flag correct calls to functions with keyword-only
-                # args (e.g. `def f(a, b, *, x=0, y=0)`). Previously we only
-                # captured positional-or-keyword args, which made any call
-                # using the kwonly params look like wrong_arity.
-                params = [a.arg for a in node.args.args]
-                params.extend(a.arg for a in node.args.kwonlyargs)
-                if node.args.vararg:
-                    params.append(f"*{node.args.vararg.arg}")
-                if node.args.kwarg:
-                    params.append(f"**{node.args.kwarg.arg}")
-                func = IndexedFunction(name, rel, params, None)  # return type later
-                self.functions.setdefault(name, []).append(func)
-                self._all_function_names.add(name)
-        return added
-
-    def _absorb_file_pass2(self, rel: str, tree: ast.Module, known_classes: set[str]) -> None:
-        """Pass 2: infer return types for functions that have no annotation."""
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if getattr(node, "col_offset", 1) != 0:
-                continue
-            # Find the matching IndexedFunction we stored in pass 1
-            funcs = self.functions.get(node.name, [])
-            for f in funcs:
-                if f.file == rel and f.return_type is None:
-                    ret = infer_return_type(node, known_classes)
-                    if ret:
-                        f.return_type = ret
-                    break
-
-    def _absorb_class(self, rel: str, node: ast.ClassDef) -> None:
-        """Absorb one class node: methods, fields, bases."""
-        name = node.name
-        methods: dict[str, IndexedMethod] = {}
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                mname = child.name
-                if mname.startswith("__") and mname != "__init__":
-                    continue
-                ret = unparse_annotation(child.returns)
-                if ret is None:
-                    # Try body inference for unannotated methods
-                    from .inference import _infer_return_from_body, _infer_return_from_yields
-
-                    ret = _infer_return_from_body(child) or _infer_return_from_yields(child)
-                methods[mname] = IndexedMethod(mname, ret)
-
-        fields = extract_class_fields(node)
-        bases = [extract_type_name(b) or "" for b in node.bases]
-        bases = [b for b in bases if b]
-
-        if name in self._all_class_names:
-            # Class already indexed — merge new methods/fields
-            for existing_cls in self.classes.get(name, []):
-                for mname, minfo in methods.items():
-                    if mname not in existing_cls.methods:
-                        existing_cls.methods[mname] = minfo
-                        self._all_method_names.add(mname)
-                for fname, ftype in fields.items():
-                    existing_cls.fields.setdefault(fname, ftype)
-                for b in bases:
-                    if b not in existing_cls.bases:
-                        existing_cls.bases.append(b)
-        else:
-            cls = IndexedClass(name, rel, bases, methods, fields, [])
-            self.classes.setdefault(name, []).append(cls)
-            self._all_class_names.add(name)
-            for mname in methods:
-                self._all_method_names.add(mname)
+        return _augment(self, source_dir)

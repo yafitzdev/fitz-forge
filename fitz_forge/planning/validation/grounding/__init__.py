@@ -1,18 +1,18 @@
 # fitz_forge/planning/validation/grounding/__init__.py
 """Grounding validation: does a plan reference real things in the codebase?
 
-Organized into four submodules:
+Organized into five submodules:
 
     index      — StructuralIndexLookup + IndexedClass/Method/Function,
                  augment_from_source_dir with two-pass inference, MRO walking
     inference  — return type inference, class field extraction, self._attr
-                 tracking, docstring parsing, yield-type detection
-    check      — Violation, check_artifact, _SKIP_NAMES, per-artifact AST walk
+                 tracking, docstring parsing, yield-type detection (tree-sitter)
+    parser     — tree-sitter parser construction + recovery chain
+    check      — Violation, check_artifact, _SKIP_NAMES, per-artifact walk
     llm        — GroundingReport, validate_grounding, repair_violations,
                  build_llm_grounding_prompt
 
-Public re-exports below preserve the old flat `grounding.X` import path
-so existing callers don't need to change.
+Public re-exports below preserve the flat `grounding.X` import path.
 """
 
 from .check import (
@@ -33,7 +33,6 @@ from .inference import (
     extract_init_self_attrs,
     extract_type_name,
     infer_return_type,
-    try_parse,
     unparse_annotation,
 )
 from .llm import (
@@ -42,6 +41,7 @@ from .llm import (
     repair_violations,
     validate_grounding,
 )
+from .parser import parse_python
 
 __all__ = [
     # index
@@ -55,8 +55,9 @@ __all__ = [
     "extract_init_self_attrs",
     "extract_type_name",
     "infer_return_type",
-    "try_parse",
     "unparse_annotation",
+    # parser
+    "parse_python",
     # check
     "Violation",
     "check_artifact",

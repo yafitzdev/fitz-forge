@@ -1,22 +1,19 @@
-# tests/unit/test_ts_parser.py
-"""Parity tests between ast-based ``try_parse`` and tree-sitter ``parse_python``.
+# tests/unit/test_parser.py
+"""Tree-sitter parser tests: recovery chain + error detection.
 
-Both must agree on which snippets parse and which do not. Tree-sitter's
-error-recovery is lenient (it produces ERROR nodes instead of raising),
-so we gate acceptance on ``tree.root_node.has_error`` — the snippet only
-"parses" if the tree is fully error-free after all recovery steps, same
-semantics as ``ast.parse`` raising SyntaxError.
+``parse_python`` must accept well-formed snippets (including surgical
+artifact shapes needing dedent / class-wrap / import-split recovery) and
+reject snippets that stay malformed after every recovery step.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from fitz_forge.planning.validation.grounding._ts_parser import parse_python
-from fitz_forge.planning.validation.grounding.inference import try_parse
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 
-# Snippets that must parse under both backends.
+# Snippets that must parse.
 PARSE_OK_CASES = [
     # Raw module
     "x = 1\n",
@@ -41,7 +38,7 @@ PARSE_OK_CASES = [
     "class Req:\n    name: str\n    count: int = 0\n",
 ]
 
-# Snippets neither backend should accept (post-recovery).
+# Snippets the parser should reject post-recovery.
 PARSE_FAIL_CASES = [
     "def foo(:\n    return",        # unterminated signature
     "class ):\n    pass",             # malformed class header
@@ -50,22 +47,16 @@ PARSE_FAIL_CASES = [
 
 
 @pytest.mark.parametrize("src", PARSE_OK_CASES)
-def test_both_backends_accept(src: str) -> None:
-    ast_tree = try_parse(src)
-    ts_tree = parse_python(src)
-    assert ast_tree is not None, "ast backend should accept"
-    assert ts_tree is not None, "tree-sitter backend should accept"
+def test_parser_accepts(src: str) -> None:
+    assert parse_python(src) is not None
 
 
 @pytest.mark.parametrize("src", PARSE_FAIL_CASES)
-def test_both_backends_reject(src: str) -> None:
-    ast_tree = try_parse(src)
-    ts_tree = parse_python(src)
-    assert ast_tree is None, "ast backend should reject"
-    assert ts_tree is None, "tree-sitter backend should reject"
+def test_parser_rejects(src: str) -> None:
+    assert parse_python(src) is None
 
 
-def test_ts_parse_returns_tree_root_named_module() -> None:
+def test_parse_returns_tree_root_named_module() -> None:
     tree = parse_python("x = 1\n")
     assert tree is not None
     assert tree.root_node.type == "module"
