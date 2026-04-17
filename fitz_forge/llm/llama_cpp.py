@@ -7,14 +7,14 @@ when switching between fast/smart model tiers (since context_size and
 gpu_layers are server-level settings).
 """
 
+from __future__ import annotations
+
 import asyncio
 import atexit
 import ctypes
-import inspect
 import json
 import logging
 import platform
-import re
 import statistics
 import subprocess
 import time
@@ -23,14 +23,13 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from .retry import llama_cpp_retry
-from .types import AgentMessage, AgentToolCall
+from .openai_api import OpenAIApiClient, _strip_thinking
+from .retry import openai_api_retry
 
 if TYPE_CHECKING:
     from fitz_forge.config.schema import LlamaCppModelConfig
 
     from .gpu_monitor import GPUTemperatureGuard
-    from .memory import MemoryMonitor
 
 try:
     from openai import AsyncOpenAI
@@ -38,64 +37,6 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
-
-# Strip <think>...</think> blocks that some models emit even when thinking
-# is disabled.  Applied once after accumulation so all downstream parsers
-# receive clean text.
-_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
-
-
-def _strip_thinking(text: str) -> str:
-    """Remove <think>…</think> blocks from model output."""
-    text = _THINK_RE.sub("", text)
-    # Handle unclosed <think> (generation ended mid-thought)
-    if "<think>" in text:
-        text = (
-            text.split("</think>")[-1].lstrip()
-            if "</think>" in text
-            else text.split("<think>")[0].rstrip()
-        )
-    return text
-
-
-# Maps Python type annotations → JSON Schema types (same as lm_studio.py)
-_TYPE_MAP = {
-    str: "string",
-    int: "integer",
-    bool: "boolean",
-    float: "number",
-}
-
-
-def _callable_to_openai_tool(fn) -> dict:
-    """Convert a Python callable to an OpenAI tool schema dict."""
-    sig = inspect.signature(fn)
-    doc = inspect.getdoc(fn) or ""
-    description = doc.splitlines()[0] if doc else fn.__name__
-
-    properties = {}
-    required = []
-
-    for name, param in sig.parameters.items():
-        annotation = param.annotation
-        json_type = _TYPE_MAP.get(annotation, "string")
-        properties[name] = {"type": json_type}
-
-        if param.default is inspect.Parameter.empty:
-            required.append(name)
-
-    return {
-        "type": "function",
-        "function": {
-            "name": fn.__name__,
-            "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        },
-    }
 
 
 class TokSecBaseline:
@@ -170,15 +111,16 @@ class TokSecBaseline:
         return False
 
 
-class LlamaCppClient:
+class LlamaCppClient(OpenAIApiClient):
     """
     Async llama.cpp client that manages llama-server as a subprocess.
 
     Restarts the server when switching between fast/smart tiers, since
     context_size and gpu_layers are server-level (not per-request).
-
-    Requires: pip install fitz-forge[lm-studio]  (for openai SDK)
     """
+
+    # Minimum context window in tokens.  See OpenAIApiClient.
+    _MIN_CONTEXT_TOKENS = 32_768
 
     def __init__(
         self,
@@ -191,6 +133,7 @@ class LlamaCppClient:
         timeout: int = 300,
         startup_timeout: int = 120,
         gpu_guard: "GPUTemperatureGuard | None" = None,
+        disable_thinking: bool = True,
     ):
         if AsyncOpenAI is None:
             raise ImportError(
@@ -198,26 +141,35 @@ class LlamaCppClient:
                 "Install with: pip install fitz-forge[lm-studio]"
             )
 
+        super().__init__(
+            base_url=f"http://127.0.0.1:{port}/v1",
+            model=fast_model.path,
+            timeout=timeout,
+            fast_model=fast_model.path,
+            smart_model=(smart_model.path if smart_model else fast_model.path),
+            api_key="llama-cpp",
+            disable_thinking=disable_thinking,
+            gpu_guard=gpu_guard,
+            context_length=fast_model.context_size,
+        )
+
         self._server_path = server_path
         self._models_dir = models_dir
-        self._fast_model = fast_model
-        self._mid_model = mid_model or fast_model
-        self._smart_model = smart_model or fast_model
+        self._fast_model_cfg = fast_model
+        self._mid_model_cfg = mid_model or fast_model
+        self._smart_model_cfg = smart_model or fast_model
         self._port = port
-        self._timeout = timeout
         self._startup_timeout = startup_timeout
-        self._gpu_guard = gpu_guard
 
-        # Public attributes for interface parity with OllamaClient/LMStudioClient
-        self.base_url = f"http://127.0.0.1:{port}/v1"
-        self.model = fast_model.path
+        # Public attribute for interface parity with OllamaClient/LMStudioClient
         self.fallback_model = smart_model.path if smart_model else None
 
         self._process: subprocess.Popen | None = None
-        self._client: AsyncOpenAI | None = None
+        # Base class already created an _client; replace it when the server
+        # actually starts so timeout is respected and only active after start.
+        self._client = None  # type: ignore[assignment]
         self._active_tier: str | None = None
         self._active_context_size: int | None = None
-        self._call_metrics: list[dict] = []
         self._baseline = TokSecBaseline()
         self._degradation_warned = False
 
@@ -228,49 +180,47 @@ class LlamaCppClient:
     @property
     def context_size(self) -> int:
         """Active context window size in tokens."""
-        return self._active_context_size or self._fast_model.context_size
+        return self._active_context_size or self._fast_model_cfg.context_size
 
     @property
     def fast_model(self) -> str:
         """Model name for fast/screening tasks."""
-        return self._fast_model.path
+        return self._fast_model_cfg.path
 
     @property
     def mid_model(self) -> str:
         """Model name for mid-tier/summarization tasks."""
-        return self._mid_model.path
+        return self._mid_model_cfg.path
 
     @property
     def smart_model(self) -> str:
         """Model name for smart/reasoning tasks."""
-        return self._smart_model.path
+        return self._smart_model_cfg.path
 
     @property
     def active_model(self) -> str:
         """Path of the model currently loaded in llama-server."""
         if self._active_tier == "smart":
-            return self._smart_model.path
+            return self._smart_model_cfg.path
         if self._active_tier == "mid":
-            return self._mid_model.path
-        return self._fast_model.path
+            return self._mid_model_cfg.path
+        return self._fast_model_cfg.path
 
     # ------------------------------------------------------------------
-    # Lifecycle
+    # Subprocess lifecycle
     # ------------------------------------------------------------------
 
     async def start(self, tier: str = "fast", context_size: int | None = None) -> None:
-        """Start llama-server subprocess for the given tier.
-
-        Args:
-            tier: "fast", "mid", or "smart" — determines which model config to use.
-            context_size: Override context window size. None = use tier config default.
-        """
-        # Stop our own managed process if running
+        """Start llama-server subprocess for the given tier."""
         if self._process is not None:
             await self.stop()
 
-        tier_map = {"fast": self._fast_model, "mid": self._mid_model, "smart": self._smart_model}
-        model_cfg = tier_map.get(tier, self._fast_model)
+        tier_map = {
+            "fast": self._fast_model_cfg,
+            "mid": self._mid_model_cfg,
+            "smart": self._smart_model_cfg,
+        }
+        model_cfg = tier_map.get(tier, self._fast_model_cfg)
         model_path = str(Path(self._models_dir) / model_cfg.path)
         ctx = context_size or model_cfg.context_size
 
@@ -296,10 +246,8 @@ class LlamaCppClient:
 
         logger.info(f"Starting llama-server ({tier}): {' '.join(cmd)}")
 
-        # Kill any orphaned llama-server processes before spawning
         self._kill_orphaned_servers()
 
-        # Use DEVNULL for stdin, pipe stderr for error reporting
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
@@ -307,7 +255,6 @@ class LlamaCppClient:
             stderr=subprocess.PIPE,
         )
 
-        # Ensure subprocess is killed on exit (Ctrl+C may skip async cleanup)
         proc = self._process
         atexit.register(lambda: proc.kill() if proc.poll() is None else None)
 
@@ -356,7 +303,7 @@ class LlamaCppClient:
 
         self._process = None
         self._active_tier = None
-        self._client = None
+        self._client = None  # type: ignore[assignment]
         logger.info("llama-server stopped")
 
     async def ensure_model(
@@ -364,12 +311,7 @@ class LlamaCppClient:
         model_name: str,
         context_size: int | None = None,
     ) -> None:
-        """Switch to the tier for the given model name.
-
-        Public API for callers that need to pre-load a specific tier
-        (e.g. orchestrator switching from smart back to mid after agent
-        gathering). Also restarts if a different context_size is requested.
-        """
+        """Switch to the tier for the given model name."""
         await self._ensure_tier(model_name, context_size=context_size)
 
     async def _ensure_tier(
@@ -377,27 +319,27 @@ class LlamaCppClient:
         model_name: str | None,
         context_size: int | None = None,
     ) -> None:
-        """Restart server only if the actual model path or context size differs.
-
-        Compares model paths rather than tier names — avoids unnecessary restarts
-        when multiple tiers point to the same GGUF file (destroys CUDA context,
-        triggers WDDM degradation on Blackwell consumer GPUs).
-        """
+        """Restart server only if the actual model path or context size differs."""
         if model_name is None:
             if self._active_tier is None:
                 await self.start("fast", context_size=context_size)
             return
 
-        # Resolve tier from model name
-        if model_name == self._smart_model.path:
+        if model_name == self._smart_model_cfg.path:
             needed = "smart"
-        elif model_name == self._mid_model.path and self._mid_model.path != self._fast_model.path:
+        elif (
+            model_name == self._mid_model_cfg.path
+            and self._mid_model_cfg.path != self._fast_model_cfg.path
+        ):
             needed = "mid"
         else:
             needed = "fast"
 
-        # Check if the actual model path and context size match what's loaded
-        tier_map = {"fast": self._fast_model, "mid": self._mid_model, "smart": self._smart_model}
+        tier_map = {
+            "fast": self._fast_model_cfg,
+            "mid": self._mid_model_cfg,
+            "smart": self._smart_model_cfg,
+        }
         needed_cfg = tier_map[needed]
         active_cfg = tier_map.get(self._active_tier) if self._active_tier else None
 
@@ -427,12 +369,7 @@ class LlamaCppClient:
 
     @staticmethod
     def _reset_gpu_driver() -> bool:
-        """Simulate Ctrl+Win+Shift+B to reset the GPU display driver.
-
-        This recovers Blackwell consumer GPUs from WDDM VRAM reallocation
-        degradation that occurs after CUDA context create/destroy cycles.
-        Only runs on Windows. Returns True if the reset was sent.
-        """
+        """Simulate Ctrl+Win+Shift+B to reset the GPU display driver."""
         if platform.system() != "Windows":
             return False
 
@@ -447,8 +384,6 @@ class LlamaCppClient:
             VK_SHIFT = 0x10
             VK_B = 0x42
 
-            # Full Win32 INPUT structures — union must include MOUSEINPUT
-            # (the largest member) so sizeof(INPUT) matches the Windows ABI.
             class MOUSEINPUT(ctypes.Structure):
                 _fields_ = [
                     ("dx", ctypes.c_long),
@@ -495,7 +430,6 @@ class LlamaCppClient:
                 inp.ii.ki.dwFlags = flags
                 return inp
 
-            # Press Ctrl, Win, Shift, B — then release all
             inputs = (INPUT * 8)(
                 _key_input(VK_CONTROL),
                 _key_input(VK_LWIN),
@@ -525,7 +459,6 @@ class LlamaCppClient:
 
         async with httpx.AsyncClient(timeout=2.0) as http:
             while time.monotonic() < deadline:
-                # Check if process died
                 if self._process and self._process.poll() is not None:
                     stderr = ""
                     if self._process.stderr:
@@ -554,22 +487,17 @@ class LlamaCppClient:
             code = self._process.returncode
             logger.warning(f"llama-server crashed (code {code}), restarting: {stderr[:500]}")
             self._process = None
-            self._client = None
+            self._client = None  # type: ignore[assignment]
             tier = self._active_tier or "fast"
             self._active_tier = None
 
-            # Reset GPU driver after crash (CUDA context was destroyed)
             if self._reset_gpu_driver():
                 await asyncio.sleep(3)
 
             await self.start(tier)
 
     async def _auto_reset_gpu(self) -> None:
-        """Stop llama-server, reset GPU driver, restart.
-
-        WDDM Blackwell consumer GPUs degrade after CUDA context churn.
-        Resetting the display driver (Ctrl+Win+Shift+B) recovers performance.
-        """
+        """Stop llama-server, reset GPU driver, restart."""
         tier = self._active_tier or "fast"
         ctx = self._active_context_size
 
@@ -577,7 +505,6 @@ class LlamaCppClient:
         await self.stop()
 
         if self._reset_gpu_driver():
-            # Driver reset takes a few seconds to complete
             await asyncio.sleep(5)
             logger.info("Auto-reset: GPU driver reset complete, restarting server")
         else:
@@ -585,18 +512,15 @@ class LlamaCppClient:
             await asyncio.sleep(1)
 
         await self.start(tier, context_size=ctx)
-        self._degradation_warned = False  # allow re-detection after reset
+        self._degradation_warned = False
 
     # ------------------------------------------------------------------
-    # Interface methods (match OllamaClient / LMStudioClient)
+    # Interface methods
     # ------------------------------------------------------------------
-
-    # Minimum context window in tokens.  See LMStudioClient._MIN_CONTEXT_TOKENS.
-    _MIN_CONTEXT_TOKENS = 32_768
 
     async def health_check(self) -> bool:
         """Check if llama-server is running, healthy, and context is sufficient."""
-        ctx = self._active_context_size or self._fast_model.context_size
+        ctx = self._active_context_size or self._fast_model_cfg.context_size
         if ctx < self._MIN_CONTEXT_TOKENS:
             raise RuntimeError(
                 f"Context window too small: {ctx} tokens "
@@ -612,7 +536,7 @@ class LlamaCppClient:
             logger.error(f"llama-cpp health check failed: {e}")
             return False
 
-    @llama_cpp_retry
+    @openai_api_retry
     async def generate(
         self,
         messages: list[dict],
@@ -622,15 +546,8 @@ class LlamaCppClient:
     ) -> str:
         """Generate a streaming response. Switches tier if model differs.
 
-        Args:
-            messages:    Chat messages in OpenAI format.
-            model:       Model name (triggers tier switch if needed).
-            temperature: Sampling temperature. None = server default.
-            max_tokens:  Hard cap on output tokens. Prevents infinite generation
-                         from llama-server context-shift loops.
-
-        Returns:
-            Full accumulated response text.
+        Overrides the base implementation to additionally capture prefill
+        timing for the GPU degradation detector.
         """
         if self._gpu_guard:
             await self._gpu_guard.preflight()
@@ -643,16 +560,16 @@ class LlamaCppClient:
 
         t0 = time.monotonic()
         t_first_token = None
-        accumulated = []
+        accumulated: list[str] = []
         kwargs: dict = {
             "model": effective_model,
             "messages": messages,
             "stream": True,
             "max_tokens": max_tokens,
-            "extra_body": {
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
         }
+        extra = self._extra_body()
+        if extra is not None:
+            kwargs["extra_body"] = extra
         if temperature is not None:
             kwargs["temperature"] = temperature
 
@@ -692,7 +609,6 @@ class LlamaCppClient:
             f"gen ~{gen_tok_s:.1f} tok/s)"
         )
 
-        # Track prefill tok/s baseline and auto-reset GPU on degradation
         ctx = self._active_context_size or 0
         if ctx > 0:
             degraded = not self._degradation_warned and self._baseline.is_degraded(
@@ -705,7 +621,6 @@ class LlamaCppClient:
                 self._degradation_warned = True
                 logger.warning("GPU degradation detected — auto-resetting GPU driver")
                 await self._auto_reset_gpu()
-                # Don't record the degraded sample — it would poison the baseline
             else:
                 self._baseline.record(effective_model, ctx, prefill_tok_s, prefill_s)
 
@@ -723,155 +638,21 @@ class LlamaCppClient:
         result = await self.generate(messages, model=self.smart_model)
         return result, self.model
 
-    @property
-    def last_tok_s(self) -> float:
-        """Generation-only tok/s from the most recent generate() call.
-
-        Excludes prompt prefill time — measures actual decode speed.
-        """
-        if self._call_metrics:
-            return self._call_metrics[-1].get("tok_s", 0.0)
-        return 0.0
-
-    def drain_call_metrics(self) -> list[dict]:
-        """Return and clear accumulated call metrics."""
-        metrics = self._call_metrics
-        self._call_metrics = []
-        return metrics
-
     async def generate_with_tools(
         self,
         messages: list[dict],
         tools: list,
         model: str | None = None,
         tool_choice: str = "auto",
-    ) -> AgentMessage:
-        """Single chat call with tool definitions.
-
-        Args:
-            messages: Chat messages list.
-            tools:    Tool callables.
-            model:    Model override.
-            tool_choice: "auto", "none", or "required".
-
-        Returns:
-            AgentMessage with .tool_calls or .content.
-        """
-        if self._gpu_guard:
-            await self._gpu_guard.preflight()
-
+    ):
+        """Ensure the tier matches the requested model, then delegate to base."""
         await self._ensure_tier(model)
         await self._ensure_alive()
+        return await super().generate_with_tools(messages, tools, model=model, tool_choice=tool_choice)
 
-        effective_model = model or self.model
-        openai_tools = [_callable_to_openai_tool(fn) for fn in tools]
-        logger.info(
-            f"LlamaCpp.generate_with_tools: model={effective_model}, "
-            f"messages={len(messages)}, tools={len(openai_tools)}, "
-            f"tool_choice={tool_choice}"
-        )
-
-        response = await self._client.chat.completions.create(
-            model=effective_model,
-            messages=messages,
-            tools=openai_tools,
-            tool_choice=tool_choice,
-            max_tokens=16384,
-            stream=False,
-            extra_body={
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-        )
-
-        choice = response.choices[0]
-        msg = choice.message
-
-        tool_calls = None
-        assistant_tool_calls = None
-        if msg.tool_calls:
-            tool_calls = []
-            assistant_tool_calls = []
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                tool_calls.append(
-                    AgentToolCall(
-                        id=tc.id or "",
-                        name=tc.function.name,
-                        arguments=args,
-                    )
-                )
-                assistant_tool_calls.append(
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                )
-
-        assistant_dict: dict = {"role": "assistant", "content": msg.content}
-        if assistant_tool_calls:
-            assistant_dict["tool_calls"] = assistant_tool_calls
-
-        return AgentMessage(
-            content=msg.content,
-            tool_calls=tool_calls,
-            assistant_dict=assistant_dict,
-        )
-
-    async def generate_with_monitoring(
-        self,
-        messages: list[dict],
-        monitor: "MemoryMonitor",
-    ) -> tuple[str, str]:
-        """Generate with memory monitoring running in parallel.
-
-        Args:
-            messages: Chat messages.
-            monitor:  MemoryMonitor instance.
-
-        Returns:
-            (response_text, model_used)
-        """
-        monitor_task = asyncio.create_task(monitor.start_monitoring())
-        generation_task = asyncio.create_task(self.generate_with_fallback(messages))
-
-        done, pending = await asyncio.wait(
-            {monitor_task, generation_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        if monitor_task in done:
-            generation_task.cancel()
-            try:
-                await generation_task
-            except asyncio.CancelledError:
-                pass
-
-            threshold_exceeded = monitor_task.result()
-            if threshold_exceeded:
-                raise MemoryError(
-                    f"Memory threshold exceeded ({monitor.threshold_percent}%) during generation"
-                )
-            result = await generation_task
-            return result
-        else:
-            monitor.stop()
-            try:
-                await monitor_task
-            except asyncio.CancelledError:
-                pass
-            return generation_task.result()
-
-    def tool_result_message(self, tool_call_id: str, content: str) -> dict:
-        """Build a tool result message dict for the OpenAI messages format."""
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": content,
-        }
+    @property
+    def last_tok_s(self) -> float:
+        """Generation-only tok/s from the most recent generate() call."""
+        if self._call_metrics:
+            return self._call_metrics[-1].get("tok_s", 0.0)
+        return 0.0
