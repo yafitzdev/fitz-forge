@@ -7,6 +7,7 @@ All commands delegate to the same functions that MCP wraps.
 """
 
 import asyncio
+import logging
 import sys
 import time
 
@@ -159,13 +160,7 @@ def _format_event(event: PlanEvent) -> str:
             return f"    [dim]· {desc}[/dim]"
         return f"[dim]{ts}[/dim] [cyan]{pct}[/cyan]  {desc}"
     if isinstance(event, DecisionResolved):
-        # Indented dim bullet so it reads as a sub-line under the stage bar.
-        # Format: "    · d5: Add StreamingResponse route → fitz_sage/api/routes/collections.py"
-        line = f"    [dim]· {event.decision_id}: {event.summary}"
-        if event.target_file:
-            line += f" → {event.target_file}"
-        line += "[/dim]"
-        return line
+        return f"    [dim]· {event.decision_id}: {event.summary}[/dim]"
     if isinstance(event, DecisionHallucinationDropped):
         snippet = event.evidence_snippet
         # Keep first ~80 chars for readability
@@ -208,6 +203,30 @@ def _format_event(event: PlanEvent) -> str:
     return str(event)
 
 
+class _RichBulletHandler(logging.Handler):
+    """Reroutes selected logger messages to a Rich console as dim bullets.
+
+    Installed while ``fitz-forge plan`` streams live, so logger output that
+    would otherwise print to stderr in plain white interleaves cleanly with
+    the rendered event feed (e.g. artifact-set closure warnings).
+    """
+
+    def __init__(self, console):
+        super().__init__()
+        self._console = console
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return
+        # Strip the module-level prefix ("artifact_set: ") so the bullet
+        # content matches other indented lines' visual weight.
+        if msg.startswith("artifact_set: "):
+            msg = msg[len("artifact_set: "):]
+        self._console.print(f"    [dim]· {msg}[/dim]")
+
+
 async def _run_inline(
     job_id: str,
     store,
@@ -224,6 +243,20 @@ async def _run_inline(
 
     if console is None:
         console = Console(stderr=True)
+
+    # Route noisy per-module warnings (artifact-set closure violations etc.)
+    # through the Rich console as dim indented bullets, so they match the
+    # look of DecisionResolved / DecisionHallucinationDropped bullets.
+    _bullet_handler = _RichBulletHandler(console)
+    _rerouted_loggers = [
+        logging.getLogger("fitz_forge.planning.artifact.generator"),
+    ]
+    _saved_state = [
+        (lg, list(lg.handlers), lg.propagate) for lg in _rerouted_loggers
+    ]
+    for lg in _rerouted_loggers:
+        lg.handlers = [_bullet_handler]
+        lg.propagate = False
 
     heading = description[:80] + ("…" if len(description) > 80 else "")
     console.print(f"[bold]{heading}[/bold]  [dim]({job_id})[/dim]")
@@ -252,6 +285,10 @@ async def _run_inline(
                 failed_event = event
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise KeyboardInterrupt from None
+    finally:
+        for lg, handlers, propagate in _saved_state:
+            lg.handlers = handlers
+            lg.propagate = propagate
 
     if failed_event is not None:
         raise typer.Exit(1)

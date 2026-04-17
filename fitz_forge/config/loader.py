@@ -25,6 +25,18 @@ def get_config_path() -> Path:
     return config_dir / "config.yaml"
 
 
+# Keys we used to accept but no longer exist. Silently ignored — users whose
+# YAML still carries them don't need a "Typo?" scare.
+_DEPRECATED_KEYS: set[str] = {
+    "lm_studio.fast_model",
+    "lm_studio.mid_model",
+    "lm_studio.smart_model",
+    "llama_cpp.fast_model",
+    "llama_cpp.mid_model",
+    "llama_cpp.smart_model",
+}
+
+
 def _warn_unknown_keys(yaml_data: dict, model_class: type[BaseModel], prefix: str = "") -> None:
     """Log warnings for YAML keys not recognized by the Pydantic model."""
     if not isinstance(yaml_data, dict):
@@ -33,6 +45,8 @@ def _warn_unknown_keys(yaml_data: dict, model_class: type[BaseModel], prefix: st
     for key in yaml_data:
         full_key = f"{prefix}.{key}" if prefix else key
         if key not in known:
+            if full_key in _DEPRECATED_KEYS:
+                continue
             logger.warning(f"Unknown config key '{full_key}' — will be ignored. Typo?")
         else:
             field = model_class.model_fields[key]

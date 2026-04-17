@@ -525,12 +525,12 @@ class TestFormatEvent:
                 target_file="fitz_sage/api/routes/collections.py",
             )
         )
-        # Indentation + bullet + id + summary + arrow + target
+        # Indentation + bullet + id + summary (target_file is no longer shown)
         assert "    " in line
         assert "·" in line
         assert "d5" in line
         assert "Add StreamingResponse route" in line
-        assert "fitz_sage/api/routes/collections.py" in line
+        assert "fitz_sage/api/routes/collections.py" not in line
         assert "[dim]" in line
 
     def test_decision_resolved_without_target_file(self):
