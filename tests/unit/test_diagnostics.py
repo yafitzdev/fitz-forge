@@ -38,7 +38,7 @@ def _minimal_plan(**kwargs) -> PlanOutput:
 
 
 def _make_lm_client(**kwargs):
-    with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
+    with patch("fitz_forge.llm.openai_api.AsyncOpenAI"):
         client = LMStudioClient(**kwargs)
     return client
 

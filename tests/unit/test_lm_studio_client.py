@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fitz_forge.llm.lm_studio import LMStudioClient, _callable_to_openai_tool
+from fitz_forge.llm.lm_studio import LMStudioClient
+from fitz_forge.llm.openai_api import _callable_to_openai_tool
 from fitz_forge.llm.types import AgentMessage, AgentToolCall
 
 
@@ -17,7 +18,7 @@ from fitz_forge.llm.types import AgentMessage, AgentToolCall
 
 def _make_client(**kwargs):
     """Create LMStudioClient with openai patched out."""
-    with patch("fitz_forge.llm.lm_studio.AsyncOpenAI"):
+    with patch("fitz_forge.llm.openai_api.AsyncOpenAI"):
         client = LMStudioClient(**kwargs)
     return client
 
