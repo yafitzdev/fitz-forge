@@ -206,9 +206,7 @@ _STDLIB_PACKAGES = frozenset(
 _ENUM_STANDARD_ATTRS = frozenset(
     {"value", "name", "_value_", "_name_", "_ignore_", "_order_", "_missing_"}
 )
-_ENUM_BASES = frozenset(
-    {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"}
-)
+_ENUM_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"})
 
 
 def _is_enum_class(class_name: str, lookup: StructuralIndexLookup) -> bool:
@@ -250,9 +248,7 @@ def _owner_is_protocol(class_name: str, lookup: StructuralIndexLookup) -> bool:
     return False
 
 
-def _method_exists_anywhere(
-    method_name: str, lookup: StructuralIndexLookup
-) -> bool:
+def _method_exists_anywhere(method_name: str, lookup: StructuralIndexLookup) -> bool:
     """True if any class in the codebase defines a method named `method_name`."""
     for cls_list in lookup.classes.values():
         for cls in cls_list:
@@ -447,17 +443,13 @@ class _ReferenceCollector(ast.NodeVisitor):
     def _bind(self, name: str, type_name: str) -> None:
         self._scope_stack[-1][name] = type_name
 
-    def _lookup_iter_kind(
-        self, name: str
-    ) -> tuple[str, SymbolRef, str] | None:
+    def _lookup_iter_kind(self, name: str) -> tuple[str, SymbolRef, str] | None:
         for scope in reversed(self._iter_kinds_stack):
             if name in scope:
                 return scope[name]
         return None
 
-    def _bind_iter_kind(
-        self, name: str, kind: str, ref: SymbolRef, context: str
-    ) -> None:
+    def _bind_iter_kind(self, name: str, kind: str, ref: SymbolRef, context: str) -> None:
         self._iter_kinds_stack[-1][name] = (kind, ref, context)
 
     # -- emit helpers -------------------------------------------------------
@@ -609,9 +601,7 @@ class _ReferenceCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
-        target_desc = (
-            node.target.id if isinstance(node.target, ast.Name) else "var"
-        )
+        target_desc = node.target.id if isinstance(node.target, ast.Name) else "var"
         self._emit_annotation_types(node.annotation, f"annotation on {target_desc}")
         if isinstance(node.target, ast.Name):
             t = extract_type_name(node.annotation)
@@ -786,9 +776,7 @@ class _ReferenceCollector(ast.NodeVisitor):
                     return func.attr
         return None
 
-    def _infer_rhs_iter_kind(
-        self, value: ast.expr
-    ) -> tuple[str, SymbolRef, str] | None:
+    def _infer_rhs_iter_kind(self, value: ast.expr) -> tuple[str, SymbolRef, str] | None:
         """If RHS is a call whose return type is iterable/awaitable, return
         (kind, ref, context) for later usage propagation.
 
@@ -815,9 +803,7 @@ class _ReferenceCollector(ast.NodeVisitor):
             return ("sync_iter", ref, context)
         return None
 
-    def _resolve_call_target(
-        self, call: ast.Call
-    ) -> tuple[SymbolRef, str | None, str] | None:
+    def _resolve_call_target(self, call: ast.Call) -> tuple[SymbolRef, str | None, str] | None:
         """Resolve a Call to (SymbolRef of callee, return_type_string, context).
 
         Looks up the target method/function via sibling_provides first,
@@ -1014,11 +1000,7 @@ def _ref_in_codebase(ref: SymbolRef, lookup: StructuralIndexLookup) -> bool:
             # Enum subclasses inherit `.value` / `.name` / etc from enum.Enum.
             # The index doesn't track those (they come from stdlib), so accept
             # them when the owner walks to an Enum base.
-            if ref.name in _ENUM_STANDARD_ATTRS and _is_enum_class(
-                ref.owner, lookup
-            ):
-                return True
-            return False
+            return ref.name in _ENUM_STANDARD_ATTRS and _is_enum_class(ref.owner, lookup)
         # For methods (MRO-aware walk)
         if lookup.class_has_method(ref.owner, ref.name):
             return True
@@ -1026,11 +1008,7 @@ def _ref_in_codebase(ref: SymbolRef, lookup: StructuralIndexLookup) -> bool:
         # isn't on SomeProtocol but exists on some concrete class in the
         # codebase is legitimate duck-typing. Accept when the owner is a
         # Protocol and the method exists anywhere in the codebase.
-        if _owner_is_protocol(ref.owner, lookup) and _method_exists_anywhere(
-            ref.name, lookup
-        ):
-            return True
-        return False
+        return _owner_is_protocol(ref.owner, lookup) and _method_exists_anywhere(ref.name, lookup)
     if ref.owner:
         return lookup.class_exists(ref.owner)
     if ref.name:

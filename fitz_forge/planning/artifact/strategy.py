@@ -324,8 +324,7 @@ def _surgical_grounding_block(ctx: ArtifactContext) -> str:
         )
     if ctx.schema_fields:
         parts.append(
-            f"\n## DATA MODEL FIELDS (use these exact class and field names)\n"
-            f"{ctx.schema_fields}\n"
+            f"\n## DATA MODEL FIELDS (use these exact class and field names)\n{ctx.schema_fields}\n"
         )
     if ctx.available_methods:
         parts.append(

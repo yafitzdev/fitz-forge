@@ -404,17 +404,11 @@ def _check_node(
                 if expected_params is not None:
                     # Variadic (*args / **kwargs) accepts anything — don't
                     # count the call against a fixed arity.
-                    has_varargs = any(
-                        p.startswith("*") for p in expected_params
-                    )
+                    has_varargs = any(p.startswith("*") for p in expected_params)
                     if not has_varargs:
                         actual_args = len(node.args) + len(node.keywords)
                         expected = len(expected_params)
-                        if (
-                            actual_args > 0
-                            and expected > 0
-                            and abs(actual_args - expected) > 2
-                        ):
+                        if actual_args > 0 and expected > 0 and abs(actual_args - expected) > 2:
                             violations.append(
                                 Violation(
                                     filename,

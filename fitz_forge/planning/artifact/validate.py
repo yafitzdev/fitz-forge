@@ -63,9 +63,7 @@ _DATA_BASES = frozenset(
         "NamedTuple",
     }
 )
-_DATA_DECORATORS = frozenset(
-    {"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"}
-)
+_DATA_DECORATORS = frozenset({"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"})
 
 
 def _is_data_class(node: ast.ClassDef) -> bool:
@@ -103,9 +101,7 @@ def _is_data_class(node: ast.ClassDef) -> bool:
             return True
     # Enum-style class with plain assignments (e.g. `FOO = "foo"`)
     for child in node.body:
-        if isinstance(child, ast.Assign) and any(
-            isinstance(t, ast.Name) for t in child.targets
-        ):
+        if isinstance(child, ast.Assign) and any(isinstance(t, ast.Name) for t in child.targets):
             # Only enough if inherits from an Enum — covered above. Don't
             # over-accept plain constants.
             pass
@@ -142,10 +138,25 @@ def _check_empty(content: str) -> ArtifactError | None:
     # Unparseable (or non-Python) — use language-agnostic text heuristics.
     # Accept if content has definition-like keywords from any common language.
     _DEF_KEYWORDS = (
-        "def ", "class ", "function ", "func ", "fn ",
-        "async ", "export ", "const ", "let ", "var ",
-        "model ", "interface ", "enum ", "struct ", "impl ",
-        "pub fn ", "public ", "private ", "protected ",
+        "def ",
+        "class ",
+        "function ",
+        "func ",
+        "fn ",
+        "async ",
+        "export ",
+        "const ",
+        "let ",
+        "var ",
+        "model ",
+        "interface ",
+        "enum ",
+        "struct ",
+        "impl ",
+        "pub fn ",
+        "public ",
+        "private ",
+        "protected ",
     )
     if not any(kw in line for line in code_lines for kw in _DEF_KEYWORDS):
         return ArtifactError(
@@ -257,7 +268,8 @@ def _check_not_implemented(content: str) -> ArtifactError | None:
 def _is_python_file(filename: str) -> bool:
     """True if the filename looks like a Python source file."""
     return filename.endswith(".py") or not any(
-        filename.endswith(ext) for ext in (".ts", ".js", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".rb", ".prisma")
+        filename.endswith(ext)
+        for ext in (".ts", ".js", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".rb", ".prisma")
     )
 
 

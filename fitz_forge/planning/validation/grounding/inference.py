@@ -68,11 +68,7 @@ def try_parse(content: str) -> ast.Module | None:
             body.append(line)
     if imports and body:
         body_text = textwrap.dedent("\n".join(body))
-        wrapped = (
-            "\n".join(imports)
-            + "\n\nclass _:\n    "
-            + body_text.replace("\n", "\n    ")
-        )
+        wrapped = "\n".join(imports) + "\n\nclass _:\n    " + body_text.replace("\n", "\n    ")
         try:
             return ast.parse(wrapped)
         except SyntaxError:

@@ -1972,9 +1972,7 @@ class SynthesisStage(PipelineStage):
                 )
             injected.append(f"{fname} -- {purpose}")
             injected_paths.add(fname)
-            logger.info(
-                "injecting %s (%d decision refs)", fname, count
-            )
+            logger.info("injecting %s (%d decision refs)", fname, count)
 
         # Criterion 2: evidence-source (min 1 — file was directly analyzed)
         for fname in sorted(evidence_source_files):
@@ -2265,13 +2263,10 @@ class SynthesisStage(PipelineStage):
         resolution_output_for_coverage = prior_outputs.get("decision_resolution", {})
         resolutions_for_coverage = resolution_output_for_coverage.get("resolutions", [])
         agent_ctx_for_coverage = prior_outputs.get("_agent_context", {})
-        structural_index_for_coverage = (
-            agent_ctx_for_coverage.get("full_structural_index", "")
-            or prior_outputs.get("_gathered_context", "")
-        )
-        known_files_for_coverage = self._known_files_from_index(
-            structural_index_for_coverage
-        )
+        structural_index_for_coverage = agent_ctx_for_coverage.get(
+            "full_structural_index", ""
+        ) or prior_outputs.get("_gathered_context", "")
+        known_files_for_coverage = self._known_files_from_index(structural_index_for_coverage)
         needed = self._enforce_decision_coverage(
             needed,
             resolutions_for_coverage,
@@ -2559,9 +2554,7 @@ class SynthesisStage(PipelineStage):
 
         # Find classes referenced in decisions/reasoning for prioritization
         text = relevant_decisions + " " + reasoning[:3000]
-        mentioned: set[str] = set(
-            _re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
-        )
+        mentioned: set[str] = set(_re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text))
 
         # Schema-shaped suffixes — language/codebase-agnostic; these are
         # common conventions for data container classes. Matches classes
@@ -2794,7 +2787,7 @@ class SynthesisStage(PipelineStage):
         purpose: str,
         reference_body: str,
     ) -> dict | None:
-        """ generate artifact by surgically rewriting a reference method.
+        """generate artifact by surgically rewriting a reference method.
 
         Instead of the normal prompt (46K chars with competing reasoning,
         decisions, source, etc.), give the model ONLY the reference method

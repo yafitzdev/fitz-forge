@@ -178,9 +178,7 @@ def _extract_target_self_methods(source: str) -> str:
         if not isinstance(node, ast.ClassDef):
             continue
         count = sum(
-            1
-            for child in node.body
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            1 for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
         )
         if count > best_count:
             best_count = count
