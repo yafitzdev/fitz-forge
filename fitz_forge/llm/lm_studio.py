@@ -52,14 +52,22 @@ class LMStudioClient(OpenAIApiClient):
             base_url=base_url,
             model=model,
             timeout=timeout,
-            fast_model=fast_model,
-            smart_model=smart_model,
             api_key=api_key or "lm-studio",
             disable_thinking=disable_thinking,
             gpu_guard=gpu_guard,
             context_length=context_length,
         )
+        self._fast_model = fast_model
+        self._smart_model = smart_model
         self.fallback_model = fallback_model
+
+    @property
+    def fast_model(self) -> str:
+        return self._fast_model or self.model
+
+    @property
+    def smart_model(self) -> str:
+        return self._smart_model or self.model
 
     # ------------------------------------------------------------------
     # lms CLI lifecycle

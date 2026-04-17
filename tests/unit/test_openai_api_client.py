@@ -98,19 +98,9 @@ class TestProperties:
         client = _make_client(context_length=65536)
         assert client.context_size == 65536
 
-    def test_fast_mid_smart_default_to_model(self):
+    def test_model_attribute(self):
         client = _make_client(model="m")
-        assert client.fast_model == "m"
-        assert client.mid_model == "m"
-        assert client.smart_model == "m"
-
-    def test_fast_model_override(self):
-        client = _make_client(model="m", fast_model="fast")
-        assert client.fast_model == "fast"
-
-    def test_smart_model_override(self):
-        client = _make_client(model="m", smart_model="smart")
-        assert client.smart_model == "smart"
+        assert client.model == "m"
 
 
 # ---------------------------------------------------------------------------

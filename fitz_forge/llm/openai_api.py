@@ -7,7 +7,7 @@ OpenAI-compatible ``/v1/chat/completions`` endpoint.  This module
 centralises streaming generation, tool-call handling, monitoring, and
 metric tracking so the provider-specific subclasses only need to
 implement lifecycle hooks (subprocess/CLI management, health checks,
-etc.) and override model-tier properties where they differ.
+etc.).
 """
 
 from __future__ import annotations
@@ -116,8 +116,6 @@ class OpenAIApiClient:
         base_url: str,
         model: str,
         timeout: int = 300,
-        fast_model: str | None = None,
-        smart_model: str | None = None,
         api_key: str | None = None,
         disable_thinking: bool = True,
         gpu_guard: "GPUTemperatureGuard | None" = None,
@@ -131,8 +129,6 @@ class OpenAIApiClient:
         self.base_url = base_url
         self.model = model
         self._timeout = timeout
-        self._fast_model = fast_model
-        self._smart_model = smart_model
         self._disable_thinking = disable_thinking
         self._gpu_guard = gpu_guard
         self._context_length = context_length
@@ -144,28 +140,13 @@ class OpenAIApiClient:
         self._call_metrics: list[dict] = []
 
     # ------------------------------------------------------------------
-    # Model tier properties (subclasses may override)
+    # Properties
     # ------------------------------------------------------------------
 
     @property
     def context_size(self) -> int:
         """Configured context window size in tokens."""
         return self._context_length
-
-    @property
-    def fast_model(self) -> str:
-        """Model name for fast/screening tasks."""
-        return self._fast_model or self.model
-
-    @property
-    def mid_model(self) -> str:
-        """Model name for mid-tier tasks."""
-        return self.model
-
-    @property
-    def smart_model(self) -> str:
-        """Model name for reasoning tasks."""
-        return self._smart_model or self.model
 
     # ------------------------------------------------------------------
     # Lifecycle hooks (default no-ops; subclasses override)

@@ -145,8 +145,6 @@ class LlamaCppClient(OpenAIApiClient):
             base_url=f"http://127.0.0.1:{port}/v1",
             model=fast_model.path,
             timeout=timeout,
-            fast_model=fast_model.path,
-            smart_model=(smart_model.path if smart_model else fast_model.path),
             api_key="llama-cpp",
             disable_thinking=disable_thinking,
             gpu_guard=gpu_guard,
