@@ -68,7 +68,7 @@ and extracts structured output that a small model can actually produce reliably.
 
 </div>
 
----
+--- 
 
 ### Where to start 🚀
 
