@@ -24,9 +24,6 @@ def _make_config(**kwargs):
 def mock_client():
     client = MagicMock()
     client.model = "test-model"
-    client.fast_model = "test-model"
-    client.mid_model = "test-model"
-    client.smart_model = "test-model"
     client.context_size = 65536
     client.generate = AsyncMock(return_value="LLM response")
     return client
@@ -49,21 +46,15 @@ def _make_read_result(file_path, content, origin="selected"):
 # ---------------------------------------------------------------------------
 class TestChatFactoryBridge:
     @pytest.mark.asyncio
-    async def test_bridge_maps_tiers(self, mock_client):
-        mock_client.fast_model = "fast-4b"
-        mock_client.mid_model = "balanced-9b"
-        mock_client.smart_model = "smart-30b"
+    async def test_bridge_uses_client_model_regardless_of_tier(self, mock_client):
+        """Tier argument is ignored — fitz-forge serves a single model."""
+        mock_client.model = "single-30b"
 
         loop = MagicMock()
         factory = _make_chat_factory(mock_client, loop)
 
-        fast_chat = factory("fast")
-        balanced_chat = factory("balanced")
-        smart_chat = factory("smart")
-
-        assert fast_chat._model == "fast-4b"
-        assert balanced_chat._model == "balanced-9b"
-        assert smart_chat._model == "smart-30b"
+        for tier in ("fast", "balanced", "smart", "anything"):
+            assert factory(tier)._model == "single-30b"
 
 
 # ---------------------------------------------------------------------------

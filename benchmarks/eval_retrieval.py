@@ -74,11 +74,6 @@ async def _run_retrieval(source_dir: str, query: str) -> list[str]:
     if hasattr(client, "health_check"):
         await client.health_check()
 
-    if hasattr(client, "switch_model") and hasattr(client, "smart_model"):
-        loaded = await client.get_loaded_model() if hasattr(client, "get_loaded_model") else None
-        if loaded != client.smart_model:
-            await client.switch_model(client.smart_model)
-
     loop = asyncio.get_running_loop()
     chat_factory = _make_chat_factory(client, loop)
 

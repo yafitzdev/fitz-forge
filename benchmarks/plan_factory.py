@@ -151,16 +151,6 @@ async def _run_retrieval_once(
     if hasattr(client, "health_check"):
         await client.health_check()
 
-    # Switch to smart_model if different
-    if (
-        hasattr(client, "switch_model")
-        and hasattr(client, "smart_model")
-        and client.smart_model != client.model
-    ):
-        loaded = await client.get_loaded_model() if hasattr(client, "get_loaded_model") else None
-        if loaded != client.smart_model:
-            await client.switch_model(client.smart_model)
-
     loop = asyncio.get_running_loop()
     chat_factory = _make_chat_factory(client, loop)
 
@@ -352,12 +342,6 @@ async def _run_reasoning_once(
     # Health check
     if hasattr(client, "health_check"):
         await client.health_check()
-
-    # Ensure planning model is loaded (not the agent model)
-    if hasattr(client, "switch_model"):
-        loaded = await client.get_loaded_model() if hasattr(client, "get_loaded_model") else None
-        if loaded != client.model:
-            await client.switch_model(client.model)
 
     stages = [
         ContextStage(),

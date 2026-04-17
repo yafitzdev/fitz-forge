@@ -194,21 +194,6 @@ class PlanningPipeline:
 
         # Run agent context gathering (once, before all stages, with checkpoint)
         if agent is not None and "_agent_context" not in prior_outputs:
-            # Switch to agent model if different from planning model
-            # (skip if using override_files — no LLM calls needed)
-            _needs_switch = (
-                not _bench_override_files
-                and hasattr(client, "switch_model")
-                and hasattr(client, "smart_model")
-                and client.smart_model != client.model
-            )
-            if _needs_switch:
-                logger.info(
-                    f"Switching to agent model: {client.smart_model} "
-                    f"(planning model: {client.model})"
-                )
-                await client.switch_model(client.smart_model)
-
             logger.info(f"Running AgentContextGatherer for job {job_id}")
             t_agent = time.monotonic()
             gathered = await agent.gather(
@@ -226,11 +211,6 @@ class PlanningPipeline:
             logger.info(
                 f"AgentContextGatherer complete: synthesized={synth_len}, raw={raw_len} chars"
             )
-
-            # Switch back to planning model
-            if _needs_switch:
-                logger.info(f"Switching back to planning model: {client.model}")
-                await client.switch_model(client.model)
         elif "_agent_context" in prior_outputs:
             logger.info(f"Resuming: using checkpointed agent context for job {job_id}")
             # Report agent stage as complete so UI shows it done
@@ -743,15 +723,6 @@ class DecomposedPipeline:
 
         # Agent context gathering (identical to PlanningPipeline)
         if agent is not None and "_agent_context" not in prior_outputs:
-            _needs_switch = (
-                not _bench_override_files
-                and hasattr(client, "switch_model")
-                and hasattr(client, "smart_model")
-                and client.smart_model != client.model
-            )
-            if _needs_switch:
-                await client.switch_model(client.smart_model)
-
             t_agent = time.monotonic()
             gathered = await agent.gather(
                 client=client,
@@ -766,9 +737,6 @@ class DecomposedPipeline:
             )
             prior_outputs["_agent_context"] = gathered
             stage_timings["agent_gathering"] = time.monotonic() - t_agent
-
-            if _needs_switch:
-                await client.switch_model(client.model)
         elif "_agent_context" in prior_outputs:
             if progress_callback:
                 result_or_coro = progress_callback(0.09, "agent_exploring_complete")

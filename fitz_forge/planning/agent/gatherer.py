@@ -46,7 +46,9 @@ def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable
     """Bridge fitz-forge's async LLM client to fitz-sage's sync ChatFactory.
 
     Returns a factory ``(tier: str) -> ChatProvider`` where ChatProvider.chat()
-    schedules the async ``client.generate()`` on *loop* and blocks for the result.
+    schedules the async ``client.generate()`` on *loop* and blocks for the
+    result.  fitz-sage's tier parameter is ignored — fitz-forge serves a
+    single model.
     """
 
     class _SyncChat:
@@ -64,16 +66,8 @@ def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable
             )
             return future.result()
 
-    _TIER_MAP = {
-        "fast": "fast_model",
-        "balanced": "mid_model",
-        "smart": "smart_model",
-    }
-
     def factory(tier: str) -> _SyncChat:
-        attr = _TIER_MAP.get(tier, "model")
-        model = getattr(client, attr, client.model)
-        return _SyncChat(model)
+        return _SyncChat(client.model)
 
     return factory
 
