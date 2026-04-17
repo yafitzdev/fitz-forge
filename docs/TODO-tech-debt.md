@@ -74,6 +74,28 @@ missing.
 tree-sitter port already needs to un-skip `async`-flagged functions
 once this is addressed.
 
+### 5. Port ``planning/pipeline/stages/synthesis.py`` (optional)
+
+**Status:** intentionally NOT ported to tree-sitter.
+
+**Why it's skipped:**
+- synthesis.py generates *Python* artifacts; it never processes TS/Go/etc.
+  source, so the tree-sitter value proposition (cross-language parsing)
+  doesn't apply.
+- 35 ast sites spread across 15 functions, each with dense pattern
+  matching (``ImportFrom`` + ``AnnAssign`` + ``FunctionDef`` mixed),
+  roughly 6-8 hours of careful translation with no runtime parity
+  benefit.
+- Existing tests exercise these functions indirectly via integration
+  tests that require real LLM calls, so a cheap fixture-level parity
+  gate isn't available. Porting without that gate would ship subtle
+  regressions.
+
+**When to port:** if synthesis.py ever needs to process non-Python
+artifacts, port it then. Otherwise leave the ``ast`` usage in place —
+it's the correct tool for Python-only source analysis. The engine
+flag in ``grounding.index`` does not affect this file.
+
 ## Compatibility / legacy shims
 
 ### 4. Remove compatibility shims in the codebase
