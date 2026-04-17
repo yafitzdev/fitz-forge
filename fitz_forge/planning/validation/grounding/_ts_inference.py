@@ -560,3 +560,217 @@ def extract_init_self_attrs(
                 attrs[attr_name] = cname
 
     return attrs
+
+
+# ---------------------------------------------------------------------------
+# Top-level index augmentation (tree-sitter)
+# ---------------------------------------------------------------------------
+
+
+def _function_name(func_def: "Node") -> str | None:
+    """Return the function name identifier text, or None."""
+    for c in func_def.children:
+        if c.type == "identifier":
+            return c.text.decode("utf-8")
+    return None
+
+
+def _class_name(class_def: "Node") -> str | None:
+    for c in class_def.children:
+        if c.type == "identifier":
+            return c.text.decode("utf-8")
+    return None
+
+
+def _class_bases(class_def: "Node") -> list[str]:
+    """Return base class names from a ``class_definition``'s argument_list."""
+    args = next((c for c in class_def.children if c.type == "argument_list"), None)
+    if args is None:
+        return []
+    bases: list[str] = []
+    for c in args.children:
+        if not c.is_named:
+            continue
+        if c.type == "identifier":
+            bases.append(c.text.decode("utf-8"))
+        elif c.type == "attribute":
+            idents = [x for x in c.children if x.type == "identifier"]
+            if idents:
+                bases.append(idents[-1].text.decode("utf-8"))
+        elif c.type == "subscript":
+            # Base[generic] — unwrap to the outer name
+            v = next((x for x in c.children if x.type in ("identifier", "attribute")), None)
+            if v is not None:
+                if v.type == "identifier":
+                    bases.append(v.text.decode("utf-8"))
+                else:
+                    idents = [x for x in v.children if x.type == "identifier"]
+                    if idents:
+                        bases.append(idents[-1].text.decode("utf-8"))
+    return bases
+
+
+def _extract_param_names(func_def: "Node") -> list[str]:
+    """Replicate ast version's param collection: positional + kwonly flat,
+    ``*vararg``/``**kwarg`` prefixed with ``*``/``**``.
+    """
+    params_node = next((c for c in func_def.children if c.type == "parameters"), None)
+    if params_node is None:
+        return []
+    out: list[str] = []
+    for p in params_node.children:
+        if p.type == "identifier":
+            out.append(p.text.decode("utf-8"))
+        elif p.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
+            ident = next((c for c in p.children if c.type == "identifier"), None)
+            if ident is not None:
+                out.append(ident.text.decode("utf-8"))
+        elif p.type == "list_splat_pattern":
+            ident = next((c for c in p.children if c.type == "identifier"), None)
+            if ident is not None:
+                out.append(f"*{ident.text.decode('utf-8')}")
+        elif p.type == "dictionary_splat_pattern":
+            ident = next((c for c in p.children if c.type == "identifier"), None)
+            if ident is not None:
+                out.append(f"**{ident.text.decode('utf-8')}")
+    return out
+
+
+def iter_top_level_classes(root: "Node") -> Iterator["Node"]:
+    """Yield class_definition nodes at module top level (col_offset == 0)."""
+    for c in root.children:
+        if c.type == "class_definition" and c.start_point[1] == 0:
+            yield c
+
+
+def iter_top_level_functions(root: "Node") -> Iterator["Node"]:
+    """Yield function_definition nodes at module top level (col_offset == 0)."""
+    for c in root.children:
+        if c.type == "function_definition" and c.start_point[1] == 0:
+            yield c
+
+
+def iter_class_methods(class_def: "Node") -> Iterator["Node"]:
+    """Yield direct function_definition children of a class's body block."""
+    body = _class_body(class_def)
+    if body is None:
+        return
+    for c in body.children:
+        if c.type == "function_definition":
+            yield c
+
+
+def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
+    """Tree-sitter port of ``StructuralIndexLookup._absorb_file_pass1``.
+
+    Takes the lookup instance so we don't have to duplicate the index
+    data structures. Same return value: number of new classes added.
+    """
+    from .index import IndexedFunction
+
+    added = 0
+    for class_node in iter_top_level_classes(root):
+        absorb_class(lookup, rel, class_node)
+        added += 1
+    for func_node in iter_top_level_functions(root):
+        name = _function_name(func_node)
+        if name is None:
+            continue
+        if name in lookup._all_function_names:
+            continue
+        params = _extract_param_names(func_node)
+        func = IndexedFunction(name, rel, params, None)
+        lookup.functions.setdefault(name, []).append(func)
+        lookup._all_function_names.add(name)
+    return added
+
+
+def absorb_file_pass2(lookup, rel: str, root: "Node", known_classes: set[str]) -> None:
+    """Tree-sitter port of ``StructuralIndexLookup._absorb_file_pass2``."""
+    for func_node in iter_top_level_functions(root):
+        name = _function_name(func_node)
+        if name is None:
+            continue
+        funcs = lookup.functions.get(name, [])
+        for f in funcs:
+            if f.file == rel and f.return_type is None:
+                ret = infer_return_type(func_node, known_classes)
+                if ret:
+                    f.return_type = ret
+                break
+
+
+def absorb_class(lookup, rel: str, class_node: "Node") -> None:
+    """Tree-sitter port of ``StructuralIndexLookup._absorb_class``."""
+    from .index import IndexedClass, IndexedMethod
+
+    name = _class_name(class_node)
+    if name is None:
+        return
+
+    methods: dict[str, IndexedMethod] = {}
+    for m_node in iter_class_methods(class_node):
+        mname = _function_name(m_node)
+        if mname is None:
+            continue
+        if mname.startswith("__") and mname != "__init__":
+            continue
+        ret_node = _returns_annotation(m_node)
+        ret = unparse_annotation(ret_node) if ret_node is not None else None
+        if ret is None:
+            ret = _infer_return_from_body(m_node) or _infer_return_from_yields(m_node)
+        methods[mname] = IndexedMethod(mname, ret)
+
+    fields = extract_class_fields(class_node)
+    bases = _class_bases(class_node)
+
+    if name in lookup._all_class_names:
+        for existing_cls in lookup.classes.get(name, []):
+            for mname, minfo in methods.items():
+                if mname not in existing_cls.methods:
+                    existing_cls.methods[mname] = minfo
+                    lookup._all_method_names.add(mname)
+            for fname, ftype in fields.items():
+                existing_cls.fields.setdefault(fname, ftype)
+            for b in bases:
+                if b not in existing_cls.bases:
+                    existing_cls.bases.append(b)
+    else:
+        cls = IndexedClass(name, rel, bases, methods, fields, [])
+        lookup.classes.setdefault(name, []).append(cls)
+        lookup._all_class_names.add(name)
+        for mname in methods:
+            lookup._all_method_names.add(mname)
+
+
+def augment_from_source_dir(lookup, source_dir: str) -> int:
+    """Tree-sitter port of ``StructuralIndexLookup.augment_from_source_dir``."""
+    from pathlib import Path
+
+    from ._ts_parser import _parse_or_none
+
+    root = Path(source_dir)
+    if not root.is_dir():
+        return 0
+
+    parsed: list[tuple[str, "Node"]] = []
+    added = 0
+    for py_file in root.rglob("*.py"):
+        rel = str(py_file.relative_to(root)).replace("\\", "/")
+        if ".venv" in rel or "__pycache__" in rel:
+            continue
+        try:
+            text = py_file.read_bytes()[:200_000].decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        tree = _parse_or_none(text)
+        if tree is None:
+            continue
+        parsed.append((rel, tree.root_node))
+        added += absorb_file_pass1(lookup, rel, tree.root_node)
+
+    known_classes = set(lookup._all_class_names)
+    for rel, root_node in parsed:
+        absorb_file_pass2(lookup, rel, root_node, known_classes)
+
+    return added
