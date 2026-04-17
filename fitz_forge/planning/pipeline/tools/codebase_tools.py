@@ -10,13 +10,234 @@ All tools are pure Python (no LLM calls). They query the structural index
 and source code that was already gathered by the agent.
 """
 
-import ast
+from __future__ import annotations
+
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fitz_forge.planning.validation.grounding import StructuralIndexLookup
+from fitz_forge.planning.validation.grounding._ts_inference import (
+    _class_body,
+    _function_name,
+    _returns_annotation,
+    iter_all_classes,
+    iter_class_methods,
+    unparse_annotation,
+)
+from fitz_forge.planning.validation.grounding._ts_parser import parse_python
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 logger = logging.getLogger(__name__)
+
+
+def _find_class(src: str, class_name: str) -> "Node | None":
+    """Return the class_definition node with ``.name == class_name``, or None."""
+    tree = parse_python(src)
+    if tree is None:
+        return None
+    for cls in iter_all_classes(tree.root_node):
+        name_node = next((c for c in cls.children if c.type == "identifier"), None)
+        if name_node is not None and name_node.text.decode("utf-8") == class_name:
+            return cls
+    return None
+
+
+def _format_method_sig(method: "Node") -> str:
+    """Signature line for a function_definition."""
+    params: list[str] = []
+    params_node = next((c for c in method.children if c.type == "parameters"), None)
+    if params_node is not None:
+        for p in params_node.children:
+            if p.type == "identifier":
+                name = p.text.decode("utf-8")
+                if name != "self":
+                    params.append(name)
+            elif p.type == "typed_parameter":
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                tnode = next((c for c in p.children if c.type == "type"), None)
+                if ident is None:
+                    continue
+                name = ident.text.decode("utf-8")
+                if name == "self":
+                    continue
+                entry = name
+                if tnode is not None:
+                    unparsed = unparse_annotation(tnode)
+                    if unparsed:
+                        entry += f": {unparsed}"
+                params.append(entry)
+            elif p.type == "default_parameter":
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                if ident is None:
+                    continue
+                name = ident.text.decode("utf-8")
+                saw_eq = False
+                default_node = None
+                for c in p.children:
+                    if not c.is_named and c.type == "=":
+                        saw_eq = True
+                        continue
+                    if saw_eq and c.is_named:
+                        default_node = c
+                        break
+                if name != "self":
+                    suffix = f" = {default_node.text.decode('utf-8')}" if default_node else ""
+                    params.append(f"{name}{suffix}")
+            elif p.type == "typed_default_parameter":
+                ident = next((c for c in p.children if c.type == "identifier"), None)
+                tnode = next((c for c in p.children if c.type == "type"), None)
+                if ident is None:
+                    continue
+                name = ident.text.decode("utf-8")
+                if name == "self":
+                    continue
+                entry = name
+                if tnode is not None:
+                    unparsed = unparse_annotation(tnode)
+                    if unparsed:
+                        entry += f": {unparsed}"
+                saw_eq = False
+                default_node = None
+                for c in p.children:
+                    if not c.is_named and c.type == "=":
+                        saw_eq = True
+                        continue
+                    if saw_eq and c.is_named:
+                        default_node = c
+                        break
+                if default_node is not None:
+                    entry += f" = {default_node.text.decode('utf-8')}"
+                params.append(entry)
+
+    sig = f"{_function_name(method)}({', '.join(params)})"
+    ret_node = _returns_annotation(method)
+    if ret_node is not None:
+        unparsed = unparse_annotation(ret_node)
+        if unparsed:
+            sig += f" -> {unparsed}"
+    return sig
+
+
+def _lookup_method(src: str, class_name: str, method_name: str) -> str | None:
+    """Return formatted signature string or None if not found."""
+    cls = _find_class(src, class_name)
+    if cls is None:
+        return None
+    for m in iter_class_methods(cls):
+        if _function_name(m) == method_name:
+            return f"{class_name}.{_format_method_sig(m)}"
+    return None
+
+
+def _lookup_class(src: str, class_name: str) -> str | None:
+    """Return a multiline description of the class, or None if not found."""
+    cls = _find_class(src, class_name)
+    if cls is None:
+        return None
+
+    parts: list[str] = []
+
+    # Bases
+    args = next((c for c in cls.children if c.type == "argument_list"), None)
+    bases: list[str] = []
+    if args is not None:
+        for c in args.children:
+            if c.is_named:
+                bases.append(c.text.decode("utf-8"))
+    if bases:
+        parts.append(f"class {class_name}({', '.join(bases)})")
+    else:
+        parts.append(f"class {class_name}")
+
+    # Instance attrs from __init__ / _init_components
+    attrs: list[str] = []
+    for method in iter_class_methods(cls):
+        mname = _function_name(method)
+        if mname not in ("__init__", "_init_components"):
+            continue
+        body = next((c for c in method.children if c.type == "block"), None)
+        if body is None:
+            continue
+        stack = list(body.children)
+        while stack:
+            n = stack.pop()
+            if n.type == "assignment":
+                target = next((c for c in n.children if c.is_named), None)
+                if target is None or target.type != "attribute":
+                    stack.extend(n.children)
+                    continue
+                idents = [c for c in target.children if c.type == "identifier"]
+                if len(idents) != 2 or idents[0].text.decode("utf-8") != "self":
+                    stack.extend(n.children)
+                    continue
+                attr_name = idents[1].text.decode("utf-8")
+                saw_eq = False
+                value = None
+                for c in n.children:
+                    if not c.is_named and c.type == "=":
+                        saw_eq = True
+                        continue
+                    if saw_eq and c.is_named:
+                        value = c
+                        break
+                rhs = ""
+                if value is not None and value.type == "call":
+                    callee = next(
+                        (c for c in value.children if c.is_named and c.type != "argument_list"),
+                        None,
+                    )
+                    if callee is not None:
+                        if callee.type == "identifier":
+                            rhs = callee.text.decode("utf-8")
+                        elif callee.type == "attribute":
+                            idents2 = [c for c in callee.children if c.type == "identifier"]
+                            if idents2:
+                                rhs = idents2[-1].text.decode("utf-8")
+                attrs.append(
+                    f"  self.{attr_name} = {rhs}(...)" if rhs else f"  self.{attr_name}"
+                )
+            stack.extend(n.children)
+    if attrs:
+        parts.append("Attributes:")
+        parts.extend(attrs[:20])
+
+    # Class-level annotated fields (Pydantic models, dataclasses)
+    fields: list[str] = []
+    body = _class_body(cls)
+    if body is not None:
+        for stmt in body.children:
+            if stmt.type != "expression_statement":
+                continue
+            inner = next((c for c in stmt.children if c.is_named), None)
+            if inner is None or inner.type != "assignment":
+                continue
+            target = next((c for c in inner.children if c.is_named), None)
+            if target is None or target.type != "identifier":
+                continue
+            tnode = next((c for c in inner.children if c.type == "type"), None)
+            if tnode is None:
+                continue
+            ann = unparse_annotation(tnode) or "?"
+            fields.append(f"  {target.text.decode('utf-8')}: {ann}")
+    if fields:
+        parts.append("Fields:")
+        parts.extend(fields[:20])
+
+    # Methods (excluding dunders)
+    methods_lines: list[str] = []
+    for m in iter_class_methods(cls):
+        mname = _function_name(m)
+        if mname is None or mname.startswith("__"):
+            continue
+        methods_lines.append(f"  {_format_method_sig(m)}")
+    if methods_lines:
+        parts.append("Methods:")
+        parts.extend(methods_lines[:15])
+
+    return "\n".join(parts)
 
 
 def make_codebase_tools(
@@ -35,16 +256,13 @@ def make_codebase_tools(
 
     def _find_source(class_name: str) -> str | None:
         """Find source code containing a class definition."""
-        # Search file_contents first — must have the actual class def, not just an import
         class_marker = f"class {class_name}"
         for _, content in _source_pool.items():
             if class_marker in content:
                 return content
-        # Disk fallback — match class name against filename in both directions
         if source_dir:
             cn_lower = class_name.lower()
             for py in Path(source_dir).rglob("*.py"):
-                # Skip venvs and hidden directories
                 parts_str = str(py)
                 if (
                     ".venv" in parts_str
@@ -53,8 +271,6 @@ def make_codebase_tools(
                 ):
                     continue
                 stem = py.stem.lower()
-                # Match: class name contains stem or stem contains class name
-                # Require minimum 4-char stem to avoid matching 'c.py', 'de.py' etc.
                 if len(stem) >= 4 and (cn_lower in stem or stem in cn_lower):
                     try:
                         src = py.read_text(encoding="utf-8", errors="replace")
@@ -64,58 +280,8 @@ def make_codebase_tools(
                         continue
         return None
 
-    def _find_class_node(src: str, class_name: str) -> ast.ClassDef | None:
-        """Find AST ClassDef node by name."""
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            return None
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == class_name:
-                return node
-        return None
-
-    def _format_method_sig(method: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-        """Format a method's full signature from AST."""
-        params = []
-        for arg in method.args.args:
-            if arg.arg == "self":
-                continue
-            p = arg.arg
-            if arg.annotation:
-                try:
-                    p += f": {ast.unparse(arg.annotation)}"
-                except Exception:
-                    pass
-            params.append(p)
-        # Defaults
-        defaults = method.args.defaults
-        n_defaults = len(defaults)
-        n_params = len(params)
-        for i, default in enumerate(defaults):
-            param_idx = n_params - n_defaults + i
-            if param_idx >= 0:
-                try:
-                    params[param_idx] += f" = {ast.unparse(default)}"
-                except Exception:
-                    pass
-
-        sig = f"{method.name}({', '.join(params)})"
-        if method.returns:
-            try:
-                sig += f" -> {ast.unparse(method.returns)}"
-            except Exception:
-                pass
-        return sig
-
     def _strip_module(name: str) -> str:
-        """Strip module path from a class/function name.
-
-        Models often pass fully-qualified names like
-        'fitz_sage.engines.fitz_krag.engine.FitzKragEngine' but tools
-        index by simple name 'FitzKragEngine'. Also strips method
-        names passed as 'ClassName.method'.
-        """
+        """Strip module path from a class/function name."""
         if "." in name:
             return name.rsplit(".", 1)[-1]
         return name
@@ -128,26 +294,12 @@ def make_codebase_tools(
         class_name = _strip_module(class_name)
         method_name = _strip_module(method_name)
 
-        from fitz_forge.planning.validation.grounding.index import get_engine
-
-        # Try source-based resolution first (most accurate) — tree-sitter
-        # when engine is tree_sitter, ast otherwise.
+        # Try source-based resolution first (most accurate)
         src = _find_source(class_name)
         if src:
-            if get_engine() == "tree_sitter":
-                from ._ts_codebase_tools import lookup_method as _ts_lookup_method
-
-                hit = _ts_lookup_method(src, class_name, method_name)
-                if hit:
-                    return hit
-            else:
-                cls_node = _find_class_node(src, class_name)
-                if cls_node:
-                    for node in ast.iter_child_nodes(cls_node):
-                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                            if node.name == method_name:
-                                sig = _format_method_sig(node)
-                                return f"{class_name}.{sig}"
+            hit = _lookup_method(src, class_name, method_name)
+            if hit:
+                return hit
 
         # Fall back to structural index
         if lookup.class_has_method(class_name, method_name):
@@ -173,86 +325,15 @@ def make_codebase_tools(
     def lookup_class(class_name: str) -> str:
         """Look up a class: its methods, instance attributes, and base classes."""
         class_name = _strip_module(class_name)
-        parts = []
 
-        from fitz_forge.planning.validation.grounding.index import get_engine
-
-        # AST-based (most accurate)
         src = _find_source(class_name)
-        if src and get_engine() == "tree_sitter":
-            from ._ts_codebase_tools import lookup_class as _ts_lookup_class
-
-            hit = _ts_lookup_class(src, class_name)
+        if src:
+            hit = _lookup_class(src, class_name)
             if hit:
                 return hit
 
-        if src:
-            cls_node = _find_class_node(src, class_name)
-            if cls_node:
-                # Bases
-                bases = [ast.unparse(b) if hasattr(ast, "unparse") else "?" for b in cls_node.bases]
-                if bases:
-                    parts.append(f"class {class_name}({', '.join(bases)})")
-                else:
-                    parts.append(f"class {class_name}")
-
-                # Instance attrs from __init__ / _init_components
-                attrs = []
-                for method in ast.iter_child_nodes(cls_node):
-                    if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if method.name in ("__init__", "_init_components"):
-                            for node in ast.walk(method):
-                                if isinstance(node, ast.Assign):
-                                    for target in node.targets:
-                                        if (
-                                            isinstance(target, ast.Attribute)
-                                            and isinstance(target.value, ast.Name)
-                                            and target.value.id == "self"
-                                        ):
-                                            rhs = ""
-                                            if isinstance(node.value, ast.Call):
-                                                if isinstance(node.value.func, ast.Name):
-                                                    rhs = node.value.func.id
-                                                elif isinstance(node.value.func, ast.Attribute):
-                                                    rhs = node.value.func.attr
-                                            attrs.append(
-                                                f"  self.{target.attr} = {rhs}(...)"
-                                                if rhs
-                                                else f"  self.{target.attr}"
-                                            )
-                if attrs:
-                    parts.append("Attributes:")
-                    parts.extend(attrs[:20])  # cap at 20
-
-                # Class-level annotated fields (Pydantic models, dataclasses)
-                # e.g. question: str = Field(...)
-                fields = []
-                for node in ast.iter_child_nodes(cls_node):
-                    if isinstance(node, ast.AnnAssign) and node.target:
-                        if isinstance(node.target, ast.Name):
-                            name = node.target.id
-                            try:
-                                ann = ast.unparse(node.annotation)
-                            except Exception:
-                                ann = "?"
-                            fields.append(f"  {name}: {ann}")
-                if fields:
-                    parts.append("Fields:")
-                    parts.extend(fields[:20])
-
-                # Methods with signatures
-                methods = []
-                for node in ast.iter_child_nodes(cls_node):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if not node.name.startswith("__"):
-                            methods.append(f"  {_format_method_sig(node)}")
-                if methods:
-                    parts.append("Methods:")
-                    parts.extend(methods[:15])  # cap at 15
-
-                return "\n".join(parts)
-
         # Fall back to structural index
+        parts: list[str] = []
         cls = lookup.find_class(class_name)
         if cls:
             parts.append(f"class {class_name} (from structural index, {cls.file})")
@@ -272,17 +353,14 @@ def make_codebase_tools(
     # ------------------------------------------------------------------
     def check_exists(symbol_name: str) -> str:
         """Check if a class, method, or function exists anywhere in the codebase."""
-        # Check classes
         if lookup.class_exists(symbol_name):
             cls = lookup.find_class(symbol_name)
             return f"EXISTS: class {symbol_name} in {cls.file}"
 
-        # Check functions
         if lookup.function_exists(symbol_name):
             funcs = lookup.find_function(symbol_name)
             return f"EXISTS: function {symbol_name} in {funcs[0].file}"
 
-        # Check as a method on any class
         if lookup.method_exists_anywhere(symbol_name):
             for cls_name, cls_list in lookup.classes.items():
                 for cls in cls_list:
@@ -302,21 +380,23 @@ def make_codebase_tools(
         if not src:
             return f"SOURCE NOT AVAILABLE for {class_name}"
 
-        cls_node = _find_class_node(src, class_name)
-        if not cls_node:
+        cls = _find_class(src, class_name)
+        if cls is None:
             return f"CLASS {class_name} NOT FOUND in source"
 
-        for node in ast.iter_child_nodes(cls_node):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name == method_name:
-                    # Extract source lines
-                    lines = src.split("\n")
-                    start = node.lineno - 1
-                    end = node.end_lineno or (start + 50)
-                    method_src = "\n".join(lines[start:end])
-                    if len(method_src) > 2000:
-                        method_src = method_src[:2000] + "\n... (truncated)"
-                    return method_src
+        for m in iter_class_methods(cls):
+            if _function_name(m) != method_name:
+                continue
+            # Extract source lines by tree-sitter byte range
+            lines = src.split("\n")
+            start = m.start_point[0]  # 0-indexed
+            end_row = m.end_point[0]
+            end_col = m.end_point[1]
+            end = end_row if end_col == 0 else end_row + 1
+            method_src = "\n".join(lines[start:end])
+            if len(method_src) > 2000:
+                method_src = method_src[:2000] + "\n... (truncated)"
+            return method_src
 
         return f"METHOD {method_name} NOT FOUND on {class_name}"
 

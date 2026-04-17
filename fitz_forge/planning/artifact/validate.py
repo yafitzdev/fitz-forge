@@ -8,13 +8,25 @@ These are the SAME checks the V2 scorer runs, so if an artifact
 passes validation here, the scorer will agree.
 """
 
-import ast
+from __future__ import annotations
+
 import logging
 import re
 import textwrap
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from ..validation.grounding._ts_inference import (
+    _class_body,
+    _rightmost_attribute_name,
+    _unwrap_decorated,
+    iter_all_classes,
+)
+from ..validation.grounding._ts_parser import parse_python
 from .context import ArtifactContext
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 logger = logging.getLogger(__name__)
 
@@ -33,24 +45,6 @@ class ArtifactError:
     suggestion: str  # what to fix
 
 
-def _try_parse(content: str) -> ast.Module | None:
-    """Try parsing with recovery: raw -> dedent -> class wrap -> import-split."""
-    from fitz_forge.planning.validation.grounding.inference import try_parse
-
-    return try_parse(content)
-
-
-def _check_parseable(content: str) -> ArtifactError | None:
-    """Check if content is valid Python (with recovery)."""
-    if _try_parse(content) is None:
-        return ArtifactError(
-            check="parseable",
-            message="Content is not valid Python (even after quote fix/dedent/class wrap recovery)",
-            suggestion="Ensure the output is syntactically valid Python code",
-        )
-    return None
-
-
 _DATA_BASES = frozenset(
     {
         "BaseModel",
@@ -63,49 +57,116 @@ _DATA_BASES = frozenset(
         "NamedTuple",
     }
 )
-_DATA_DECORATORS = frozenset({"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"})
+_DATA_DECORATORS = frozenset(
+    {"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"}
+)
 
 
-def _is_data_class(node: ast.ClassDef) -> bool:
-    """True if `node` is a Pydantic / dataclass / Enum / TypedDict style class.
+def _decorator_name(dec_node: "Node") -> str | None:
+    """Return the leaf identifier of a ``decorator`` node."""
+    body: Node | None = None
+    for c in dec_node.children:
+        if c.is_named:
+            body = c
+            break
+    if body is None:
+        return None
+    if body.type == "identifier":
+        return body.text.decode("utf-8")
+    if body.type == "attribute":
+        return _rightmost_attribute_name(body)
+    if body.type == "call":
+        callee = None
+        for c in body.children:
+            if c.is_named and c.type != "argument_list":
+                callee = c
+                break
+        if callee is None:
+            return None
+        if callee.type == "identifier":
+            return callee.text.decode("utf-8")
+        if callee.type == "attribute":
+            return _rightmost_attribute_name(callee)
+    return None
 
-    These are valid Python artifacts with no `def` — they contain only
-    annotated fields or enum values, and should not trip the empty check.
+
+def _class_decorators(class_def: "Node") -> list[str]:
+    """Return decorator leaf names for a class node."""
+    parent = class_def.parent
+    if parent is not None and parent.type == "decorated_definition":
+        out: list[str] = []
+        for c in parent.children:
+            if c.type == "decorator":
+                name = _decorator_name(c)
+                if name:
+                    out.append(name)
+        return out
+    return []
+
+
+def _is_data_class(class_def: "Node") -> bool:
+    """True iff the class is Pydantic / dataclass / Enum / TypedDict / annotated.
+
+    Short-circuits in order: annotated field → base class → decorator.
     """
-    # Any annotated field (pydantic / dataclass / plain class with annotations)
-    for child in node.body:
-        if isinstance(child, ast.AnnAssign):
+    body = _class_body(class_def)
+    if body is not None:
+        for stmt in body.children:
+            if stmt.type != "expression_statement":
+                continue
+            inner = next((c for c in stmt.children if c.is_named), None)
+            if inner is None or inner.type != "assignment":
+                continue
+            has_type = any(c.type == "type" for c in inner.children)
+            if has_type:
+                return True
+
+    args = next((c for c in class_def.children if c.type == "argument_list"), None)
+    if args is not None:
+        for c in args.children:
+            if not c.is_named:
+                continue
+            name: str | None = None
+            if c.type == "identifier":
+                name = c.text.decode("utf-8")
+            elif c.type == "attribute":
+                name = _rightmost_attribute_name(c)
+            if name in _DATA_BASES:
+                return True
+
+    for d in _class_decorators(class_def):
+        if d in _DATA_DECORATORS:
             return True
-    # Inherits from a data-model base
-    for base in node.bases:
-        name: str | None = None
-        if isinstance(base, ast.Name):
-            name = base.id
-        elif isinstance(base, ast.Attribute):
-            name = base.attr
-        if name in _DATA_BASES:
-            return True
-    # @dataclass / @pydantic.dataclass / @attr.s / @define decorator
-    for dec in node.decorator_list:
-        name = None
-        if isinstance(dec, ast.Name):
-            name = dec.id
-        elif isinstance(dec, ast.Call):
-            if isinstance(dec.func, ast.Name):
-                name = dec.func.id
-            elif isinstance(dec.func, ast.Attribute):
-                name = dec.func.attr
-        elif isinstance(dec, ast.Attribute):
-            name = dec.attr
-        if name in _DATA_DECORATORS:
-            return True
-    # Enum-style class with plain assignments (e.g. `FOO = "foo"`)
-    for child in node.body:
-        if isinstance(child, ast.Assign) and any(isinstance(t, ast.Name) for t in child.targets):
-            # Only enough if inherits from an Enum — covered above. Don't
-            # over-accept plain constants.
-            pass
+
     return False
+
+
+def _iter_all_functions(root: "Node"):
+    """Yield every function_definition in the tree (nested and decorated)."""
+    stack: list[Node] = [root]
+    seen: set[int] = set()
+    while stack:
+        n = stack.pop()
+        if n.type == "function_definition" and n.id not in seen:
+            seen.add(n.id)
+            yield n
+        elif n.type == "decorated_definition":
+            inner = _unwrap_decorated(n)
+            if inner.type == "function_definition" and inner.id not in seen:
+                seen.add(inner.id)
+                yield inner
+        stack.extend(n.children)
+
+
+def _check_parseable(content: str) -> ArtifactError | None:
+    """Check if content is valid Python (with recovery)."""
+    if parse_python(content) is None:
+        return ArtifactError(
+            check="parseable",
+            message="Content is not valid Python (even after quote fix/dedent/class wrap recovery)",
+            suggestion="Ensure the output is syntactically valid Python code",
+        )
+    return None
 
 
 def _check_empty(content: str) -> ArtifactError | None:
@@ -124,36 +185,21 @@ def _check_empty(content: str) -> ArtifactError | None:
             suggestion="Write the actual implementation, not just comments or stubs",
         )
 
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        from ._ts_validate import check_empty_structural
-
-        result = check_empty_structural(content)
-        if result is None:
+    tree = parse_python(content)
+    if tree is not None:
+        root = tree.root_node
+        for _fn in _iter_all_functions(root):
             return None
-        if result != "__parse_failed__":
-            return ArtifactError(
-                check="empty",
-                message=result,
-                suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
-            )
-        # parser failed — fall through to the text-heuristic path below
-    else:
-        tree = _try_parse(content)
-        if tree is not None:
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    return None
-                if isinstance(node, ast.ClassDef) and _is_data_class(node):
-                    return None
-            return ArtifactError(
-                check="empty",
-                message="Content has no function/method defs and no data-model class",
-                suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
-            )
+        for cls in iter_all_classes(root):
+            if _is_data_class(cls):
+                return None
+        return ArtifactError(
+            check="empty",
+            message="Content has no function/method defs and no data-model class",
+            suggestion="Include at least one function/method, or a Pydantic/dataclass/Enum class with annotated fields",
+        )
+
     # Unparseable (or non-Python) — use language-agnostic text heuristics.
-    # Accept if content has definition-like keywords from any common language.
     _DEF_KEYWORDS = (
         "def ",
         "class ",
@@ -249,38 +295,34 @@ def _check_return_type(content: str, ctx: ArtifactContext) -> ArtifactError | No
     if not is_streaming:
         return None
 
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        from ._ts_validate import check_return_type
-
-        hit = check_return_type(content)
-        if hit is None:
-            return None
-        name, ret_text = hit
-        return ArtifactError(
-            check="return_type",
-            message=f"Method '{name}' returns '{ret_text}' but streaming methods must return Iterator/Generator",
-            suggestion="Change return type to Iterator[str] or Generator[str, None, None]",
-        )
-
-    tree = _try_parse(content)
+    tree = parse_python(content)
     if tree is None:
         return None  # handled by parseable check
-
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    for fn in _iter_all_functions(tree.root_node):
+        name_node = next((c for c in fn.children if c.type == "identifier"), None)
+        if name_node is None:
             continue
-        if "stream" not in node.name.lower():
+        name = name_node.text.decode("utf-8")
+        if "stream" not in name.lower():
             continue
-        if node.returns is None:
+        # Return annotation: ``type`` node between parameters and ``:``
+        saw_params = False
+        ret_node: Node | None = None
+        for c in fn.children:
+            if c.type == "parameters":
+                saw_params = True
+                continue
+            if saw_params and c.type == "type":
+                ret_node = c
+                break
+        if ret_node is None:
             continue
-
-        ret_type = ast.unparse(node.returns)
-        if not any(t in ret_type for t in _ITERATOR_TYPES):
+        named = [c for c in ret_node.children if c.is_named]
+        ret_text = (named[0] if len(named) == 1 else ret_node).text.decode("utf-8")
+        if not any(t in ret_text for t in _ITERATOR_TYPES):
             return ArtifactError(
                 check="return_type",
-                message=f"Method '{node.name}' returns '{ret_type}' but streaming methods must return Iterator/Generator",
+                message=f"Method '{name}' returns '{ret_text}' but streaming methods must return Iterator/Generator",
                 suggestion="Change return type to Iterator[str] or Generator[str, None, None]",
             )
     return None
