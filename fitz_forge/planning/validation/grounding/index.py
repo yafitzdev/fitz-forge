@@ -32,10 +32,11 @@ from .inference import (
 
 logger = logging.getLogger(__name__)
 
-# Parser engine for ``augment_from_source_dir``. ``"ast"`` is the legacy
-# Python-ast walker; ``"tree_sitter"`` routes through the byte-parity
-# implementation in ``_ts_inference``. Flip via ``set_engine()``.
-_ENGINE: str = "ast"
+# Parser engine for ``augment_from_source_dir``. ``"tree_sitter"`` is the
+# default (byte-parity with the legacy ast walker; ~5× faster on a 500-
+# file tree). ``"ast"`` is kept as a rollback path until the migration
+# has soaked. Flip via ``set_engine()``.
+_ENGINE: str = "tree_sitter"
 
 
 def set_engine(engine: str) -> None:

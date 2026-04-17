@@ -47,6 +47,8 @@ def test_set_engine_rejects_unknown(_reset_engine) -> None:
         _index_mod.set_engine("wat")
 
 
-def test_default_engine_is_ast() -> None:
-    # Fresh import state: default must remain "ast" until explicitly flipped.
-    assert _index_mod.get_engine() == "ast"
+def test_default_engine_is_tree_sitter() -> None:
+    # Default is now tree-sitter after parity was proven on fitz-forge
+    # itself. Flip back to "ast" if a regression appears — the routing
+    # stays in place.
+    assert _index_mod.get_engine() == "tree_sitter"
