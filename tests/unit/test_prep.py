@@ -377,3 +377,77 @@ class TestCliIntegration:
         assert "--model" in result.stdout
 
 
+# ---------------------------------------------------------------------------
+# First-run trigger on load_config
+# ---------------------------------------------------------------------------
+
+
+class TestFirstRunTrigger:
+    def test_load_config_triggers_wizard_when_unconfigured(
+        self, tmp_path, monkeypatch
+    ):
+        """If config is missing or model is placeholder, loader invokes wizard."""
+        from fitz_forge.config import loader, prep as prep_mod
+
+        cfg_path = tmp_path / "config.yaml"
+
+        invoked = {"count": 0}
+
+        async def fake_wizard(path, base_url=None, model=None):
+            # Simulate user completing the wizard.
+            write_config("http://localhost:1234/v1", "wizard-wrote-this", path)
+            invoked["count"] += 1
+
+        monkeypatch.setattr(loader, "get_config_path", lambda: cfg_path)
+        monkeypatch.setattr(prep_mod, "run_wizard", fake_wizard)
+
+        config = loader.load_config()
+        assert invoked["count"] == 1
+        assert config.provider == "lm_studio"
+        assert config.lm_studio.model == "wizard-wrote-this"
+
+    def test_load_config_no_wizard_when_configured(self, tmp_path, monkeypatch):
+        from fitz_forge.config import loader, prep as prep_mod
+
+        cfg_path = tmp_path / "config.yaml"
+        write_config("http://localhost:1234/v1", "already-configured", cfg_path)
+
+        monkeypatch.setattr(loader, "get_config_path", lambda: cfg_path)
+
+        called = {"count": 0}
+
+        async def fake_wizard(path, base_url=None, model=None):
+            called["count"] += 1
+
+        monkeypatch.setattr(prep_mod, "run_wizard", fake_wizard)
+
+        config = loader.load_config()
+        assert called["count"] == 0
+        assert config.lm_studio.model == "already-configured"
+
+    def test_load_config_placeholder_triggers_wizard(self, tmp_path, monkeypatch):
+        from fitz_forge.config import loader, prep as prep_mod
+
+        cfg_path = tmp_path / "config.yaml"
+        # Pre-write a config with the placeholder "local-model" value.
+        cfg_path.write_text(
+            yaml.safe_dump(
+                {"provider": "lm_studio", "lm_studio": {"model": "local-model"}}
+            ),
+            encoding="utf-8",
+        )
+
+        invoked = {"count": 0}
+
+        async def fake_wizard(path, base_url=None, model=None):
+            write_config("http://localhost:1234/v1", "real-model", path)
+            invoked["count"] += 1
+
+        monkeypatch.setattr(loader, "get_config_path", lambda: cfg_path)
+        monkeypatch.setattr(prep_mod, "run_wizard", fake_wizard)
+
+        config = loader.load_config()
+        assert invoked["count"] == 1
+        assert config.lm_studio.model == "real-model"
+
+

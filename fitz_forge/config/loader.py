@@ -5,9 +5,12 @@ Configuration loading with auto-creation of defaults.
 Uses platformdirs for cross-platform config directory management.
 """
 
+import asyncio
 import logging
+import sys
 from pathlib import Path
 
+import typer
 import yaml
 from platformdirs import user_config_path
 from pydantic import BaseModel
@@ -39,21 +42,49 @@ def _warn_unknown_keys(yaml_data: dict, model_class: type[BaseModel], prefix: st
                 _warn_unknown_keys(yaml_data[key], annotation, full_key)
 
 
+def _maybe_run_first_time_wizard(config_path: Path) -> None:
+    """If config is missing or contains only placeholder values, run the wizard.
+
+    Printing and prompting go to the user's terminal (stdout) because this
+    is the interactive setup path. Raises ``typer.Exit`` on Ctrl+C so the
+    caller exits cleanly rather than continuing with unconfigured state.
+    """
+    from . import prep
+
+    if not prep.is_unconfigured(config_path):
+        return
+
+    # ``print`` here is the interactive-UX exception (rule #2) — this is
+    # triggered from the CLI path, not from MCP. MCP users go through
+    # ``fitz prep`` manually before launching the server.
+    print("First-time setup — run 'fitz prep' to configure.", file=sys.stderr)
+
+    try:
+        asyncio.run(prep.run_wizard(config_path))
+    except KeyboardInterrupt:
+        print("\nSetup aborted.", file=sys.stderr)
+        raise typer.Exit(130) from None
+
+
 def load_config() -> FitzPlannerConfig:
     """
     Load configuration from YAML file.
 
-    If config file doesn't exist, creates it with defaults.
-    Returns validated Pydantic model.
+    If the config file doesn't exist or still holds placeholder values
+    (first run), invokes the ``fitz prep`` setup wizard inline before
+    loading. Returns a validated Pydantic model.
     """
     config_path = get_config_path()
 
+    _maybe_run_first_time_wizard(config_path)
+
     if not config_path.exists():
-        # Create default config
+        # Wizard was skipped/bypassed (e.g. in a test with the wizard patched
+        # out) — fall back to writing defaults so the rest of the pipeline
+        # has something to work with.
         default_config = FitzPlannerConfig()
         config_dict = default_config.model_dump(mode="json")
 
-        # Write to YAML
         with config_path.open("w") as f:
             yaml.safe_dump(config_dict, f, default_flow_style=False, sort_keys=False)
 

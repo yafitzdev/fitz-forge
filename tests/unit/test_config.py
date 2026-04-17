@@ -460,8 +460,20 @@ class TestWarnUnknownKeys:
 class TestLoadConfig:
     """Tests for load_config with real filesystem (tmp_path)."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_wizard(self, monkeypatch):
+        """Stub out the first-run wizard so load_config never tries to prompt."""
+
+        async def _noop(path, base_url=None, model=None):
+            return None
+
+        monkeypatch.setattr(
+            "fitz_forge.config.prep.run_wizard",
+            _noop,
+        )
+
     def test_creates_default_config_when_missing(self, tmp_path, monkeypatch):
-        """load_config creates a default YAML file when none exists."""
+        """load_config falls back to writing defaults when the wizard is skipped."""
         config_path = tmp_path / "config.yaml"
         monkeypatch.setattr(
             "fitz_forge.config.loader.get_config_path",
