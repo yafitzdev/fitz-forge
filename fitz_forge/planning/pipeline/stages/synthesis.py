@@ -305,14 +305,11 @@ def _resolve_imported_type_apis(
 
     Generic — works for any codebase, not hardcoded to specific classes.
     """
-    import ast as _ast
-
     if not source:
         return ""
 
-    try:
-        tree = _ast.parse(source)
-    except SyntaxError:
+    tree = _ts_parse_python(source)
+    if tree is None:
         return ""
 
     # Collect type names from imports, annotations, and return types
@@ -320,33 +317,97 @@ def _resolve_imported_type_apis(
     # Track imported functions to resolve their return types
     imported_funcs: dict[str, str] = {}  # func_name -> module_path
 
-    for node in _ast.walk(tree):
+    def _annotation_name(type_node) -> str | None:
+        """If a `type` node wraps a single bare identifier, return its text."""
+        if type_node is None or type_node.type != "type":
+            return None
+        named = [c for c in type_node.children if c.is_named]
+        if len(named) != 1:
+            return None
+        if named[0].type != "identifier":
+            return None
+        return named[0].text.decode("utf-8")
+
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.children)
+
         # from X import ClassName or function
-        if isinstance(node, _ast.ImportFrom) and node.module:
-            for alias in node.names:
-                name = alias.name
-                if name[0].isupper() and not name.startswith("_"):
-                    imported_types.add(name)
-                elif name[0].islower() and not name.startswith("_"):
-                    # Imported function — resolve its return type later
-                    imported_funcs[name] = node.module
-        # var: ClassName = ... (annotations)
-        if isinstance(node, _ast.AnnAssign) and isinstance(node.annotation, _ast.Name):
-            name = node.annotation.id
-            if name[0].isupper():
-                imported_types.add(name)
-        # def func(...) -> ClassName (return type hints)
-        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            if node.returns and isinstance(node.returns, _ast.Name):
-                name = node.returns.id
-                if name[0].isupper():
-                    imported_types.add(name)
-            # Parameter type hints
-            for arg in node.args.args:
-                if arg.annotation and isinstance(arg.annotation, _ast.Name):
-                    name = arg.annotation.id
-                    if name[0].isupper():
+        if node.type == "import_from_statement":
+            # Find the module path (dotted_name child) — skip relative imports
+            module_node = next(
+                (c for c in node.children if c.type == "dotted_name"),
+                None,
+            )
+            if module_node is None:
+                continue
+            module_path = module_node.text.decode("utf-8")
+            # Imported names: every dotted_name / aliased_import after the keyword.
+            # The first dotted_name is the module, subsequent ones are imports.
+            seen_module = False
+            for c in node.children:
+                if c.type == "dotted_name":
+                    if not seen_module:
+                        seen_module = True
+                        continue
+                    name = c.text.decode("utf-8")
+                    if name and name[0].isupper() and not name.startswith("_"):
                         imported_types.add(name)
+                    elif name and name[0].islower() and not name.startswith("_"):
+                        imported_funcs[name] = module_path
+                elif c.type == "aliased_import":
+                    inner = next(
+                        (ic for ic in c.children if ic.type == "dotted_name"),
+                        None,
+                    )
+                    if inner is None:
+                        continue
+                    name = inner.text.decode("utf-8")
+                    if name and name[0].isupper() and not name.startswith("_"):
+                        imported_types.add(name)
+                    elif name and name[0].islower() and not name.startswith("_"):
+                        imported_funcs[name] = module_path
+
+        # var: ClassName = ... (annotations) — emit if RHS exists or not.
+        # Tree-sitter wraps `x: T = v` and `x: T` both as `assignment` with type child.
+        if node.type == "assignment":
+            type_child = next((c for c in node.children if c.type == "type"), None)
+            ann_name = _annotation_name(type_child)
+            if ann_name and ann_name[0].isupper():
+                imported_types.add(ann_name)
+
+        # def func(...) -> ClassName (return type hints) and parameter hints
+        if node.type == "function_definition":
+            # Return type
+            saw_params = False
+            ret_node = None
+            for c in node.children:
+                if c.type == "parameters":
+                    saw_params = True
+                    continue
+                if saw_params and c.type == "type":
+                    ret_node = c
+                    break
+            ret_name = _annotation_name(ret_node)
+            if ret_name and ret_name[0].isupper():
+                imported_types.add(ret_name)
+
+            # Parameter hints
+            params = next(
+                (c for c in node.children if c.type == "parameters"),
+                None,
+            )
+            if params is not None:
+                for p in params.children:
+                    if p.type not in ("typed_parameter", "typed_default_parameter"):
+                        continue
+                    type_node = next(
+                        (c for c in p.children if c.type == "type"), None
+                    )
+                    pname = _annotation_name(type_node)
+                    if pname and pname[0].isupper():
+                        imported_types.add(pname)
 
     # Filter out builtins and stdlib types
     _SKIP = {
@@ -383,20 +444,42 @@ def _resolve_imported_type_apis(
                 continue
             try:
                 func_src = func_file.read_text(encoding="utf-8", errors="replace")
-                func_tree = _ast.parse(func_src)
-            except (OSError, SyntaxError):
+            except OSError:
                 continue
-            for fnode in _ast.walk(func_tree):
-                if (
-                    isinstance(fnode, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-                    and fnode.name == func_name
-                    and fnode.returns
-                    and isinstance(fnode.returns, _ast.Name)
-                ):
-                    ret_type = fnode.returns.id
+            func_tree = _ts_parse_python(func_src)
+            if func_tree is None:
+                continue
+            f_stack = [func_tree.root_node]
+            while f_stack:
+                fnode = f_stack.pop()
+                f_stack.extend(fnode.children)
+                if fnode.type != "function_definition":
+                    continue
+                fname = None
+                for c in fnode.children:
+                    if c.type == "identifier":
+                        fname = c.text.decode("utf-8")
+                        break
+                if fname != func_name:
+                    continue
+                # Find return type annotation
+                saw_params = False
+                ret_node = None
+                for c in fnode.children:
+                    if c.type == "parameters":
+                        saw_params = True
+                        continue
+                    if saw_params and c.type == "type":
+                        ret_node = c
+                        break
+                if ret_node is None:
+                    break
+                named = [c for c in ret_node.children if c.is_named]
+                if len(named) == 1 and named[0].type == "identifier":
+                    ret_type = named[0].text.decode("utf-8")
                     if ret_type[0].isupper() and ret_type not in _SKIP:
                         imported_types.add(ret_type)
-                    break
+                break
 
     imported_types -= _SKIP
 
@@ -458,28 +541,23 @@ def _resolve_imported_type_apis(
                     continue
                 if f"class {type_name}" not in src:
                     continue
-                try:
-                    file_tree = _ast.parse(src)
-                except SyntaxError:
+                file_tree = _ts_parse_python(src)
+                if file_tree is None:
                     continue
-                for cnode in _ast.walk(file_tree):
-                    if isinstance(cnode, _ast.ClassDef) and cnode.name == type_name:
-                        meths = []
-                        for child in _ast.iter_child_nodes(cnode):
-                            if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if child.name.startswith("_"):
-                                    continue
-                                params = [a.arg for a in child.args.args if a.arg != "self"]
-                                sig = f"{child.name}({', '.join(params)})"
-                                if child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
-                        break
+                cnode = _ts_find_class_anywhere(file_tree.root_node, type_name)
+                if cnode is not None:
+                    meths: list[str] = []
+                    for child in _ts_iter_class_methods(cnode):
+                        cname = None
+                        for c in child.children:
+                            if c.type == "identifier":
+                                cname = c.text.decode("utf-8")
+                                break
+                        if cname is None or cname.startswith("_"):
+                            continue
+                        meths.append(_ts_format_method_signature(child))
+                    if meths:
+                        lines.append(f"{type_name} methods: {', '.join(meths[:10])}")
                 if type_name in {l.split(" methods:")[0] for l in lines}:
                     break
 
@@ -1242,8 +1320,6 @@ def _build_attr_methods(
 
     Returns {attr_name: first_method_name}.
     """
-    import ast as _ast
-
     if not type_attr_map:
         return {}
 
@@ -1298,19 +1374,28 @@ def _build_attr_methods(
         for _src in all_sources:
             if not remaining:
                 break
-            try:
-                _tree = _ast.parse(_src)
-            except SyntaxError:
+            _tree = _ts_parse_python(_src)
+            if _tree is None:
                 continue
-            for _node in _ast.walk(_tree):
-                if isinstance(_node, _ast.ClassDef) and _node.name in remaining:
-                    for _child in _ast.iter_child_nodes(_node):
-                        if isinstance(
-                            _child, (_ast.FunctionDef, _ast.AsyncFunctionDef)
-                        ) and not _child.name.startswith("_"):
-                            attr_name = remaining.pop(_node.name)
-                            result[attr_name] = _child.name
+            for _cls in _ts_iter_all_classes(_tree.root_node):
+                cls_name = None
+                for c in _cls.children:
+                    if c.type == "identifier":
+                        cls_name = c.text.decode("utf-8")
+                        break
+                if cls_name not in remaining:
+                    continue
+                for _method in _ts_iter_class_methods(_cls):
+                    mname = None
+                    for c in _method.children:
+                        if c.type == "identifier":
+                            mname = c.text.decode("utf-8")
                             break
+                    if mname is None or mname.startswith("_"):
+                        continue
+                    attr_name = remaining.pop(cls_name)
+                    result[attr_name] = mname
+                    break
 
     return result
 
@@ -2737,45 +2822,26 @@ class SynthesisStage(PipelineStage):
         objects (e.g. inventing self._router.retrieve_chunks() when the real
         method is self._router.route()).
         """
-        import ast as _ast
-
         if not source:
             return ""
 
-        try:
-            tree = _ast.parse(source)
-        except SyntaxError:
+        tree = _ts_parse_python(source)
+        if tree is None:
             return ""
 
         # Extract self._xxx = ClassName(...) from init methods
         attrs: dict[str, str] = {}  # attr_name -> type_name
-        for cls_node in _ast.iter_child_nodes(tree):
-            if not isinstance(cls_node, _ast.ClassDef):
+        for cls_node in tree.root_node.children:
+            if cls_node.type == "decorated_definition":
+                cls_node = _ts_unwrap_decorated(cls_node)
+            if cls_node.type != "class_definition":
                 continue
-            for method in _ast.iter_child_nodes(cls_node):
-                if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+                if value is None or value.type != "call":
                     continue
-                if method.name not in ("__init__", "_init_components", "setup", "_setup"):
-                    continue
-                for node in _ast.walk(method):
-                    if not isinstance(node, _ast.Assign):
-                        continue
-                    for target in node.targets:
-                        if (
-                            isinstance(target, _ast.Attribute)
-                            and isinstance(target.value, _ast.Name)
-                            and target.value.id == "self"
-                            and target.attr.startswith("_")
-                            and not target.attr.startswith("__")
-                        ):
-                            rhs = ""
-                            if isinstance(node.value, _ast.Call):
-                                if isinstance(node.value.func, _ast.Name):
-                                    rhs = node.value.func.id
-                                elif isinstance(node.value.func, _ast.Attribute):
-                                    rhs = node.value.func.attr
-                            if rhs:
-                                attrs[target.attr] = rhs
+                rhs = _ts_extract_call_class_name(value)
+                if rhs:
+                    attrs[attr_name] = rhs
 
         if not attrs:
             return ""
@@ -2834,28 +2900,30 @@ class SynthesisStage(PipelineStage):
             for _src in all_sources:
                 if not missing_types:
                     break
-                try:
-                    _tree = _ast.parse(_src)
-                except SyntaxError:
+                _tree = _ts_parse_python(_src)
+                if _tree is None:
                     continue
-                for _node in _ast.walk(_tree):
-                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
-                        meths = []
-                        for _child in _ast.iter_child_nodes(_node):
-                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if _child.name.startswith("__"):
-                                    continue
-                                params = [a.arg for a in _child.args.args if a.arg != "self"]
-                                sig = f"{_child.name}({', '.join(params)})"
-                                if _child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(_child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            component_methods[_node.name] = meths
-                            missing_types.discard(_node.name)
+                for _cls in _ts_iter_all_classes(_tree.root_node):
+                    cls_name = None
+                    for c in _cls.children:
+                        if c.type == "identifier":
+                            cls_name = c.text.decode("utf-8")
+                            break
+                    if cls_name not in missing_types:
+                        continue
+                    meths = []
+                    for _child in _ts_iter_class_methods(_cls):
+                        mname = None
+                        for c in _child.children:
+                            if c.type == "identifier":
+                                mname = c.text.decode("utf-8")
+                                break
+                        if mname is None or mname.startswith("__"):
+                            continue
+                        meths.append(_ts_format_method_signature(_child))
+                    if meths:
+                        component_methods[cls_name] = meths
+                        missing_types.discard(cls_name)
 
         # Build compact cheat sheet
         _MAX_INTERFACE_LINES = 50
