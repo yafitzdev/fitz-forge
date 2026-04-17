@@ -196,8 +196,6 @@ class TestLMStudioConfig:
         c = LMStudioConfig()
         assert c.base_url == "http://localhost:1234/v1"
         assert c.model == "local-model"
-        assert c.fast_model is None
-        assert c.smart_model is None
         assert c.fallback_model is None
         assert c.timeout == 300
         assert c.context_length == 65536
@@ -207,12 +205,10 @@ class TestLMStudioConfig:
         c = LMStudioConfig(
             base_url="http://other:1234/v1",
             model="big-model",
-            fast_model="fast",
-            smart_model="smart",
             api_key="key-123",
         )
-        assert c.fast_model == "fast"
-        assert c.smart_model == "smart"
+        assert c.base_url == "http://other:1234/v1"
+        assert c.model == "big-model"
         assert c.api_key == "key-123"
 
     def test_extra_fields_ignored(self):

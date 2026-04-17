@@ -12,17 +12,7 @@ Common issues and solutions for fitz-forge, especially on consumer GPU hardware.
 
 **Cause:** On Windows consumer GPUs (WDDM driver), each CUDA context creation and destruction permanently degrades performance until reboot. There's no persistence mode on consumer cards (unlike data center GPUs with TCC driver).
 
-**Fix:** fitz-forge avoids this by design — all model tiers use the same GGUF file, so the llama-server starts once and never restarts. If you're using different models per tier, set them all to the same path:
-
-```yaml
-llama_cpp:
-  fast_model:
-    path: same-model.gguf    # all three point to the same file
-  mid_model:
-    path: same-model.gguf
-  smart_model:
-    path: same-model.gguf
-```
+**Fix:** fitz-forge avoids this by design — the llama-server starts once with a single model and never restarts during a session, so no CUDA contexts are destroyed.
 
 If degradation has already occurred, reset your GPU: press `Ctrl+Win+Shift+B` (Windows GPU driver reset) or reboot.
 
@@ -38,7 +28,7 @@ If degradation has already occurred, reset your GPU: press `Ctrl+Win+Shift+B` (W
 
 ```yaml
 llama_cpp:
-  fast_model:
+  model:
     cache_type_k: q8_0    # must match
     cache_type_v: q8_0    # must match
     flash_attention: true
@@ -58,7 +48,7 @@ Both `q8_0` works well for VRAM savings. Both `f16` works but uses more VRAM. Do
 
 ```yaml
 llama_cpp:
-  fast_model:
+  model:
     cache_type_k: q8_0
     cache_type_v: q8_0
     context_size: 65536

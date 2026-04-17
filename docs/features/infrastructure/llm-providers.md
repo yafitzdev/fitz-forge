@@ -70,26 +70,22 @@ There is no `ollama` Python SDK dependency. There is no OOM fallback path
 Inherits the base and implements `ensure_model`, `switch_model`, `unload_model`,
 `reload_model`, `is_model_loaded`, and `get_loaded_model` on top of the `lms`
 CLI. The overridden `health_check` adds a minimum context-window preflight
-(`_MIN_CONTEXT_TOKENS = 8_192`) and auto-loads the smart model when nothing
-is loaded.
-
-Switching models goes through `switch_model`, which first checks
-`get_loaded_model()` and skips the unload+load pair if the target is already
-live — this avoids CUDA context destruction on WDDM consumer GPUs.
+(`_MIN_CONTEXT_TOKENS = 8_192`) and auto-loads the configured model when
+nothing is loaded. `switch_model` stays on the interface for manual reloads
+but is not called from any planning code path.
 
 ### Provider 3: llama.cpp (`llm/llama_cpp.py`)
 
 Inherits the base and wraps a `llama-server` subprocess. The client owns
-`start` / `stop` / `_ensure_tier` / `_ensure_alive` plus the WDDM-aware
+`start` / `stop` / `ensure_model` / `_ensure_alive` plus the WDDM-aware
 `TokSecBaseline` (tracks prefill tok/s across runs, triggers
 `_auto_reset_gpu` via Ctrl+Win+Shift+B when degradation is detected).
 
 `generate()` is an override — not because of the chat protocol, but because
 the prefill-vs-generate timing split feeds `TokSecBaseline`. The base's
-`_strip_thinking` and `_extra_body` helpers are reused verbatim. Tier-
-switching (`ensure_model`) compares model *file paths*, not tier names, so
-pointing several tiers at the same GGUF leaves the server running and CUDA
-context intact.
+`_strip_thinking` and `_extra_body` helpers are reused verbatim. The server
+hosts a single model for the whole session; no tier switching means no CUDA
+context destruction on WDDM consumer GPUs.
 
 ### Retry Logic
 
@@ -133,10 +129,10 @@ focused extractions and investigations).
    loads at the runtime level (`ollama run`, `lms load`, llama-server
    arguments); a second in-process fallback added no value.
 
-4. **Same model path = no restart (llama.cpp)** -- the WDDM workaround is
-   specific to Windows consumer GPUs but critical for usability. Without it,
-   every tier switch destroys inference performance until reboot. Comparing
-   file paths (not tier names) is the key insight.
+4. **Single model per session (llama.cpp)** -- the WDDM workaround is
+   specific to Windows consumer GPUs but critical for usability. Serving
+   one model for the whole session means the server starts once and CUDA
+   contexts are never destroyed — preserving inference performance.
 
 5. **Thinking mode disabled globally** -- Qwen3's thinking mode consumes
    output tokens without producing extractable content. `disable_thinking`
@@ -158,14 +154,13 @@ ollama:
 
 # LM Studio-specific
 lm_studio:
-  smart_model: qwen3.5-35b
-  fast_model: qwen3.5-4b
+  model: qwen3.5-35b
 
 # llama.cpp-specific
 llama_cpp:
   server_path: /path/to/llama-server
   models_dir: /path/to/models
-  fast_model:
+  model:
     path: model.gguf
     context_size: 65536
     gpu_layers: -1

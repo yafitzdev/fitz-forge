@@ -53,14 +53,12 @@ ollama:
 
 ## Provider: LM Studio
 
-OpenAI-compatible API. Supports model switching via `lms` CLI.
+OpenAI-compatible API. Loads models via the `lms` CLI.
 
 ```yaml
 lm_studio:
   base_url: http://localhost:1234/v1
   model: qwen3-coder-30b-a3b-instruct
-  smart_model: null
-  fast_model: null
   fallback_model: null
   timeout: 300
   context_length: 65536
@@ -70,15 +68,11 @@ lm_studio:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `base_url` | string | `http://localhost:1234/v1` | LM Studio API endpoint |
-| `model` | string | `local-model` | Default model for all operations |
-| `smart_model` | string \| null | `null` | Model for reasoning tasks. `null` = use `model` |
-| `fast_model` | string \| null | `null` | Model for fast/screening tasks. `null` = use `model` |
+| `model` | string | `local-model` | Model to serve |
 | `fallback_model` | string \| null | `null` | Fallback model. `null` = no fallback |
 | `timeout` | int | `300` | Request timeout in seconds |
 | `context_length` | int | `65536` | Context window size. **Split reasoning auto-enables below 32768** |
 | `api_key` | string \| null | `null` | API key for OpenAI-compatible endpoints (e.g., OpenRouter) |
-
-> **Tip:** Set `smart_model`, `fast_model`, and `model` to the same value to avoid CUDA context destruction on consumer GPUs. Model switching creates/destroys CUDA contexts, which permanently degrades performance on WDDM drivers until reboot.
 
 ---
 
@@ -93,7 +87,7 @@ llama_cpp:
   port: 8012
   timeout: 300
   startup_timeout: 120
-  fast_model:
+  model:
     path: model.gguf
     context_size: 65536
     gpu_layers: -1
@@ -112,9 +106,7 @@ llama_cpp:
 | `timeout` | int | `300` | Request timeout in seconds |
 | `startup_timeout` | int | `120` | Max seconds to wait for server to become healthy |
 
-### Model tier settings
-
-Three tiers available: `fast_model`, `mid_model`, `smart_model`. Each has:
+### Model settings
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -126,8 +118,6 @@ Three tiers available: `fast_model`, `mid_model`, `smart_model`. Each has:
 | `cache_type_v` | string \| null | `null` | KV cache quantization for values. **Must match `cache_type_k`** for flash attention |
 
 > **Critical:** If `cache_type_k` and `cache_type_v` don't match, flash attention silently falls back to O(n^2) standard attention. Use both `q8_0` or both `f16`.
-
-> **Tip:** Set all three tiers to the same model path. This prevents CUDA context destruction (server starts once, never restarts). See [Troubleshooting](TROUBLESHOOTING.md#wddm-gpu-performance-degradation-blackwell--consumer-cards).
 
 ---
 
@@ -232,7 +222,7 @@ llama_cpp:
   server_path: /usr/local/bin/llama-server
   models_dir: /models
   port: 8012
-  fast_model:
+  model:
     path: qwen3-coder-30b-a3b.Q6_K.gguf
     context_size: 65536
     gpu_layers: -1

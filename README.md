@@ -329,8 +329,6 @@ provider: lm_studio
 lm_studio:
   base_url: http://localhost:1234/v1
   model: qwen3-coder-30b-a3b-instruct    # single model for retrieval + reasoning
-  smart_model: null                        # null = use model for all tiers
-  fast_model: null                         # null = use model for all tiers
   timeout: 600
   context_length: 65536                    # split reasoning auto-enables below 32768
 
@@ -345,7 +343,7 @@ llama_cpp:
   server_path: /path/to/llama-server
   models_dir: /path/to/models
   port: 8012
-  fast_model:
+  model:
     path: model.gguf
     context_size: 65536
     gpu_layers: -1
