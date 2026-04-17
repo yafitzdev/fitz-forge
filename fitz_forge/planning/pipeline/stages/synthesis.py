@@ -1453,7 +1453,6 @@ def _repair_fabricated_refs(
 
     Returns (repaired_content, number_of_fixes).
     """
-    import ast as _ast
     import re as _re
 
     agent_ctx = prior_outputs.get("_agent_context", {})
@@ -1468,56 +1467,82 @@ def _repair_fabricated_refs(
     lookup = StructuralIndexLookup(full_index)
 
     # Try parsing — handle code fragments via dedent + class wrapper
-    import textwrap as _tw
-
-    tree = None
-    for attempt in [
-        content,
-        _tw.dedent(content),
-        "class _:\n    " + content.replace("\n", "\n    "),
-    ]:
-        try:
-            tree = _ast.parse(attempt)
-            break
-        except SyntaxError:
-            continue
-
+    tree = _ts_parse_python(content)
     if tree is None:
         return content, 0
 
-    # Pre-collect artifact-defined methods
-    artifact_methods = set()
-    for n in _ast.walk(tree):
-        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-            artifact_methods.add(n.name)
+    # Walk the tree once, collecting both function-definition names and
+    # self.X / self.X(...) reference sites with their call-vs-attribute role.
+    artifact_methods: set[str] = set()
+    candidate_refs: list[tuple[str, bool]] = []  # (ref_name, is_call)
+
+    def _self_attr_name(attr_node) -> str | None:
+        """If ``attr_node`` is ``self.<name>``, return ``<name>``."""
+        if attr_node.type != "attribute":
+            return None
+        idents = [c for c in attr_node.children if c.type == "identifier"]
+        if len(idents) != 2:
+            return None
+        if idents[0].text.decode("utf-8") != "self":
+            return None
+        return idents[1].text.decode("utf-8")
+
+    def _is_store_position(attr_node) -> bool:
+        """True if ``attr_node`` is the LHS target of an assignment.
+
+        Mirrors ast.Attribute.ctx == ast.Store: the attribute lives directly
+        as the first named child of its parent ``assignment`` node.
+        """
+        parent = attr_node.parent
+        if parent is None or parent.type != "assignment":
+            return False
+        first_named = next((c for c in parent.children if c.is_named), None)
+        return first_named is attr_node
+
+    # Walk every node once in BFS order to mirror ast.walk's emission
+    # sequence. ast.walk emits Call and Attribute as separate visits even
+    # when the Call's func IS the Attribute — and the original code
+    # processes both visits (first with is_call=True, then is_call=False).
+    # The order matters for the early-exit on already-registered fixes.
+    from collections import deque
+
+    queue: deque = deque([tree.root_node])
+    while queue:
+        node = queue.popleft()
+        queue.extend(node.children)
+
+        if node.type == "function_definition":
+            for c in node.children:
+                if c.type == "identifier":
+                    artifact_methods.add(c.text.decode("utf-8"))
+                    break
+            continue
+
+        if node.type == "call":
+            func = next(
+                (c for c in node.children if c.is_named and c.type != "argument_list"),
+                None,
+            )
+            if func is None:
+                continue
+            ref_name = _self_attr_name(func)
+            if ref_name is not None:
+                candidate_refs.append((ref_name, True))
+            continue
+
+        if node.type == "attribute":
+            ref_name = _self_attr_name(node)
+            if ref_name is None:
+                continue
+            if _is_store_position(node):
+                continue
+            candidate_refs.append((ref_name, False))
 
     is_test_file = "test" in filename.lower()
     fixes: dict[str, str] = {}  # fabricated_name -> corrected_name
     removals: list[str] = []  # refs to strip entirely (test leaks)
 
-    for node in _ast.walk(tree):
-        ref_name = None
-        is_call = False
-
-        # self.method() calls
-        if (
-            isinstance(node, _ast.Call)
-            and isinstance(node.func, _ast.Attribute)
-            and isinstance(node.func.value, _ast.Name)
-            and node.func.value.id == "self"
-        ):
-            ref_name = node.func.attr
-            is_call = True
-
-        # self._attr references (not calls)
-        elif (
-            isinstance(node, _ast.Attribute)
-            and isinstance(node.value, _ast.Name)
-            and node.value.id == "self"
-            and not isinstance(node.ctx, _ast.Store)
-        ):
-            ref_name = node.attr
-
+    for ref_name, is_call in candidate_refs:
         if not ref_name or ref_name.startswith("__"):
             continue
         if ref_name in fixes or ref_name in removals:
@@ -1668,8 +1693,6 @@ def _build_attribute_template(
     This prevents the model from fabricating method names like
     self._build_context() when the real attribute is self._assembler.
     """
-    import ast as _ast
-
     agent_ctx = prior_outputs.get("_agent_context", {})
     file_contents = agent_ctx.get("file_contents", {})
     if not file_contents:
@@ -1693,42 +1716,31 @@ def _build_attribute_template(
         if not content:
             continue
 
-        try:
-            tree = _ast.parse(content)
-        except SyntaxError:
+        tree = _ts_parse_python(content)
+        if tree is None:
             continue
 
-        for cls_node in _ast.iter_child_nodes(tree):
-            if not isinstance(cls_node, _ast.ClassDef):
+        for cls_node in tree.root_node.children:
+            if cls_node.type == "decorated_definition":
+                cls_node = _ts_unwrap_decorated(cls_node)
+            if cls_node.type != "class_definition":
+                continue
+            cls_name = None
+            for c in cls_node.children:
+                if c.type == "identifier":
+                    cls_name = c.text.decode("utf-8")
+                    break
+            if cls_name is None:
                 continue
 
-            # Extract self._xxx = ... assignments from __init__ and setup methods
+            # Extract self._xxx = ... assignments from init/setup methods
             attrs: dict[str, str] = {}  # attr_name -> type_hint
-            for method in _ast.iter_child_nodes(cls_node):
-                if not isinstance(method, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            for attr_name, value in _ts_iter_init_self_assignments(cls_node):
+                if value is None or value.type != "call":
                     continue
-                if method.name not in ("__init__", "_init_components", "setup", "_setup"):
-                    continue
-                for node in _ast.walk(method):
-                    if not isinstance(node, _ast.Assign):
-                        continue
-                    for target in node.targets:
-                        if (
-                            isinstance(target, _ast.Attribute)
-                            and isinstance(target.value, _ast.Name)
-                            and target.value.id == "self"
-                            and target.attr.startswith("_")
-                            and not target.attr.startswith("__")
-                        ):
-                            # Resolve type from RHS
-                            rhs = ""
-                            if isinstance(node.value, _ast.Call):
-                                if isinstance(node.value.func, _ast.Name):
-                                    rhs = node.value.func.id
-                                elif isinstance(node.value.func, _ast.Attribute):
-                                    rhs = node.value.func.attr
-                            if rhs:
-                                attrs[target.attr] = rhs
+                rhs = _ts_extract_call_class_name(value)
+                if rhs:
+                    attrs[attr_name] = rhs
 
             if not attrs:
                 continue
@@ -1738,12 +1750,12 @@ def _build_attribute_template(
             for idx_path, idx_lines in sections.items():
                 if ref_path.endswith(idx_path) or idx_path.endswith(ref_path):
                     for line in idx_lines:
-                        if line.startswith("classes:") and cls_node.name in line:
+                        if line.startswith("classes:") and cls_name in line:
                             # Extract method list from brackets
                             import re
 
                             bracket_match = re.search(
-                                rf"{cls_node.name}[^[]*\[([^\]]+)\]",
+                                rf"{cls_name}[^[]*\[([^\]]+)\]",
                                 line,
                             )
                             if bracket_match:
@@ -1804,30 +1816,32 @@ def _build_attribute_template(
             for _src in all_sources:
                 if not missing_types:
                     break
-                try:
-                    _tree = _ast.parse(_src)
-                except SyntaxError:
+                _tree = _ts_parse_python(_src)
+                if _tree is None:
                     continue
-                for _node in _ast.walk(_tree):
-                    if isinstance(_node, _ast.ClassDef) and _node.name in missing_types:
-                        meths = []
-                        for _child in _ast.iter_child_nodes(_node):
-                            if isinstance(_child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                                if _child.name.startswith("__"):
-                                    continue
-                                params = [a.arg for a in _child.args.args if a.arg != "self"]
-                                sig = f"{_child.name}({', '.join(params)})"
-                                if _child.returns:
-                                    try:
-                                        sig += f" -> {_ast.unparse(_child.returns)}"
-                                    except Exception:
-                                        pass
-                                meths.append(sig)
-                        if meths:
-                            component_methods[_node.name] = meths
-                            missing_types.discard(_node.name)
+                for _cls in _ts_iter_all_classes(_tree.root_node):
+                    inner_name = None
+                    for c in _cls.children:
+                        if c.type == "identifier":
+                            inner_name = c.text.decode("utf-8")
+                            break
+                    if inner_name not in missing_types:
+                        continue
+                    meths = []
+                    for _child in _ts_iter_class_methods(_cls):
+                        mname = None
+                        for c in _child.children:
+                            if c.type == "identifier":
+                                mname = c.text.decode("utf-8")
+                                break
+                        if mname is None or mname.startswith("__"):
+                            continue
+                        meths.append(_ts_format_method_signature(_child))
+                    if meths:
+                        component_methods[inner_name] = meths
+                        missing_types.discard(inner_name)
 
-            lines.append(f"### {cls_node.name} ({ref_path})")
+            lines.append(f"### {cls_name} ({ref_path})")
             lines.append("  Attributes:")
             for attr_name, type_name in sorted(attrs.items()):
                 # Append component's public methods as inline comment
@@ -2991,26 +3005,32 @@ class SynthesisStage(PipelineStage):
 
         # Identify the return/yield point in the reference — the line
         # that produces the final output and should be changed.
-        import ast as _ast
-
         output_line = ""
-        try:
-            wrapped = f"class _W:\n{reference_body}"
-            ref_tree = _ast.parse(wrapped)
-            # Find the last return statement
-            returns = []
-            for node in _ast.walk(ref_tree):
-                if isinstance(node, _ast.Return) and node.value:
-                    returns.append(node)
-            if returns:
-                last_return = max(returns, key=lambda n: n.lineno)
+        wrapped = f"class _W:\n{reference_body}"
+        ref_tree = _ts_parse_python(wrapped)
+        if ref_tree is not None:
+            # Find the last return statement that has a value.
+            return_lines: list[int] = []
+            stack = [ref_tree.root_node]
+            while stack:
+                node = stack.pop()
+                stack.extend(node.children)
+                if node.type != "return_statement":
+                    continue
+                # Tree-sitter return_statement has a value child if non-bare.
+                # The first non-keyword named child is the value.
+                has_value = any(
+                    c.is_named for c in node.children if c.type != "return"
+                )
+                if has_value:
+                    return_lines.append(node.start_point[0] + 1)  # 1-based lineno
+            if return_lines:
+                last_lineno = max(return_lines)
                 ref_lines = reference_body.split("\n")
                 # Adjust for the wrapper class offset
-                idx = last_return.lineno - 2  # -1 for 0-index, -1 for wrapper
+                idx = last_lineno - 2  # -1 for 0-index, -1 for wrapper
                 if 0 <= idx < len(ref_lines):
                     output_line = ref_lines[idx].strip()
-        except SyntaxError:
-            pass
 
         change_hint = ""
         if output_line:
