@@ -1498,42 +1498,79 @@ def _method_claims_to_stream(func_def: "Node") -> bool:
     return False
 
 
-def _streaming_sibling_for(
+def _is_streaming_signature(sig: Signature | None) -> bool:
+    """A method is "streaming" if its body yields OR its return type is
+    iterator-shaped (sync or async).
+
+    `is_generator` on the Signature already encodes "body has yield" for
+    sibling artifacts. Disk-source methods only have a return-type string
+    to go on, so we also check the type.
+    """
+    if sig is None:
+        return False
+    if sig.is_generator:
+        return True
+    if _is_iterator_return_type(sig.return_type):
+        return True
+    if _is_async_iter_type(sig.return_type):
+        return True
+    return False
+
+
+def _streaming_siblings_for(
     method_name: str,
     class_methods: dict[str, Signature | None],
-) -> str | None:
-    """Find a streaming sibling of `method_name` in `class_methods`.
+) -> tuple[str | None, list[str]]:
+    """Find streaming siblings of `method_name` in `class_methods`.
 
-    Three patterns, language-agnostic:
-        1. `stream_<method>` exists.
-        2. `<method>_stream` exists.
-        3. Some other method exists whose name shares the suffix/prefix
-           with `method_name` AND whose return type is iterator-shaped
-           (e.g. `<method>_iter`, `iter_<method>`).
+    Returns ``(stem_match, any_streaming)``:
+        * ``stem_match`` is the name of a sibling matching the high-confidence
+          stem patterns ``stream_<method>`` / ``<method>_stream``, or
+          ``None`` if none exists.
+        * ``any_streaming`` is the list of OTHER methods on the class that
+          are themselves streaming (yield in body OR iterator-shaped return
+          type) — the broader, lower-confidence match. The stem match (if
+          any) appears first; remaining streaming methods follow in
+          alphabetical order.
 
-    Returns the sibling's name, or None if none qualifies.
+    Both lists exclude `method_name` itself, and we exit early when the
+    method already IS a streaming method (no need to flag it for calling
+    a streaming sibling — it's not the blocking variant).
     """
     if method_name.startswith("stream_") or method_name.endswith("_stream"):
-        return None  # The method already IS the streaming variant.
+        return None, []
 
-    candidates: list[str] = [f"stream_{method_name}", f"{method_name}_stream"]
-    for cand in candidates:
-        if cand in class_methods and cand != method_name:
-            return cand
+    # Don't flag a streaming-shape method calling another method on the same
+    # class — the offender isn't the blocking variant.
+    own_sig = class_methods.get(method_name)
+    if _is_streaming_signature(own_sig):
+        return None, []
 
-    # Pattern 3: any method that mentions the same root name and whose
-    # return type is iterator-shaped. Conservative: require the candidate
-    # name to differ AND to contain the original method name as a token,
-    # so we don't pull in unrelated streaming methods on the same class.
+    stem_match: str | None = None
+    for cand in (f"stream_{method_name}", f"{method_name}_stream"):
+        if cand == method_name or cand not in class_methods:
+            continue
+        # Even the stem rule must verify the candidate actually streams.
+        # A method named `stream_foo` whose body returns an int (no yield,
+        # no iterator return type) doesn't earn the high-confidence label.
+        if _is_streaming_signature(class_methods.get(cand)):
+            stem_match = cand
+            break
+
+    # Broader match: ANY other method on the class that is itself streaming.
+    other_streaming: list[str] = []
     for cand_name, sig in class_methods.items():
         if cand_name == method_name:
             continue
-        if method_name not in cand_name.split("_"):
+        if cand_name == stem_match:
             continue
-        if sig is None or not _is_iterator_return_type(sig.return_type):
-            continue
-        return cand_name
-    return None
+        if _is_streaming_signature(sig):
+            other_streaming.append(cand_name)
+    other_streaming.sort()
+
+    if stem_match:
+        return stem_match, [stem_match, *other_streaming]
+    return None, other_streaming
 
 
 def _build_class_method_set(
@@ -1603,7 +1640,8 @@ class _StreamingSiblingScanner:
             if not _method_claims_to_stream(func):
                 continue
             offender_name = _function_name(func) or "<anonymous>"
-            self._scan_method(func, offender_name)
+            offender_has_yield = _has_yield(func)
+            self._scan_method(func, offender_name, offender_has_yield)
         return self.violations
 
     def _iter_top_methods(self, root: "Node") -> "Iterator[Node]":
@@ -1629,7 +1667,12 @@ class _StreamingSiblingScanner:
                     continue
             stack.extend(n.children)
 
-    def _scan_method(self, func_def: "Node", offender_name: str) -> None:
+    def _scan_method(
+        self,
+        func_def: "Node",
+        offender_name: str,
+        offender_has_yield: bool,
+    ) -> None:
         # Build the type environment for this method scope
         type_env: dict[str, str] = {}
         params_node = next((c for c in func_def.children if c.type == "parameters"), None)
@@ -1677,11 +1720,245 @@ class _StreamingSiblingScanner:
                     if attr_name and attr_name[:1].isupper() and attr_name not in _SKIP_NAMES:
                         type_env[target.text.decode("utf-8")] = attr_name
 
+        # Pre-pass: collect names that are "yielded" anywhere in the method
+        # body. This includes:
+        #   * `yield <name>` / `yield from <name>`
+        #   * `for x in <name>: yield ...` (the iterated source counts —
+        #      its values are flowing into the yield)
+        # Used by the call-site discriminator to decide whether a call
+        # whose result is bound to a local is "data-producing for the
+        # yield path".
+        yielded_names: set[str] = self._collect_yielded_names(func_def)
+
+        # Pre-pass: collect (class, method) pairs the offender already
+        # calls where `method` is itself a streaming method on `class`.
+        # If the offender already calls a streaming variant of the
+        # target class, we treat any blocking call to a sibling on the
+        # same class as a deliberate helper call, not a missed delegation.
+        already_streaming_classes: set[str] = self._collect_already_streaming_calls(
+            func_def, type_env
+        )
+
         # Second sweep: inspect call sites
         for node in self._iter_method_body(func_def):
             if node.type != "call":
                 continue
-            self._check_call(node, offender_name, type_env)
+            self._check_call(
+                node,
+                offender_name,
+                offender_has_yield,
+                type_env,
+                yielded_names,
+                already_streaming_classes,
+            )
+
+    def _collect_yielded_names(self, func_def: "Node") -> set[str]:
+        """Names whose value flows into a yield in the method body.
+
+        Conservative: identifier yielded directly (`yield x`,
+        `yield from x`) or iterated-then-yielded (`for x in y: yield ...`
+        contributes `y`).
+        """
+        out: set[str] = set()
+        for node in self._iter_method_body(func_def):
+            if node.type == "yield":
+                # Children: 'yield' keyword, optionally 'from', then expr.
+                for c in node.children:
+                    if c.is_named and c.type == "identifier":
+                        out.add(c.text.decode("utf-8"))
+            elif node.type == "for_statement":
+                # `for x in <iter_source>: <body containing yield>`
+                # We only count the source if the body actually yields.
+                idents_in_header: list[Node] = []
+                colon_idx = -1
+                for i, c in enumerate(node.children):
+                    if c.type == ":":
+                        colon_idx = i
+                        break
+                    if c.type == "identifier":
+                        idents_in_header.append(c)
+                if colon_idx == -1 or len(idents_in_header) < 2:
+                    continue
+                # Second identifier is the iter source (`for <a> in <b>`).
+                source_ident = idents_in_header[1]
+                # Check the for-body for a yield (skipping nested defs).
+                body = next(
+                    (c for c in node.children[colon_idx + 1 :] if c.type == "block"),
+                    None,
+                )
+                if body is None:
+                    continue
+                if self._block_yields(body):
+                    out.add(source_ident.text.decode("utf-8"))
+        return out
+
+    def _block_yields(self, block: "Node") -> bool:
+        """Does `block` contain a yield, ignoring nested function/lambda?"""
+        stack: list[Node] = list(block.children)
+        while stack:
+            n = stack.pop()
+            if n.type in ("function_definition", "lambda"):
+                continue
+            if n.type == "decorated_definition":
+                inner = _unwrap_decorated(n)
+                if inner.type == "function_definition":
+                    continue
+            if n.type == "yield":
+                return True
+            stack.extend(n.children)
+        return False
+
+    def _collect_already_streaming_calls(
+        self,
+        func_def: "Node",
+        type_env: dict[str, str],
+    ) -> set[str]:
+        """Classes for which the offender already calls a streaming method.
+
+        If this set contains class C, we suppress streaming-sibling
+        violations for any blocking call on a C-typed local — the model
+        already knows the streaming method exists (it called it), so the
+        blocking call is presumed deliberate (helper / setup / etc.).
+        """
+        out: set[str] = set()
+        for node in self._iter_method_body(func_def):
+            if node.type != "call":
+                continue
+            callee = _callable_of(node)
+            if callee is None or callee.type != "attribute":
+                continue
+            owner_class, method_name = self._resolve_call_owner(
+                callee, type_env
+            )
+            if not owner_class or not method_name:
+                continue
+            class_methods = self._class_methods_for(owner_class)
+            if not class_methods:
+                continue
+            sig = class_methods.get(method_name)
+            if _is_streaming_signature(sig):
+                out.add(owner_class)
+        return out
+
+    def _resolve_call_owner(
+        self,
+        callee: "Node",
+        type_env: dict[str, str],
+    ) -> tuple[str | None, str | None]:
+        """Resolve `obj.method` / `self._attr.method` to (class, method).
+
+        Returns (None, None) if the owner type can't be resolved (untyped
+        local, unknown self attribute, etc.). Mirrors the resolution logic
+        in `_check_call` but split out so we can reuse it for the
+        already-streaming pre-pass.
+        """
+        idents = [c for c in callee.children if c.type == "identifier"]
+        inner_attrs = [c for c in callee.children if c.type == "attribute"]
+        if len(idents) == 2 and not inner_attrs:
+            obj_name = idents[0].text.decode("utf-8")
+            method_name = idents[1].text.decode("utf-8")
+            if obj_name == "self":
+                return None, None
+            owner_class = type_env.get(obj_name)
+            return (owner_class, method_name) if owner_class else (None, None)
+        if len(idents) == 1 and len(inner_attrs) == 1:
+            inner_attr = inner_attrs[0]
+            method_ident = idents[0]
+            inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+            if len(inner_idents) != 2 or inner_idents[0].text.decode("utf-8") != "self":
+                return None, None
+            attr_name = inner_idents[1].text.decode("utf-8")
+            owner_class = self.self_attrs.get(attr_name)
+            method_name = method_ident.text.decode("utf-8")
+            return (owner_class, method_name) if owner_class else (None, None)
+        return None, None
+
+    def _class_methods_for(
+        self, owner_class: str
+    ) -> dict[str, Signature | None]:
+        cached = self._class_methods_cache.get(owner_class)
+        if cached is None:
+            cached = _build_class_method_set(
+                owner_class, self.sibling_provides, self.lookup
+            )
+            self._class_methods_cache[owner_class] = cached
+        return cached
+
+    def _call_is_data_producing(
+        self, call: "Node", offender_has_yield: bool, yielded_names: set[str]
+    ) -> bool:
+        """True iff the call's result flows into the offender's yield path.
+
+        Cases (per spec):
+            1. ``yield <call>`` / ``yield from <call>``
+            2. ``return <call>`` (counts when offender claims to stream —
+               either via yield or via iterator-typed annotation)
+            3. ``var = <call>`` where ``var`` is later yielded / iterated
+               into a yield
+            4. The call appears anywhere inside a yield expression
+
+        Anything else (discarded call, nested in a non-yielded
+        expression, etc.) is a helper/setup call, not part of streaming.
+        """
+        parent = call.parent
+        if parent is None:
+            return False
+        # Walk up to find enclosing yield, return, or assignment.
+        cur: Node | None = parent
+        while cur is not None:
+            t = cur.type
+            if t == "yield":
+                return True
+            if t == "return_statement":
+                # In a return context we treat the call as data-producing
+                # only when the offender method actually streams (yield
+                # in body) OR when the offender declares an iterator
+                # return type (the existing `_method_claims_to_stream`
+                # contract — both kinds are allowed in by `scan()`).
+                return True
+            if t == "assignment":
+                # RHS of assignment — was the call directly the value?
+                # Find the assignment value (after '=').
+                seen_eq = False
+                for c in cur.children:
+                    if not c.is_named and c.type == "=":
+                        seen_eq = True
+                        continue
+                    if seen_eq and c.is_named:
+                        # The value subtree must contain the call.
+                        if self._node_contains(c, call):
+                            target = next(
+                                (x for x in cur.children if x.is_named),
+                                None,
+                            )
+                            if (
+                                target is not None
+                                and target.type == "identifier"
+                                and target.text.decode("utf-8") in yielded_names
+                            ):
+                                return True
+                        break
+                return False
+            # Stop at function boundary — we're past the call site context.
+            if t in ("function_definition", "lambda"):
+                return False
+            cur = cur.parent
+        # Suppress unused-arg warning; offender_has_yield is reserved for
+        # future per-case discrimination (currently used only via the
+        # `_method_claims_to_stream` gate in scan()).
+        _ = offender_has_yield
+        return False
+
+    @staticmethod
+    def _node_contains(haystack: "Node", needle: "Node") -> bool:
+        # Tree-sitter creates new Python wrapper objects on each access,
+        # so identity (`is`) comparisons fail. Compare by byte range —
+        # `needle` is contained iff its [start, end] sits inside
+        # `haystack`'s [start, end].
+        return (
+            haystack.start_byte <= needle.start_byte
+            and haystack.end_byte >= needle.end_byte
+        )
 
     def _iter_method_body(self, func_def: "Node") -> "Iterator[Node]":
         """Yield every descendant of the function body EXCEPT those inside
@@ -1711,19 +1988,22 @@ class _StreamingSiblingScanner:
         self,
         call: "Node",
         offender_name: str,
+        offender_has_yield: bool,
         type_env: dict[str, str],
+        yielded_names: set[str],
+        already_streaming_classes: set[str],
     ) -> None:
         callee = _callable_of(call)
         if callee is None or callee.type != "attribute":
             return
 
+        idents = [c for c in callee.children if c.type == "identifier"]
+        inner_attrs = [c for c in callee.children if c.type == "attribute"]
+
         owner_class: str | None = None
         method_name: str | None = None
         context_str: str | None = None
 
-        idents = [c for c in callee.children if c.type == "identifier"]
-        inner_attrs = [c for c in callee.children if c.type == "attribute"]
-        # obj.method()  — plain 2-identifier attribute node
         if len(idents) == 2 and not inner_attrs:
             obj_name = idents[0].text.decode("utf-8")
             method_name = idents[1].text.decode("utf-8")
@@ -1739,8 +2019,6 @@ class _StreamingSiblingScanner:
                 return
             context_str = f"{obj_name}.{method_name}()"
         elif len(idents) == 1 and len(inner_attrs) == 1:
-            # self._attr.method()  — inner attribute `self._attr`, outer
-            # identifier is the method name.
             inner_attr = inner_attrs[0]
             method_ident = idents[0]
             inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
@@ -1767,27 +2045,63 @@ class _StreamingSiblingScanner:
         if method_name.startswith("stream_") or method_name.endswith("_stream"):
             return
 
-        class_methods = self._class_methods_cache.get(owner_class)
-        if class_methods is None:
-            class_methods = _build_class_method_set(
-                owner_class, self.sibling_provides, self.lookup
-            )
-            self._class_methods_cache[owner_class] = class_methods
+        # Rule 5 (false-positive control): if the offender already calls a
+        # streaming method on this class, treat blocking calls on the same
+        # class as deliberate (helpers, config, etc.).
+        if owner_class in already_streaming_classes:
+            return
 
+        class_methods = self._class_methods_for(owner_class)
         if not class_methods:
-            return  # owner class has no methods we know about — bail quietly
+            return
 
-        sibling = _streaming_sibling_for(method_name, class_methods)
-        if sibling is None:
+        # Rule 3 (false-positive control): the called method must itself be
+        # a blocking method. A streaming method calling another streaming
+        # method on the same class isn't this bug.
+        called_sig = class_methods.get(method_name)
+        if _is_streaming_signature(called_sig):
+            return
+
+        stem_match, all_streaming = _streaming_siblings_for(
+            method_name, class_methods
+        )
+        if not all_streaming:
+            return
+
+        # Rule 1 (false-positive control): only flag when the call's value
+        # is data-producing for the offender's yield path. Pure helper
+        # calls (`obj.load_config()` whose result is discarded or used
+        # for branching) are not violations even when streaming siblings
+        # exist on the class.
+        if not self._call_is_data_producing(
+            call, offender_has_yield, yielded_names
+        ):
             return
 
         line = call.start_point[0] + 1
-        detail = (
-            f"Your {offender_name} method yields, but at line {line} it calls "
-            f"{owner_class}.{method_name} (blocking). The streaming variant "
-            f"{owner_class}.{sibling} exists on {owner_class} — call it "
-            f"instead. Streaming methods must delegate to streaming siblings."
-        )
+
+        if stem_match:
+            # High-confidence wording: stem-matched sibling, definitive
+            # "use this instead" framing.
+            detail = (
+                f"Your {offender_name} method yields, but at line {line} it calls "
+                f"{owner_class}.{method_name} (blocking). The streaming variant "
+                f"{owner_class}.{stem_match} exists on {owner_class} — call it "
+                f"instead. Streaming methods must delegate to streaming siblings."
+            )
+        else:
+            # Broader rule: any-name match — list candidates so the model
+            # can pick. Slightly less confident wording.
+            joined = ", ".join(f"{owner_class}.{m}" for m in all_streaming)
+            verb = "method" if len(all_streaming) == 1 else "methods"
+            detail = (
+                f"Your {offender_name} method yields, but at line {line} it calls "
+                f"{owner_class}.{method_name} (blocking) and yields its result. "
+                f"This plan defines streaming {verb} {joined} on the same class — "
+                f"likely intended call. Call one of those instead. Streaming "
+                f"methods must delegate to streaming siblings."
+            )
+
         self.violations.append(
             ClosureViolation(
                 artifact=self.filename,

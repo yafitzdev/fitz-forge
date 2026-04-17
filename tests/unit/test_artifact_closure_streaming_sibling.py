@@ -115,15 +115,15 @@ def test_iterator_return_type_triggers_check_without_yield():
 def test_typed_local_call_triggers_violation():
     """Variable bound by `var = C(...)` inside a streaming method should
     be tracked and produce a violation when the call is on the blocking
-    method."""
+    method AND its result is yielded (data-producing for the yield path)."""
     src = textwrap.dedent(
         """
         from typing import Iterator
         class Caller:
             def stream(self) -> Iterator[str]:
                 obj = Helper()
-                obj.foo()
-                yield ""
+                result = obj.foo()
+                yield result
         class Helper:
             def foo(self) -> str:
                 return ""
@@ -202,8 +202,233 @@ def test_streaming_sibling_in_disk_source_only(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Positive cases — broader (any-name) streaming-sibling rule
+# ---------------------------------------------------------------------------
+
+
+def test_any_name_streaming_sibling_different_stem():
+    """Real-world B9 variant: the synth artifact adds a streaming method
+    `stream_query` with an iterator return type (different stem from the
+    blocking `generate`). The engine artifact's `stream_query` calls
+    `self._synth.generate(...)` and yields the result. The stem-match
+    rule misses (no `stream_generate` exists), but the broader any-name
+    rule should fire and name `Synth.stream_query` as the candidate."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, synth: Synth) -> None:
+                self._synth: Synth = synth
+            def stream_query(self, q: str) -> Iterator[str]:
+                answer = self._synth.generate(q)
+                yield answer
+        """
+    ).lstrip()
+    synth_src = textwrap.dedent(
+        """
+        from typing import Iterator, Union
+        class Synth:
+            def generate(self, q: str) -> str:
+                return ""
+            def stream_query(self, q: str) -> Iterator[Union[str, str]]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert len(violations) == 1, [v.detail for v in violations]
+    v = violations[0]
+    assert v.artifact == "engine.py"
+    assert v.ref.owner == "Synth"
+    assert v.ref.name == "generate"
+    # The any-name match should name the streaming method on the class.
+    assert "Synth.stream_query" in v.detail
+    assert "delegate to streaming siblings" in v.detail
+    # And use the slightly-less-confident "likely intended call" wording
+    # that distinguishes it from the stem-match path.
+    assert "likely intended call" in v.detail
+
+
+def test_yield_from_assigned_local_triggers_violation():
+    """`result = self._x.foo(...); yield from result` — same
+    data-producing shape as direct yield."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, synth: Synth) -> None:
+                self._synth: Synth = synth
+            def stream_query(self, q: str) -> Iterator[str]:
+                result = self._synth.generate(q)
+                yield from result
+        """
+    ).lstrip()
+    synth_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Synth:
+            def generate(self, q: str) -> str:
+                return ""
+            def stream_generate(self, q: str) -> Iterator[str]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert len(violations) == 1
+    assert violations[0].ref.name == "generate"
+
+
+def test_yield_call_directly_triggers_violation():
+    """`yield self._x.foo(...)` — call result yielded directly."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, synth: Synth) -> None:
+                self._synth: Synth = synth
+            def stream_query(self, q: str) -> Iterator[str]:
+                yield self._synth.generate(q)
+        """
+    ).lstrip()
+    synth_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Synth:
+            def generate(self, q: str) -> str:
+                return ""
+            def stream_generate(self, q: str) -> Iterator[str]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert len(violations) == 1
+    assert violations[0].ref.name == "generate"
+
+
+# ---------------------------------------------------------------------------
 # Negative cases
 # ---------------------------------------------------------------------------
+
+
+def test_helper_call_not_yielded_no_violation():
+    """A streaming method calls a helper to get config — the result is
+    used for branching/setup, not yielded. Even though `Cfg` has a
+    streaming method on it, this is a legitimate helper call and must
+    not be flagged."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, cfg: Cfg) -> None:
+                self._cfg: Cfg = cfg
+            def stream_query(self, q: str) -> Iterator[str]:
+                # Helper call — not yielded, used to branch.
+                value = self._cfg.get("mode")
+                if value == "fast":
+                    yield "fast"
+                else:
+                    yield "slow"
+        """
+    ).lstrip()
+    cfg_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Cfg:
+            def get(self, key: str) -> str:
+                return ""
+            def stream_values(self) -> Iterator[str]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "cfg.py", "content": cfg_src, "purpose": "cfg"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert violations == []
+
+
+def test_already_calls_streaming_then_blocking_no_violation():
+    """The streaming method calls BOTH the streaming variant
+    (`stream_query`) AND the blocking sibling (`generate`) for some
+    other purpose. Since the model demonstrably knows about the
+    streaming method, the blocking call is presumed deliberate."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, synth: Synth) -> None:
+                self._synth: Synth = synth
+            def stream_query(self, q: str) -> Iterator[str]:
+                # Use streaming for the answer
+                yield from self._synth.stream_query(q)
+                # Also produce a non-streaming followup (e.g. metadata)
+                meta = self._synth.generate(q)
+                yield meta
+        """
+    ).lstrip()
+    synth_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Synth:
+            def generate(self, q: str) -> str:
+                return ""
+            def stream_query(self, q: str) -> Iterator[str]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert violations == []
+
+
+def test_blocking_call_assigned_but_never_yielded_no_violation():
+    """The call result is assigned to a local that's used for
+    side-effects (logging, saving) but never yielded. Not a streaming
+    bug."""
+    engine_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Engine:
+            def __init__(self, synth: Synth) -> None:
+                self._synth: Synth = synth
+            def stream_query(self, q: str) -> Iterator[str]:
+                # Side-effect only — measure latency, log, persist.
+                _measured = self._synth.generate(q)
+                # The yielded value comes from elsewhere.
+                yield "static"
+        """
+    ).lstrip()
+    synth_src = textwrap.dedent(
+        """
+        from typing import Iterator
+        class Synth:
+            def generate(self, q: str) -> str:
+                return ""
+            def stream_generate(self, q: str) -> Iterator[str]:
+                yield ""
+        """
+    ).lstrip()
+    artifacts = [
+        {"filename": "engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(check_closure(artifacts, _make_lookup()))
+    assert violations == []
 
 
 def test_no_streaming_sibling_no_violation():
