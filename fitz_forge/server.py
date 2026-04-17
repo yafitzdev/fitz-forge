@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 # Create FastMCP instance
 mcp = FastMCP("fitz-forge")
 
-# Load configuration
-_config = load_config()
+# Load configuration (MCP: never launch interactive wizard over stdio)
+_config = load_config(allow_wizard=False)
 logger.info(f"Loaded configuration: model={_config.ollama.model}")
 
 # Lifecycle manager (will be initialized by __main__.py)

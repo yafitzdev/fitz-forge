@@ -7,7 +7,6 @@ Uses platformdirs for cross-platform config directory management.
 
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
 import typer
@@ -45,38 +44,47 @@ def _warn_unknown_keys(yaml_data: dict, model_class: type[BaseModel], prefix: st
 def _maybe_run_first_time_wizard(config_path: Path) -> None:
     """If config is missing or contains only placeholder values, run the wizard.
 
-    Printing and prompting go to the user's terminal (stdout) because this
-    is the interactive setup path. Raises ``typer.Exit`` on Ctrl+C so the
-    caller exits cleanly rather than continuing with unconfigured state.
+    Prompts write to the user's terminal because this is the interactive
+    setup path. Raises ``typer.Exit`` on Ctrl+C so the caller exits cleanly
+    rather than continuing with unconfigured state.
     """
     from . import prep
 
     if not prep.is_unconfigured(config_path):
         return
 
-    # ``print`` here is the interactive-UX exception (rule #2) — this is
-    # triggered from the CLI path, not from MCP. MCP users go through
-    # ``fitz prep`` manually before launching the server.
-    print("First-time setup — run 'fitz prep' to configure.", file=sys.stderr)
+    logger.warning("First-time setup — run 'fitz prep' to configure.")
 
     try:
         asyncio.run(prep.run_wizard(config_path))
     except KeyboardInterrupt:
-        print("\nSetup aborted.", file=sys.stderr)
+        logger.warning("Setup aborted.")
         raise typer.Exit(130) from None
 
 
-def load_config() -> FitzPlannerConfig:
+def load_config(allow_wizard: bool = True) -> FitzPlannerConfig:
     """
     Load configuration from YAML file.
 
     If the config file doesn't exist or still holds placeholder values
     (first run), invokes the ``fitz prep`` setup wizard inline before
-    loading. Returns a validated Pydantic model.
+    loading — unless ``allow_wizard`` is False, in which case a missing
+    config raises ``RuntimeError``. Non-interactive callers (MCP server)
+    pass ``allow_wizard=False`` so the wizard doesn't try to prompt over
+    stdio. Returns a validated Pydantic model.
     """
     config_path = get_config_path()
 
-    _maybe_run_first_time_wizard(config_path)
+    if allow_wizard:
+        _maybe_run_first_time_wizard(config_path)
+    else:
+        from . import prep
+
+        if prep.is_unconfigured(config_path):
+            raise RuntimeError(
+                "No configuration found. Run 'fitz prep' to set up the API server "
+                "and model before launching the MCP server."
+            )
 
     if not config_path.exists():
         # Wizard was skipped/bypassed (e.g. in a test with the wizard patched
