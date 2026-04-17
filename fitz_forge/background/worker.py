@@ -498,7 +498,7 @@ class BackgroundWorker:
 
         # Provider-specific model details
         if self._config.provider == "llama_cpp":
-            model_cfg = self._config.llama_cpp.fast_model
+            model_cfg = self._config.llama_cpp.model
             diagnostics["model_file"] = model_cfg.path
             if model_cfg.cache_type_k:
                 diagnostics["cache_type_k"] = model_cfg.cache_type_k

@@ -1,9 +1,7 @@
 # tests/unit/test_llama_cpp_client.py
-"""Unit tests for LlamaCppClient subprocess management and tier switching."""
+"""Unit tests for LlamaCppClient subprocess management."""
 
-import asyncio
 import subprocess
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,14 +16,9 @@ def _make_client(**kwargs):
     defaults = dict(
         server_path="/usr/bin/llama-server",
         models_dir="/models",
-        fast_model=LlamaCppModelConfig(
-            path="fast.gguf",
+        model=LlamaCppModelConfig(
+            path="single.gguf",
             context_size=32768,
-            gpu_layers=-1,
-        ),
-        smart_model=LlamaCppModelConfig(
-            path="smart.gguf",
-            context_size=8192,
             gpu_layers=-1,
         ),
         port=18080,
@@ -40,25 +33,17 @@ def _make_client(**kwargs):
 # Properties
 # ---------------------------------------------------------------------------
 class TestProperties:
-    def test_fast_model(self):
+    def test_model(self):
         client = _make_client()
-        assert client.fast_model == "fast.gguf"
-
-    def test_smart_model(self):
-        client = _make_client()
-        assert client.smart_model == "smart.gguf"
-
-    def test_smart_defaults_to_fast(self):
-        client = _make_client(smart_model=None)
-        assert client.smart_model == "fast.gguf"
-
-    def test_model_defaults_to_fast_path(self):
-        client = _make_client()
-        assert client.model == "fast.gguf"
+        assert client.model == "single.gguf"
 
     def test_base_url(self):
         client = _make_client(port=9999)
         assert client.base_url == "http://127.0.0.1:9999/v1"
+
+    def test_context_size_defaults_to_model_cfg(self):
+        client = _make_client()
+        assert client.context_size == 32768
 
 
 # ---------------------------------------------------------------------------
@@ -77,32 +62,14 @@ class TestLifecycle:
             patch.object(LlamaCppClient, "_kill_orphaned_servers"),
             patch.object(client, "_wait_for_ready", new_callable=AsyncMock),
         ):
-            await client.start("fast")
+            await client.start()
 
         popen.assert_called_once()
         cmd = popen.call_args[0][0]
         assert "/usr/bin/llama-server" in cmd
         assert "-m" in cmd
-        # Should use fast model path
         model_idx = cmd.index("-m")
-        assert "fast.gguf" in cmd[model_idx + 1]
-        assert client._active_tier == "fast"
-
-    @pytest.mark.asyncio
-    async def test_start_smart_tier(self):
-        client = _make_client()
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None
-
-        with (
-            patch("fitz_forge.llm.llama_cpp.subprocess.Popen", return_value=mock_proc),
-            patch.object(LlamaCppClient, "_kill_orphaned_servers"),
-            patch.object(client, "_wait_for_ready", new_callable=AsyncMock),
-        ):
-            await client.start("smart")
-
-        assert client._active_tier == "smart"
-        assert client.model == "smart.gguf"
+        assert "single.gguf" in cmd[model_idx + 1]
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self):
@@ -110,14 +77,12 @@ class TestLifecycle:
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         client._process = mock_proc
-        client._active_tier = "fast"
 
         await client.stop()
 
         mock_proc.terminate.assert_called_once()
         mock_proc.wait.assert_called_once()
         assert client._process is None
-        assert client._active_tier is None
 
     @pytest.mark.asyncio
     async def test_stop_kills_on_timeout(self):
@@ -129,7 +94,6 @@ class TestLifecycle:
             None,
         ]
         client._process = mock_proc
-        client._active_tier = "fast"
 
         await client.stop()
 
@@ -143,80 +107,23 @@ class TestLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Tier switching
+# ensure_model
 # ---------------------------------------------------------------------------
-class TestEnsureTier:
+class TestEnsureModel:
     @pytest.mark.asyncio
-    async def test_no_switch_needed(self):
+    async def test_starts_if_not_running(self):
         client = _make_client()
-        client._active_tier = "fast"
-        with (
-            patch.object(client, "start", new_callable=AsyncMock) as start,
-            patch.object(client, "stop", new_callable=AsyncMock) as stop,
-        ):
-            await client._ensure_tier("fast.gguf")
-        start.assert_not_called()
-        stop.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_switches_fast_to_smart(self):
-        client = _make_client()
-        client._active_tier = "fast"
-        with (
-            patch.object(client, "start", new_callable=AsyncMock) as start,
-            patch.object(client, "stop", new_callable=AsyncMock) as stop,
-        ):
-            await client._ensure_tier("smart.gguf")
-        stop.assert_called_once()
-        start.assert_called_once_with("smart", context_size=None)
-
-    @pytest.mark.asyncio
-    async def test_switches_smart_to_fast(self):
-        client = _make_client()
-        client._active_tier = "smart"
-        with (
-            patch.object(client, "start", new_callable=AsyncMock) as start,
-            patch.object(client, "stop", new_callable=AsyncMock) as stop,
-        ):
-            await client._ensure_tier("fast.gguf")
-        stop.assert_called_once()
-        start.assert_called_once_with("fast", context_size=None)
-
-    @pytest.mark.asyncio
-    async def test_auto_starts_if_not_running(self):
-        client = _make_client()
-        assert client._active_tier is None
+        assert client._process is None
         with patch.object(client, "start", new_callable=AsyncMock) as start:
-            await client._ensure_tier(None)
-        start.assert_called_once_with("fast", context_size=None)
+            await client.ensure_model("single.gguf")
+        start.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_skips_restart_when_same_model_path(self):
-        """When all tiers point to the same GGUF, no restart needed."""
-        same_model = LlamaCppModelConfig(
-            path="shared.gguf",
-            context_size=65536,
-            gpu_layers=-1,
-        )
-        client = _make_client(
-            fast_model=same_model,
-            smart_model=same_model,
-        )
-        client._active_tier = "fast"
-        with (
-            patch.object(client, "start", new_callable=AsyncMock) as start,
-            patch.object(client, "stop", new_callable=AsyncMock) as stop,
-        ):
-            await client._ensure_tier("shared.gguf")
-        stop.assert_not_called()
-        start.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_none_model_keeps_current(self):
+    async def test_noop_if_running(self):
         client = _make_client()
-        client._active_tier = "smart"
+        client._process = MagicMock()
         with patch.object(client, "start", new_callable=AsyncMock) as start:
-            await client._ensure_tier(None)
+            await client.ensure_model("single.gguf")
         start.assert_not_called()
 
 
@@ -257,11 +164,10 @@ class TestHealthCheck:
         mock_proc.stderr = MagicMock()
         mock_proc.stderr.read.return_value = b"segfault"
         client._process = mock_proc
-        client._active_tier = "fast"
 
         with patch.object(client, "start", new_callable=AsyncMock) as mock_start:
             await client._ensure_alive()
-            mock_start.assert_called_once_with("fast")
+            mock_start.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +194,7 @@ class TestWaitForReady:
 class TestCallMetrics:
     def test_drain_returns_and_clears(self):
         client = _make_client()
-        client._call_metrics = [{"elapsed_s": 1.0, "output_chars": 100, "model": "fast.gguf"}]
+        client._call_metrics = [{"elapsed_s": 1.0, "output_chars": 100, "model": "single.gguf"}]
         metrics = client.drain_call_metrics()
         assert len(metrics) == 1
         assert client._call_metrics == []

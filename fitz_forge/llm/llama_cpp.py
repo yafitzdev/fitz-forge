@@ -1,10 +1,11 @@
 # fitz_forge/llm/llama_cpp.py
 """
-llama.cpp client with subprocess management and model tier support.
+llama.cpp client with subprocess management.
 
-Manages a llama-server process as a subprocess. Restarts the server
-when switching between fast/smart model tiers (since context_size and
-gpu_layers are server-level settings).
+Manages a llama-server process as a subprocess. The server hosts a
+single model for the whole process lifetime; there is no tier
+switching (keeping one model resident avoids CUDA context destruction
+on WDDM consumer GPUs).
 """
 
 from __future__ import annotations
@@ -112,12 +113,7 @@ class TokSecBaseline:
 
 
 class LlamaCppClient(OpenAIApiClient):
-    """
-    Async llama.cpp client that manages llama-server as a subprocess.
-
-    Restarts the server when switching between fast/smart tiers, since
-    context_size and gpu_layers are server-level (not per-request).
-    """
+    """Async llama.cpp client that manages llama-server as a subprocess."""
 
     # Minimum context window in tokens.  See OpenAIApiClient.
     _MIN_CONTEXT_TOKENS = 32_768
@@ -126,9 +122,7 @@ class LlamaCppClient(OpenAIApiClient):
         self,
         server_path: str,
         models_dir: str,
-        fast_model: "LlamaCppModelConfig",
-        mid_model: "LlamaCppModelConfig | None" = None,
-        smart_model: "LlamaCppModelConfig | None" = None,
+        model: "LlamaCppModelConfig",
         port: int = 8012,
         timeout: int = 300,
         startup_timeout: int = 120,
@@ -143,82 +137,47 @@ class LlamaCppClient(OpenAIApiClient):
 
         super().__init__(
             base_url=f"http://127.0.0.1:{port}/v1",
-            model=fast_model.path,
+            model=model.path,
             timeout=timeout,
             api_key="llama-cpp",
             disable_thinking=disable_thinking,
             gpu_guard=gpu_guard,
-            context_length=fast_model.context_size,
+            context_length=model.context_size,
         )
 
         self._server_path = server_path
         self._models_dir = models_dir
-        self._fast_model_cfg = fast_model
-        self._mid_model_cfg = mid_model or fast_model
-        self._smart_model_cfg = smart_model or fast_model
+        self._model_cfg = model
         self._port = port
         self._startup_timeout = startup_timeout
-
-        # Public attribute for interface parity with OllamaClient/LMStudioClient
-        self.fallback_model = smart_model.path if smart_model else None
 
         self._process: subprocess.Popen | None = None
         # Base class already created an _client; replace it when the server
         # actually starts so timeout is respected and only active after start.
         self._client = None  # type: ignore[assignment]
-        self._active_tier: str | None = None
         self._active_context_size: int | None = None
         self._baseline = TokSecBaseline()
         self._degradation_warned = False
 
     # ------------------------------------------------------------------
-    # Model tier properties
+    # Properties
     # ------------------------------------------------------------------
 
     @property
     def context_size(self) -> int:
         """Active context window size in tokens."""
-        return self._active_context_size or self._fast_model_cfg.context_size
-
-    @property
-    def fast_model(self) -> str:
-        """Model name for fast/screening tasks."""
-        return self._fast_model_cfg.path
-
-    @property
-    def mid_model(self) -> str:
-        """Model name for mid-tier/summarization tasks."""
-        return self._mid_model_cfg.path
-
-    @property
-    def smart_model(self) -> str:
-        """Model name for smart/reasoning tasks."""
-        return self._smart_model_cfg.path
-
-    @property
-    def active_model(self) -> str:
-        """Path of the model currently loaded in llama-server."""
-        if self._active_tier == "smart":
-            return self._smart_model_cfg.path
-        if self._active_tier == "mid":
-            return self._mid_model_cfg.path
-        return self._fast_model_cfg.path
+        return self._active_context_size or self._model_cfg.context_size
 
     # ------------------------------------------------------------------
     # Subprocess lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, tier: str = "fast", context_size: int | None = None) -> None:
-        """Start llama-server subprocess for the given tier."""
+    async def start(self, context_size: int | None = None) -> None:
+        """Start llama-server subprocess."""
         if self._process is not None:
             await self.stop()
 
-        tier_map = {
-            "fast": self._fast_model_cfg,
-            "mid": self._mid_model_cfg,
-            "smart": self._smart_model_cfg,
-        }
-        model_cfg = tier_map.get(tier, self._fast_model_cfg)
+        model_cfg = self._model_cfg
         model_path = str(Path(self._models_dir) / model_cfg.path)
         ctx = context_size or model_cfg.context_size
 
@@ -242,7 +201,7 @@ class LlamaCppClient(OpenAIApiClient):
         if model_cfg.cache_type_v:
             cmd.extend(["--cache-type-v", model_cfg.cache_type_v])
 
-        logger.info(f"Starting llama-server ({tier}): {' '.join(cmd)}")
+        logger.info(f"Starting llama-server: {' '.join(cmd)}")
 
         self._kill_orphaned_servers()
 
@@ -263,11 +222,9 @@ class LlamaCppClient(OpenAIApiClient):
             api_key="llama-cpp",
             timeout=self._timeout,
         )
-        self._active_tier = tier
         self._active_context_size = ctx
-        self.model = model_cfg.path
 
-        logger.info(f"llama-server ready ({tier}): {model_cfg.path} (ctx={ctx})")
+        logger.info(f"llama-server ready: {model_cfg.path} (ctx={ctx})")
 
     @staticmethod
     def _kill_orphaned_servers() -> None:
@@ -300,7 +257,6 @@ class LlamaCppClient(OpenAIApiClient):
             self._process.wait(timeout=5)
 
         self._process = None
-        self._active_tier = None
         self._client = None  # type: ignore[assignment]
         logger.info("llama-server stopped")
 
@@ -309,61 +265,9 @@ class LlamaCppClient(OpenAIApiClient):
         model_name: str,
         context_size: int | None = None,
     ) -> None:
-        """Switch to the tier for the given model name."""
-        await self._ensure_tier(model_name, context_size=context_size)
-
-    async def _ensure_tier(
-        self,
-        model_name: str | None,
-        context_size: int | None = None,
-    ) -> None:
-        """Restart server only if the actual model path or context size differs."""
-        if model_name is None:
-            if self._active_tier is None:
-                await self.start("fast", context_size=context_size)
-            return
-
-        if model_name == self._smart_model_cfg.path:
-            needed = "smart"
-        elif (
-            model_name == self._mid_model_cfg.path
-            and self._mid_model_cfg.path != self._fast_model_cfg.path
-        ):
-            needed = "mid"
-        else:
-            needed = "fast"
-
-        tier_map = {
-            "fast": self._fast_model_cfg,
-            "mid": self._mid_model_cfg,
-            "smart": self._smart_model_cfg,
-        }
-        needed_cfg = tier_map[needed]
-        active_cfg = tier_map.get(self._active_tier) if self._active_tier else None
-
-        same_model = (
-            active_cfg is not None
-            and active_cfg.path == needed_cfg.path
-            and active_cfg.gpu_layers == needed_cfg.gpu_layers
-        )
-        ctx_changed = (
-            context_size is not None
-            and self._active_context_size is not None
-            and context_size != self._active_context_size
-        )
-
-        if same_model and not ctx_changed:
-            if self._active_tier != needed:
-                logger.debug(f"Tier {self._active_tier}→{needed} (same model, skipping restart)")
-                self._active_tier = needed
-            return
-
-        reason = f"tier {self._active_tier}→{needed}"
-        if ctx_changed:
-            reason += f", ctx {self._active_context_size}→{context_size}"
-        logger.info(f"Restarting llama-server: {reason} (model={model_name})")
-        await self.stop()
-        await self.start(needed, context_size=context_size)
+        """Start the server if not running. Single-model: no tier switching."""
+        if self._process is None:
+            await self.start(context_size=context_size)
 
     @staticmethod
     def _reset_gpu_driver() -> bool:
@@ -486,17 +390,14 @@ class LlamaCppClient(OpenAIApiClient):
             logger.warning(f"llama-server crashed (code {code}), restarting: {stderr[:500]}")
             self._process = None
             self._client = None  # type: ignore[assignment]
-            tier = self._active_tier or "fast"
-            self._active_tier = None
 
             if self._reset_gpu_driver():
                 await asyncio.sleep(3)
 
-            await self.start(tier)
+            await self.start()
 
     async def _auto_reset_gpu(self) -> None:
         """Stop llama-server, reset GPU driver, restart."""
-        tier = self._active_tier or "fast"
         ctx = self._active_context_size
 
         logger.info("Auto-reset: stopping llama-server for GPU driver reset")
@@ -509,7 +410,7 @@ class LlamaCppClient(OpenAIApiClient):
             logger.warning("Auto-reset: GPU driver reset failed, restarting anyway")
             await asyncio.sleep(1)
 
-        await self.start(tier, context_size=ctx)
+        await self.start(context_size=ctx)
         self._degradation_warned = False
 
     # ------------------------------------------------------------------
@@ -518,7 +419,7 @@ class LlamaCppClient(OpenAIApiClient):
 
     async def health_check(self) -> bool:
         """Check if llama-server is running, healthy, and context is sufficient."""
-        ctx = self._active_context_size or self._fast_model_cfg.context_size
+        ctx = self._active_context_size or self._model_cfg.context_size
         if ctx < self._MIN_CONTEXT_TOKENS:
             raise RuntimeError(
                 f"Context window too small: {ctx} tokens "
@@ -542,7 +443,7 @@ class LlamaCppClient(OpenAIApiClient):
         temperature: float | None = None,
         max_tokens: int = 16384,
     ) -> str:
-        """Generate a streaming response. Switches tier if model differs.
+        """Generate a streaming response.
 
         Overrides the base implementation to additionally capture prefill
         timing for the GPU degradation detector.
@@ -550,7 +451,8 @@ class LlamaCppClient(OpenAIApiClient):
         if self._gpu_guard:
             await self._gpu_guard.preflight()
 
-        await self._ensure_tier(model)
+        if self._process is None:
+            await self.start()
         await self._ensure_alive()
 
         effective_model = model or self.model
@@ -624,18 +526,6 @@ class LlamaCppClient(OpenAIApiClient):
 
         return result
 
-    async def generate_with_fallback(
-        self,
-        messages: list[dict],
-    ) -> tuple[str, str]:
-        """Generate using the smart model (no OOM fallback needed).
-
-        Returns:
-            (response_text, model_used)
-        """
-        result = await self.generate(messages, model=self.smart_model)
-        return result, self.model
-
     async def generate_with_tools(
         self,
         messages: list[dict],
@@ -643,8 +533,9 @@ class LlamaCppClient(OpenAIApiClient):
         model: str | None = None,
         tool_choice: str = "auto",
     ):
-        """Ensure the tier matches the requested model, then delegate to base."""
-        await self._ensure_tier(model)
+        """Ensure the server is alive, then delegate to base."""
+        if self._process is None:
+            await self.start()
         await self._ensure_alive()
         return await super().generate_with_tools(messages, tools, model=model, tool_choice=tool_choice)
 

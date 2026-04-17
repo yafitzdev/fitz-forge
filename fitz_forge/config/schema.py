@@ -161,23 +161,15 @@ class LlamaCppModelConfig(BaseModel):
 
 
 class LlamaCppConfig(BaseModel):
-    """llama.cpp server configuration with fast/smart model tiers."""
+    """llama.cpp server configuration."""
 
     model_config = ConfigDict(extra="ignore")
 
     server_path: str = Field(default="", description="Path to llama-server binary")
     models_dir: str = Field(default="", description="Directory containing GGUF model files")
-    fast_model: LlamaCppModelConfig = Field(
+    model: LlamaCppModelConfig = Field(
         default_factory=LlamaCppModelConfig,
-        description="Small model for screening (fast YES/NO calls)",
-    )
-    mid_model: LlamaCppModelConfig | None = Field(
-        default=None,
-        description="Mid-tier model for summarization (None = use fast_model)",
-    )
-    smart_model: LlamaCppModelConfig | None = Field(
-        default=None,
-        description="Large model for reasoning (None = use fast_model for everything)",
+        description="GGUF model served by llama-server",
     )
     port: int = Field(default=8012, description="llama-server port")
     timeout: int = Field(default=300, description="Request timeout in seconds")

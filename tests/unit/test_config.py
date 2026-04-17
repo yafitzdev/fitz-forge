@@ -267,31 +267,27 @@ class TestLlamaCppConfig:
         c = LlamaCppConfig()
         assert c.server_path == ""
         assert c.models_dir == ""
-        assert isinstance(c.fast_model, LlamaCppModelConfig)
-        assert c.mid_model is None
-        assert c.smart_model is None
+        assert isinstance(c.model, LlamaCppModelConfig)
         assert c.port == 8012
         assert c.timeout == 300
         assert c.startup_timeout == 120
 
     def test_nested_model_config(self):
         c = LlamaCppConfig(
-            fast_model=LlamaCppModelConfig(path="fast.gguf", context_size=4096),
-            smart_model=LlamaCppModelConfig(path="smart.gguf", context_size=65536),
+            model=LlamaCppModelConfig(path="main.gguf", context_size=65536),
         )
-        assert c.fast_model.path == "fast.gguf"
-        assert c.smart_model.path == "smart.gguf"
+        assert c.model.path == "main.gguf"
 
     def test_nested_from_dict(self):
         """Model can be constructed from nested dicts (YAML parse output)."""
         c = LlamaCppConfig.model_validate(
             {
                 "server_path": "/usr/bin/llama-server",
-                "fast_model": {"path": "small.gguf", "context_size": 2048},
+                "model": {"path": "small.gguf", "context_size": 2048},
             }
         )
-        assert c.fast_model.path == "small.gguf"
-        assert c.fast_model.context_size == 2048
+        assert c.model.path == "small.gguf"
+        assert c.model.context_size == 2048
 
     def test_extra_fields_ignored(self):
         c = LlamaCppConfig(batch_size=512)
