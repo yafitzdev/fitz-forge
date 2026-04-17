@@ -153,6 +153,13 @@ def _extract_python(content: str) -> str:
 
     Falls back to regex if AST parsing fails (syntax errors).
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_indexer import extract_python as _ts
+
+        return _ts(content)
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -328,6 +335,13 @@ def extract_method_flows(content: str, min_lines: int = _MIN_METHOD_LINES) -> st
     Returns a multi-line string with one section per complex method, or
     empty string if no complex methods found.
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_indexer import extract_method_flows as _ts
+
+        return _ts(content, min_lines)
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -718,6 +732,13 @@ def _extract_full_imports(
         file_path: Relative posix path of the file (e.g. "pkg/sub/mod.py").
             Used to resolve relative imports (from .sibling import X).
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_indexer import extract_full_imports as _ts
+
+        return _ts(content, file_path)
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -862,6 +883,13 @@ def _extract_signatures_from_python(content: str) -> str:
     - Classes with base classes and method signatures (params + return types)
     - Top-level functions with params + return types
     """
+    from fitz_forge.planning.validation.grounding.index import get_engine
+
+    if get_engine() == "tree_sitter":
+        from ._ts_indexer import extract_signatures_from_python as _ts
+
+        return _ts(content)
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
