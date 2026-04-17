@@ -101,12 +101,29 @@ def extract_type_name(node: "Node | None") -> str | None:
     return None
 
 
+_DOUBLE_QUOTED_RE = re.compile(r'"([^"\\\']*)"')
+
+
+def _normalise_string_quotes(text: str) -> str:
+    """Match ``ast.unparse``'s single-quote string emission.
+
+    ``ast.unparse`` always emits simple string literals with single
+    quotes, regardless of source form. We re-write each double-quoted
+    literal with a clean inner body to its single-quoted equivalent.
+    Strings containing ``'``, ``"`` or ``\\`` are left alone (the regex
+    class rules them out) — those are cases where ``ast.unparse`` would
+    keep double quotes anyway.
+    """
+    return _DOUBLE_QUOTED_RE.sub(r"'\1'", text)
+
+
 def unparse_annotation(node: "Node | None") -> str | None:
     """Tree-sitter port of ``inference.unparse_annotation``.
 
     Returns the textual source of the annotation node, or None. Equivalent
     to ``ast.unparse(annotation)`` for the subset of annotation shapes we
-    care about.
+    care about — including the quote normalisation that ast applies to
+    string literals inside the annotation.
     """
     if node is None:
         return None
@@ -115,8 +132,8 @@ def unparse_annotation(node: "Node | None") -> str | None:
     if node.type == "type":
         named = [c for c in node.children if c.is_named]
         if len(named) == 1:
-            return named[0].text.decode("utf-8")
-    return node.text.decode("utf-8")
+            return unparse_annotation(named[0])
+    return _normalise_string_quotes(node.text.decode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -636,28 +653,82 @@ def _extract_param_names(func_def: "Node") -> list[str]:
     return out
 
 
-def iter_top_level_classes(root: "Node") -> Iterator["Node"]:
-    """Yield class_definition nodes at module top level (col_offset == 0)."""
-    for c in root.children:
-        if c.type == "class_definition" and c.start_point[1] == 0:
-            yield c
+def _unwrap_decorated(node: "Node") -> "Node":
+    """Tree-sitter wraps ``@dec\ndef foo`` in a ``decorated_definition``.
+
+    ast treats decorators as attributes of the FunctionDef/ClassDef, so
+    to get parity we unwrap ``decorated_definition`` to its inner def.
+    """
+    if node.type == "decorated_definition":
+        for c in node.children:
+            if c.type in ("function_definition", "class_definition"):
+                return c
+    return node
+
+
+def iter_all_classes(root: "Node") -> Iterator["Node"]:
+    """Yield every ``class_definition`` in the tree (nested included).
+
+    Mirrors ``ast.walk(tree)`` filtered to ``ast.ClassDef`` — which also
+    descends into classes and functions looking for nested class defs.
+    Deduplicates decorated classes: ``decorated_definition`` wraps an
+    inner ``class_definition`` in tree-sitter, so we must yield one
+    without re-yielding the other when the tree is walked.
+    """
+    stack: list[Node] = [root]
+    seen: set[int] = set()
+    while stack:
+        n = stack.pop()
+        if n.type == "class_definition" and n.id not in seen:
+            seen.add(n.id)
+            yield n
+        elif n.type == "decorated_definition":
+            inner = _unwrap_decorated(n)
+            if inner.type == "class_definition" and inner.id not in seen:
+                seen.add(inner.id)
+                yield inner
+        stack.extend(n.children)
 
 
 def iter_top_level_functions(root: "Node") -> Iterator["Node"]:
-    """Yield function_definition nodes at module top level (col_offset == 0)."""
+    """Yield sync function_definition nodes at module top level (col_offset == 0).
+
+    Unwraps ``decorated_definition`` wrappers. Skips ``async def`` — the
+    ast pass1 indexes only ``ast.FunctionDef``, never ``AsyncFunctionDef``,
+    so top-level async functions stay out of the index. We preserve that
+    quirk for strict byte-parity; fixing it is a separate post-migration
+    change.
+    """
     for c in root.children:
+        candidate: "Node | None" = None
         if c.type == "function_definition" and c.start_point[1] == 0:
-            yield c
+            candidate = c
+        elif c.type == "decorated_definition" and c.start_point[1] == 0:
+            inner = _unwrap_decorated(c)
+            if inner.type == "function_definition":
+                candidate = inner
+        if candidate is None:
+            continue
+        if _function_is_async(candidate):
+            continue
+        yield candidate
 
 
 def iter_class_methods(class_def: "Node") -> Iterator["Node"]:
-    """Yield direct function_definition children of a class's body block."""
+    """Yield direct function_definition children of a class's body block.
+
+    Unwraps ``decorated_definition`` so decorated methods aren't missed.
+    """
     body = _class_body(class_def)
     if body is None:
         return
     for c in body.children:
         if c.type == "function_definition":
             yield c
+        elif c.type == "decorated_definition":
+            inner = _unwrap_decorated(c)
+            if inner.type == "function_definition":
+                yield inner
 
 
 def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
@@ -669,7 +740,7 @@ def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
     from .index import IndexedFunction
 
     added = 0
-    for class_node in iter_top_level_classes(root):
+    for class_node in iter_all_classes(root):
         absorb_class(lookup, rel, class_node)
         added += 1
     for func_node in iter_top_level_functions(root):

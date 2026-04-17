@@ -20,10 +20,12 @@ FIXTURE_FILES: dict[str, str] = {
     "app/routes.py": (
         "from typing import Iterator\n"
         "\n"
+        "@api_route\n"                              # decorator on class
         "class Route:\n"
         "    path: str\n"
         "    method: str = 'GET'\n"
         "\n"
+        "    @cached\n"                             # decorator on method
         "    def handle(self, req: Request) -> Response:\n"
         '        """Handle request.\n\n        Returns:\n            Response: the result.\n        """\n'
         "        return Response()\n"
@@ -31,8 +33,17 @@ FIXTURE_FILES: dict[str, str] = {
         "    async def stream(self) -> Iterator[bytes]:\n"
         "        yield b''\n"
         "\n"
+        "    class Nested:\n"                        # nested class
+        "        kind: str\n"
+        "\n"
         "def make_route(path: str, *args, **kwargs) -> Route:\n"
         "    return Route()\n"
+        "\n"
+        "async def async_top_level():\n"            # ast skips these
+        "    return 1\n"
+        "\n"
+        "def forward_ref(x: 'LateResolved') -> \"AlsoLate\":\n"  # both quote styles
+        "    return x\n"
     ),
     "app/models.py": (
         "from typing import ClassVar, Optional\n"
