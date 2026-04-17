@@ -6,7 +6,6 @@ source, reference method, available interfaces, schema fields.
 All deterministic — no LLM calls.
 """
 
-import ast
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,55 +168,7 @@ def _extract_target_self_methods(source: str) -> str:
     if not source:
         return ""
 
-    from fitz_forge.planning.validation.grounding.index import get_engine
-
-    if get_engine() == "tree_sitter":
-        return _extract_target_self_methods_ts(source)
-
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return ""
-    best_class: ast.ClassDef | None = None
-    best_count = 0
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        count = sum(
-            1 for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-        )
-        if count > best_count:
-            best_count = count
-            best_class = node
-    if best_class is None:
-        return ""
-
-    lines: list[str] = [f"# class {best_class.name}"]
-    for child in best_class.body:
-        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        async_prefix = "async " if isinstance(child, ast.AsyncFunctionDef) else ""
-        params = [a.arg for a in child.args.args if a.arg != "self"]
-        for a in child.args.kwonlyargs:
-            params.append(a.arg)
-        if child.args.vararg:
-            params.append(f"*{child.args.vararg.arg}")
-        if child.args.kwarg:
-            params.append(f"**{child.args.kwarg.arg}")
-        ret = ""
-        if child.returns:
-            try:
-                ret = " -> " + ast.unparse(child.returns)
-            except Exception:
-                pass
-        lines.append(f"{async_prefix}{child.name}({', '.join(params)}){ret}")
-    return "\n".join(lines)
-
-
-def _extract_target_self_methods_ts(source: str) -> str:
-    """Tree-sitter port of _extract_target_self_methods."""
     from fitz_forge.planning.validation.grounding._ts_inference import (
-        _class_body,
         _function_is_async,
         _function_name,
         _returns_annotation,

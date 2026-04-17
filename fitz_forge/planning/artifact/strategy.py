@@ -11,7 +11,6 @@ a JSON object. This eliminates the entire class of quote-mangling
 bugs from JSON extraction of embedded Python code.
 """
 
-import ast
 import logging
 from typing import Any, Protocol
 
@@ -337,47 +336,30 @@ def _surgical_grounding_block(ctx: ArtifactContext) -> str:
 
 def _extract_change_hint(reference_body: str) -> str:
     """Find the last return statement in the reference method."""
-    from fitz_forge.planning.validation.grounding.index import get_engine
+    from fitz_forge.planning.validation.grounding._ts_parser import parse_python
 
     output_line = ""
     wrapped = f"class _W:\n{reference_body}"
 
-    if get_engine() == "tree_sitter":
-        from fitz_forge.planning.validation.grounding._ts_parser import parse_python
-
-        tree = parse_python(wrapped)
-        if tree is not None:
-            # BFS for return_statement nodes with a value; pick the one
-            # with highest start_point.row.
-            last_row = -1
-            stack = [tree.root_node]
-            while stack:
-                n = stack.pop()
-                if n.type == "return_statement" and any(c.is_named for c in n.children):
-                    row = n.start_point[0]
-                    if row > last_row:
-                        last_row = row
-                stack.extend(n.children)
-            if last_row >= 0:
-                ref_lines = reference_body.split("\n")
-                # Tree-sitter rows are 0-indexed; wrapper adds 1 line before.
-                idx = last_row - 1
-                if 0 <= idx < len(ref_lines):
-                    output_line = ref_lines[idx].strip()
-    else:
-        try:
-            ref_tree = ast.parse(wrapped)
-            returns = [
-                node for node in ast.walk(ref_tree) if isinstance(node, ast.Return) and node.value
-            ]
-            if returns:
-                last_return = max(returns, key=lambda n: n.lineno)
-                ref_lines = reference_body.split("\n")
-                idx = last_return.lineno - 2  # -1 for 0-index, -1 for wrapper
-                if 0 <= idx < len(ref_lines):
-                    output_line = ref_lines[idx].strip()
-        except SyntaxError:
-            pass
+    tree = parse_python(wrapped)
+    if tree is not None:
+        # BFS for return_statement nodes with a value; pick the one
+        # with highest start_point.row.
+        last_row = -1
+        stack = [tree.root_node]
+        while stack:
+            n = stack.pop()
+            if n.type == "return_statement" and any(c.is_named for c in n.children):
+                row = n.start_point[0]
+                if row > last_row:
+                    last_row = row
+            stack.extend(n.children)
+        if last_row >= 0:
+            ref_lines = reference_body.split("\n")
+            # Tree-sitter rows are 0-indexed; wrapper adds 1 line before.
+            idx = last_row - 1
+            if 0 <= idx < len(ref_lines):
+                output_line = ref_lines[idx].strip()
 
     if output_line:
         return (
