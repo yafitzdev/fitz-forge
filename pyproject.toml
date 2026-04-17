@@ -37,6 +37,9 @@ dependencies = [
     "rich>=13.0",
     "fitz-sage[code]",
     "tomli>=2.0; python_version < '3.11'",
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
 ]
 
 [project.optional-dependencies]
