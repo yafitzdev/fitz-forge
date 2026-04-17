@@ -5,7 +5,7 @@
 
 # fitz-forge
 
-### Architectural planning harness for local LLMs
+### Architectural coding planning harness for local LLMs
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
@@ -63,7 +63,8 @@ the actual codebase.</em>
   </tr>
 </table>
 
-→ Same 30B model, same hardware. The difference is the harness: fitz-forge reads your codebase, reasons in stages, self-critiques, and extracts structured output that a small model can actually produce reliably.
+→ Same model, same hardware. The difference is the harness: `fitz-forge` reads your codebase, reasons in stages, self-critiques, 
+and extracts structured output that a small model can actually produce reliably.
 
 </div>
 
@@ -72,15 +73,13 @@ the actual codebase.</em>
 ### Where to start 🚀
 
 > [!IMPORTANT]
-> Requires [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) with a loaded model. Also needs [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval.
+> Requires [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) 
+> with a loaded model. Also needs [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval.
 
 ```bash
 pip install fitz-forge
 
 fitz plan "Add OAuth2 authentication with Google and GitHub providers"
-fitz run        # start background worker
-fitz status 1   # check progress
-fitz get 1      # read the finished plan
 ```
 
 That's it. Your plan runs overnight on local hardware.
@@ -89,39 +88,48 @@ That's it. Your plan runs overnight on local hardware.
 
 ### About
 
-I built `fitz-forge` because the best AI coding tools are dangerously dependent on subsidized API pricing. Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone (understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. `fitz-forge` moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. And as local models improve, your plans improve for free.
+I built `fitz-forge` because the best AI coding tools are dangerously dependent on subsidized API pricing. 
+Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone 
+(understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. 
+`fitz-forge` moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. 
+And as local models improve, your plans improve for free.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
 ~20k lines of Python. 970+ tests. Built by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
 
+![fitz-forge llm_with_harness](https://raw.githubusercontent.com/yafitzdev/fitz-forge/main/docs/assets/llm_with_harness.jpg)
+
 ---
 
-### Why fitz-forge?
+### Why `fitz-forge`?
 
 **Cut your Opus bill — plan locally, implement with Sonnet 💸**
-> Architectural planning is the most expensive phase of agentic coding. `fitz-forge` produces a markdown artifact you hand to Sonnet (or any cheaper model) for implementation. The expensive tokens never hit your API budget.
-
-**Your code never leaves your machine 🔒**
-> No API calls required. No telemetry. No cloud roundtrips. Your codebase, the LLM, and the generated plan all live on hardware you control — useful for proprietary code, NDA-bound work, or anywhere data-residency rules apply. The optional Anthropic review pass is off by default; opt in per-job if you want a second opinion.
-
-**Fully local, zero dependencies 🧩**
-> Ollama, LM Studio, or a raw llama-server subprocess. Pick your runtime, pick your model — no vendor lock-in, no SaaS login, no "sign up for an API key" step. Works the same on an offline workstation as on a cloud VM.
+> Agentic planning is the most expensive part of the process, and it's where LLMs struggle the most. `fitz-forge` 
+> produces a markdown artifact you hand to Sonnet for implementation. The expensive tokens never hit your API budget.
 
 **Dumb local models produce smart plans 🧠**
-> The pipeline breaks the task into atomic decisions, resolves each against relevant files, then narrates the committed decisions into a plan. A local LLM on a consumer GPU produces plans that a naked prompt to the same model can't.
+> The pipeline breaks the task into atomic decisions, resolves each against relevant files, then narrates the committed 
+> decisions into a plan. Suddenly a local model can produce plans that would overwhelm it in a single prompt.
 
 **Runs on whatever hardware you've got 🖥️**
-> Consumer GPU? `Gemma4-26B-A4b` does the whole pipeline. CPU-only box or tiny VRAM? Run a medium model at 10 tok/s overnight. Tokens-per-second stops mattering when you're sleeping.
+> Consumer GPU? Models like `Qwen3.6-35-a3b` or `Gemma4-26B-A4b` do the whole pipeline. CPU-only box or tiny VRAM? Run a medium model at 10 tok/s 
+> overnight. Tokens-per-second stops mattering when you're sleeping.
+
+**Drops into Claude Code or Codex via CLI and MCP 🔌**
+> Expose `fitz-forge` as an MCP server (`fitz serve`) and it becomes a tool inside Claude Code, or any MCP-capable client.
+> Same principle as with CLI. Tell Claude to create a plan using `fitz-forge`, and it does the heavy lifting locally while you wait.
 
 **Any codebase, any language 🌐**
-> Python, TypeScript, Go, Rust, NestJS backends, FastAPI services, React frontends — the retrieval layer indexes by file structure and imports, and the grounding layer validates generated artifacts against whatever the codebase actually contains. No Python bias, no hardcoded framework assumptions.
+> Python, Go, Rust — the retrieval layer indexes by file structure and imports, and the grounding layer validates generated 
+> artifacts against whatever the codebase actually contains.
 
-**Queue a job. Go to sleep. Let it run overnight. 🌙**
-> Every stage produces checkpoints. Power outage at minute 55 of a 60-minute run? `fitz retry <id>` picks up from the last completed stage. The worker detects interrupted jobs on startup and marks them resumable automatically.
+**Queue a job. Go to sleep. Relax. Let it run overnight. 🌙**
+> Every stage produces checkpoints. Power outage at minute 15 of a 20-minute run? `fitz retry <id>` picks up from the 
+> last completed stage.
 
-**Drops into Claude Code or Codex via MCP 🔌**
-> Expose `fitz-forge` as an MCP server (`fitz serve`) and it becomes a tool inside Claude Code, or any MCP-capable client. Ask the agent to plan a feature → it queues a job on your local worker → comes back with the finished plan when ready. Same service layer works from the CLI for standalone use.
+**Fully local execution possible 🏠**
+> Ollama, LM Studio, or llama.cpp. No API keys required to start.
 
 ---
 
@@ -133,7 +141,9 @@ TBD
 
 ### How It Works
 
-A 10-stage pipeline that decomposes architectural planning into small, focused LLM calls interleaved with deterministic AST work. Retrieval + implementation check feed a decision-based reasoning core (decompose → resolve → synthesize), then artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written.
+A 10-stage pipeline that decomposes architectural planning into small, focused LLM calls interleaved with deterministic 
+AST work. Retrieval + implementation check feed a decision-based reasoning core (decompose → resolve → synthesize), then 
+artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written.
 
 <br>
 
@@ -185,7 +195,9 @@ Total: ~40-60 LLM calls · ~7-9 min on RTX 5090
 <br>
 
 > [!NOTE]
-> The pipeline decomposes a problem that would overwhelm a small model into many small LLM calls it can handle reliably. Each per-field JSON extraction is under 2000 chars — small enough for a 3B quantized model to produce valid output. Deterministic AST work (call graph, grounding check) carries the structural load so LLMs only do what LLMs are good at.
+> The pipeline decomposes a problem that would overwhelm a small model into many small LLM calls it can handle reliably. 
+> Each per-field JSON extraction is under 2000 chars — small enough for a 3B quantized model to produce valid output. 
+> Deterministic AST work (call graph, grounding check) carries the structural load so LLMs only do what LLMs are good at.
 
 Full pipeline docs: **[docs/features/](docs/features/)** — detailed docs covering every stage and infrastructure component.
 
