@@ -169,9 +169,9 @@ print(r.deterministic_score)
 
 | Task | Codebase | Language | Baseline (T1/T2) | After loop (T1/T2) | Runs |
 |------|----------|----------|------------------|--------------------|------|
-| streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 96.3 / 96.9 | 5 after semantic-gate (2026-04-18). Prior closure-era peak: 100.0 / 77.3 |
-| ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 98.2 / 70.2 | 5 after semantic-gate (2026-04-18). Closure was shape-only and couldn't lift T2; gate addresses signal-preservation semantics |
-| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 77.6 / 62.0 | 5 after semantic-gate (2026-04-18). Monorepo source-dir fix + null coercion fix unblocked reliable 5/5 runs; A3 dominates (4/5) — gate confirms implementation matches intent but doesn't push reasoning away from easy Shortcode reuse toward dedicated CollectionShare module (same ceiling shape as ranking_explanation) |
+| streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 96.0 / 76.1 | 5 after build-new-vs-extend fix (2026-04-18). Prior peaks: closure-era 100.0 / 77.3; pre-fix gate 96.3 / 96.9. 4/5 plans still A1; regression is 1 A4 outlier + per-file tier drift (routes R2/R3 instead of R1). Follow-up: tighten prompt so build-new question skips when task is method-on-existing-class |
+| ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 93.4 / 69.8 | 5 after build-new-vs-extend fix (2026-04-18). Effectively stable (was 98.2 / 70.2 with gate alone). A1 requires rubric awareness the gate doesn't provide; new-module question doesn't help here |
+| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 78.7 / 95.0 | 5 after build-new-vs-extend fix + decision_text_map threading (2026-04-18). All 5 plans A1 ("Dedicated CollectionShare Module"). Prior pre-fix gate: 77.6 / 62.0. +33 points from correctly evaluating new-module-vs-extend when the task introduces a new capability concept |
 
 T2 numbers backfilled as benchmarks get re-scored under automated Tier-2.
 Note: closure-layer invariants (B9 family, B10, B11) only fire on Python
