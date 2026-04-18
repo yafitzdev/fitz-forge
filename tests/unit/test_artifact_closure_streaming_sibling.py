@@ -607,3 +607,157 @@ def test_violation_kind_routes_to_regenerate_not_expand():
         "\"usage\", \"kwargs\", \"field\", \"import\", \"streaming-sibling\"" in src
         or "'usage', 'kwargs', 'field', 'import', 'streaming-sibling'" in src
     )
+
+
+# ---------------------------------------------------------------------------
+# B9 + B15 combined: dedented surgical synth artifact unlocks the
+# streaming-sibling check on the engine artifact (the real-world variant).
+# ---------------------------------------------------------------------------
+
+
+def _write_pkg(tmp_path):
+    """Disk source: pkg.synth.Synth (with `generate`) and pkg.engine.Engine
+    (with `__init__(self, synth: Synth)` so self._synth is typed)."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "synth.py").write_text(
+        textwrap.dedent(
+            """
+            class Synth:
+                def generate(self, q: str) -> str:
+                    return ""
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    (pkg / "engine.py").write_text(
+        textwrap.dedent(
+            """
+            from .synth import Synth
+            class Engine:
+                def __init__(self, synth: Synth) -> None:
+                    self._synth: Synth = synth
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    return pkg
+
+
+def test_b9_plus_b15_dedented_surgical_synth_unlocks_streaming_check(tmp_path):
+    """The dominant real-world failure shape (B9 + B15 cooperation):
+
+    - synthesizer.py is a SURGICAL rewrite that adds `stream_query` to
+      Synth, but the model emits the def at column 0 (dedented).
+    - engine.py is a SURGICAL rewrite of `Engine.stream_query` that yields
+      and calls `self._synth.generate(...)` — the blocking sibling.
+    - Engine's `__init__` (with `self._synth: Synth`) lives on disk.
+
+    Without the B15 fix, extract_provides classifies the dedented
+    `stream_query` as a top-level function (`owner=None`), so the
+    streaming-sibling check on engine.py sees no streaming variant on
+    Synth and does not fire.
+
+    With the B15 fix (caller passes `strategy="surgical"` on the artifact
+    dicts), `stream_query` is correctly registered as `Synth.stream_query`,
+    and the B9 streaming-sibling check fires on engine.py with a violation
+    naming `Synth.generate` and pointing at `Synth.stream_query` as the
+    streaming sibling.
+    """
+    _write_pkg(tmp_path)
+
+    lookup = _make_lookup()
+    lookup.augment_from_source_dir(str(tmp_path))
+
+    # Surgical synth artifact — DEDENTED. This is the exact shape the
+    # model emits in production.
+    synth_src = textwrap.dedent(
+        """
+        def stream_query(
+            self,
+            query: str,
+        ):
+            yield query
+        """
+    ).lstrip()
+    # Surgical engine artifact — also dedented. Calls the BLOCKING
+    # `self._synth.generate(...)` and yields the result.
+    engine_src = textwrap.dedent(
+        """
+        def stream_query(self, q: str):
+            answer = self._synth.generate(q)
+            yield answer
+        """
+    ).lstrip()
+
+    artifacts = [
+        {
+            "filename": "pkg/engine.py",
+            "content": engine_src,
+            "purpose": "engine surgical",
+            "strategy": "surgical",
+        },
+        {
+            "filename": "pkg/synth.py",
+            "content": synth_src,
+            "purpose": "synth surgical",
+            "strategy": "surgical",
+        },
+    ]
+    violations = _streaming_violations(
+        check_closure(artifacts, lookup, source_dir=str(tmp_path))
+    )
+
+    assert len(violations) == 1, (
+        f"Expected 1 streaming-sibling violation, got {len(violations)}: "
+        f"{[v.pretty() for v in violations]}"
+    )
+    v = violations[0]
+    assert v.artifact == "pkg/engine.py"
+    assert v.ref.owner == "Synth"
+    assert v.ref.name == "generate"
+    assert "stream_query" in v.detail
+
+
+def test_b9_plus_b15_without_strategy_hint_misses_violation(tmp_path):
+    """Same shape as above, but no `strategy` key on the artifact dicts —
+    the legacy heuristic falls back. With dedented content the heuristic
+    classifies `stream_query` as a top-level function, so the
+    streaming-sibling check on engine.py finds no candidate sibling on
+    Synth and does NOT fire. This pins the regression: dropping the
+    explicit strategy threading reproduces the production bug."""
+    _write_pkg(tmp_path)
+
+    lookup = _make_lookup()
+    lookup.augment_from_source_dir(str(tmp_path))
+
+    synth_src = textwrap.dedent(
+        """
+        def stream_query(
+            self,
+            query: str,
+        ):
+            yield query
+        """
+    ).lstrip()
+    engine_src = textwrap.dedent(
+        """
+        def stream_query(self, q: str):
+            answer = self._synth.generate(q)
+            yield answer
+        """
+    ).lstrip()
+
+    artifacts = [
+        # NOTE: no "strategy" key. Heuristic falls back.
+        {"filename": "pkg/engine.py", "content": engine_src, "purpose": "engine"},
+        {"filename": "pkg/synth.py", "content": synth_src, "purpose": "synth"},
+    ]
+    violations = _streaming_violations(
+        check_closure(artifacts, lookup, source_dir=str(tmp_path))
+    )
+    # Without B15, the heuristic misses on dedented content — no streaming
+    # sibling registered on Synth, so no violation fires. This is exactly
+    # what was happening in production runs.
+    assert violations == []

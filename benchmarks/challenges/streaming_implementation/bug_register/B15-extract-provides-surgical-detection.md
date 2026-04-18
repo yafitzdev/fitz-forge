@@ -1,8 +1,23 @@
 # B15 — `extract_provides` loses class ownership for dedented surgical artifacts
 
-**Status:** open
+**Status:** resolved
 **Impact:** 8/10 (blocks B9 broader fix from firing on the dominant real-world variant)
 **Opened:** 2026-04-17
+**Closed:** 2026-04-17
+
+**Fix:** Threaded the artifact strategy classification (surgical/new_code,
+already known to `generate_artifact`) through to `extract_provides` via a
+new `is_surgical: bool | None` parameter. `check_closure` and the in-loop
+`combined_provides` build in `generate_artifact_set` read the strategy
+from the per-artifact dict (`art["strategy"]`) and pass it through.
+`as_artifact_dicts()` and the per-iteration dict construction in
+`generate_artifact_set` now include the `"strategy"` key. The legacy
+whitespace-based heuristic remains as a fallback for callers that don't
+supply strategy info (one-off and test code). Tests:
+`tests/unit/test_extract_provides_surgical.py` (5 cases) and 2 new
+B9+B15 cooperation tests in
+`tests/unit/test_artifact_closure_streaming_sibling.py` confirm the
+streaming-sibling check now fires on the dedented surgical shape.
 **Source:** Replay-validation of B9 broader fix (commit 5a15949) on
 streaming_implementation. The fix is correct in unit tests but doesn't
 trigger in production synthesis runs because the closure index is missing

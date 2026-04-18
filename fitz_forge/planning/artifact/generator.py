@@ -322,10 +322,21 @@ class ArtifactSetResult:
     expanded_files: list[str] = field(default_factory=list)  # files added by repair
 
     def as_artifact_dicts(self) -> list[dict[str, Any]]:
-        """Convert successful results to the {filename, content, purpose} format
-        synthesis expects."""
+        """Convert successful results to the {filename, content, purpose, strategy}
+        format synthesis expects.
+
+        `strategy` is included so downstream closure analysis can use it as the
+        canonical surgical-vs-new_code signal (see B15) instead of re-deriving
+        it from a content-shape heuristic that misclassifies dedented surgical
+        artifacts.
+        """
         return [
-            {"filename": r.filename, "content": r.content, "purpose": r.purpose}
+            {
+                "filename": r.filename,
+                "content": r.content,
+                "purpose": r.purpose,
+                "strategy": r.strategy,
+            }
             for r in self.results
             if r.success
         ]
@@ -392,8 +403,16 @@ async def generate_artifact_set(
     violations: list[ClosureViolation] = []
 
     for iter_idx in range(max_repair_iters + 1):
+        # Include strategy so closure analysis can use the canonical
+        # surgical-vs-new_code classification instead of a content-shape
+        # heuristic (see B15).
         artifact_dicts = [
-            {"filename": r.filename, "content": r.content, "purpose": r.purpose}
+            {
+                "filename": r.filename,
+                "content": r.content,
+                "purpose": r.purpose,
+                "strategy": r.strategy,
+            }
             for r in results
             if r.success
         ]
@@ -492,11 +511,20 @@ async def generate_artifact_set(
         # available signatures is much more effective feedback.
         combined_provides: dict[SymbolRef, Signature | None] = {}
         for art in artifact_dicts:
+            strategy = art.get("strategy")
+            is_surgical: bool | None
+            if strategy == "surgical":
+                is_surgical = True
+            elif strategy == "new_code":
+                is_surgical = False
+            else:
+                is_surgical = None
             combined_provides.update(
                 extract_provides(
                     art.get("content", ""),
                     art.get("filename", ""),
                     lookup,
+                    is_surgical=is_surgical,
                 )
             )
 

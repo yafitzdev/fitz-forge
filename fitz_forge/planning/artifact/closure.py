@@ -1136,11 +1136,21 @@ def extract_provides(
     content: str,
     filename: str,
     lookup: StructuralIndexLookup,
+    is_surgical: bool | None = None,
 ) -> dict[SymbolRef, Signature | None]:
     """Extract symbols an artifact defines, keyed by SymbolRef with signatures.
 
     Returns a dict so usage checks can look up signatures. Class refs map to
     None; method/function refs map to their Signature.
+
+    `is_surgical`: when the caller knows the artifact's generation strategy
+    (SurgicalRewriteStrategy vs NewCodeStrategy), it should pass the explicit
+    boolean. This is the canonical source of truth (see B15) — the artifact
+    pipeline's strategy classification is what determines whether top-level
+    `def` items belong to a target class. When `None`, fall back to a
+    whitespace-based heuristic that misclassifies dedented surgical artifacts
+    as new code; the heuristic exists so test code and one-off callers without
+    strategy info still work.
     """
     out: dict[SymbolRef, Signature | None] = {}
     tree = parse_python(content)
@@ -1148,16 +1158,17 @@ def extract_provides(
         return out
     root = tree.root_node
 
-    # Surgical rewrite: indented content whose top-level items include
-    # a function_definition (matches ast's `any(isinstance(n, FunctionDef)
-    # for n in iter_child_nodes(tree))`)
-    is_surgical = False
-    if content and content.lstrip() != content:
-        for c in root.children:
-            inner = _unwrap_decorated(c) if c.type == "decorated_definition" else c
-            if inner.type == "function_definition":
-                is_surgical = True
-                break
+    if is_surgical is None:
+        # Fallback heuristic — prefer the explicit caller-provided value when
+        # available. This whitespace check misclassifies surgical artifacts
+        # emitted at column 0 (the dominant real-world shape, see B15).
+        is_surgical = False
+        if content and content.lstrip() != content:
+            for c in root.children:
+                inner = _unwrap_decorated(c) if c.type == "decorated_definition" else c
+                if inner.type == "function_definition":
+                    is_surgical = True
+                    break
 
     target_class = _target_class_for_file(filename, lookup) if is_surgical else None
 
@@ -2154,14 +2165,26 @@ def check_closure(
     `source_dir` enables `self._attr` type tracking by reading target class
     `__init__` bodies from disk.
     """
-    # Build the provides dict from all siblings
+    # Build the provides dict from all siblings.
+    # When the caller annotates each artifact with `"strategy"` ("surgical" or
+    # "new_code"), thread that into extract_provides so the heuristic doesn't
+    # misclassify dedented surgical content as a top-level function (see B15).
     provides: dict[SymbolRef, Signature | None] = {}
     for art in artifacts:
+        strategy = art.get("strategy")
+        is_surgical: bool | None
+        if strategy == "surgical":
+            is_surgical = True
+        elif strategy == "new_code":
+            is_surgical = False
+        else:
+            is_surgical = None
         provides.update(
             extract_provides(
                 art.get("content", ""),
                 art.get("filename", ""),
                 lookup,
+                is_surgical=is_surgical,
             )
         )
 
