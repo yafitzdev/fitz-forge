@@ -42,6 +42,17 @@ Bad pattern decisions look like:
 
 Only once the build-new-vs-extend axis is resolved can you ask interface and integration questions, and only relative to the chosen mechanism.
 
+## Downstream decisions must not pre-commit to an upstream branch
+
+Every decision that `depends_on` a pattern decision must reference the upstream resolution abstractly — do NOT bake a specific mechanism into the question. The resolver answers each decision independently from its local phrasing; if d2 says "If extending X, what fields...", it will answer the extension branch even when d1 chose the alternative. The plan then ends up as a Frankenstein of mixed mechanisms.
+
+- BAD d2 (given d1 is build-new-vs-extend): "If extending the existing `Shortcode` model, what new fields are required?"
+- GOOD d2: "Given the mechanism chosen in d1, what Prisma schema changes are required to support the new capability?"
+- BAD d3: "What is the method signature for `createCollectionShortcode` in `shortcode.service.ts`?" (pre-commits to Shortcode service)
+- GOOD d3: "Given d1's chosen host service, what is the create/revoke method signature for the new capability?"
+
+Phrase downstream questions so they are answerable *whichever* way the pattern decision goes. Keep the `relevant_files` list to the candidate files on both sides of the pattern fork (typically the existing mechanism's files), so the resolver can still ground its answer in real source.
+
 ## Chain completeness rule
 
 When the task adds new behavior at an entry point (API route, CLI command, SDK method), trace the FULL call chain from the entry point to the implementation layer using the call graph edges. Generate a decision for EACH file in the chain. Skipping a middle layer (e.g., a service wrapper between a route and an engine) creates an impossible implementation gap — the entry point can't call methods that don't exist on its direct dependency.

@@ -207,7 +207,10 @@ class DecisionResolutionStage(PipelineStage):
         constraint_text = ""
         if upstream_constraints:
             constraint_text = (
-                "CONSTRAINTS FROM PREVIOUS DECISIONS (you MUST respect these):\n"
+                "UPSTREAM CONTEXT — resolved decisions this one depends on, plus "
+                "any emitted constraints. If the question references an upstream "
+                "choice (e.g. \"given d1's mechanism\"), your answer MUST be "
+                "consistent with the `RESOLVED:` line for that decision:\n"
                 + "\n".join(f"- {c}" for c in upstream_constraints)
             )
 
@@ -337,6 +340,9 @@ class DecisionResolutionStage(PipelineStage):
             ]
             for dep_id in orig.get("depends_on", []):
                 dep_res = resolution_map.get(dep_id, {})
+                dep_text = dep_res.get("decision", "")
+                if dep_text:
+                    upstream.append(f"{dep_id} RESOLVED: {dep_text}")
                 upstream.extend(dep_res.get("constraints_for_downstream", []))
 
             messages = self._build_decision_prompt(
@@ -421,10 +427,17 @@ class DecisionResolutionStage(PipelineStage):
 
             resolutions: list[dict] = []
             constraint_map: dict[str, list[str]] = {}
+            # Upstream decision texts so downstream resolvers can see what
+            # each dependency actually decided, not just the emitted
+            # constraints. Critical for build-new-vs-extend pattern decisions:
+            # without the upstream text, a downstream "Given d1's mechanism,
+            # what fields…" question gets answered against stale framing.
+            decision_text_map: dict[str, str] = {}
 
-            # Seed constraint_map from already-resolved decisions
+            # Seed both maps from already-resolved decisions
             for d_id, resolution in already_resolved.items():
                 constraint_map[d_id] = resolution.get("constraints_for_downstream", [])
+                decision_text_map[d_id] = resolution.get("decision", "")
 
             for i, decision in enumerate(sorted_decisions):
                 d_id = decision["id"]
@@ -437,8 +450,18 @@ class DecisionResolutionStage(PipelineStage):
 
                 await self._report_substep(f"resolving:{d_id}")
 
+                # Build upstream context: full decision text for each
+                # dependency first (so the resolver can answer questions
+                # framed as "given d1's choice…"), then any emitted
+                # constraints. Without the decision text, a downstream
+                # question like "Given d1's mechanism, what fields…"
+                # reverts to its local phrasing and ignores the upstream
+                # choice — producing mixed-mechanism Frankenstein plans.
                 upstream = []
                 for dep_id in decision.get("depends_on", []):
+                    dep_text = decision_text_map.get(dep_id)
+                    if dep_text:
+                        upstream.append(f"{dep_id} RESOLVED: {dep_text}")
                     upstream.extend(constraint_map.get(dep_id, []))
 
                 messages = self._build_decision_prompt(
@@ -516,6 +539,7 @@ class DecisionResolutionStage(PipelineStage):
 
                 resolutions.append(resolution)
                 constraint_map[d_id] = resolution.get("constraints_for_downstream", [])
+                decision_text_map[d_id] = resolution.get("decision", "")
 
                 # Save partial progress for crash recovery
                 prior_outputs[f"_resolution_partial_{d_id}"] = resolution
