@@ -75,6 +75,18 @@ Each bug file follows the same header:
 4. **Fix** — implement generalized to every variant of the failure
    shape. Ask: *"does this apply to any codebase/language, or is it
    specific to this task?"* If specific, don't ship it.
+
+   **Anti-bandaid check before coding:** look at the last 3-4 resolved
+   bugs in this task's register. Do they share an underlying shape
+   (e.g. "tree-sitter pattern predicate was too narrow", "metadata
+   extraction missed a real-world variant", "scanner had wrong child-
+   count assumption")? If yes, the right fix is NOT a fourth patch —
+   it's a refactor that removes the class of bug (single canonical
+   AST pass producing a unified index, replace per-walker shape
+   predicates with one tested abstraction). Surface this in the cycle
+   summary and either do the refactor OR justify why patching once
+   more is acceptable (e.g. "only 3 instances, refactor cost too high
+   for current marginal value"). Never silently stack.
 5. **Replay-validate** — replay a snapshot (~5 min). Re-runs synthesis
    only with the new code. **Inspect both tiers in the replay output.**
    Promote to full benchmark only if both improve (or one improves and
