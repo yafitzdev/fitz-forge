@@ -1766,17 +1766,33 @@ class _StreamingSiblingScanner:
     def _collect_yielded_names(self, func_def: "Node") -> set[str]:
         """Names whose value flows into a yield in the method body.
 
-        Conservative: identifier yielded directly (`yield x`,
-        `yield from x`) or iterated-then-yielded (`for x in y: yield ...`
-        contributes `y`).
+        Permissive: every identifier that appears anywhere inside a
+        yield expression (bare name, dict value, attribute access,
+        nested call argument, …) is considered yielded. The model
+        wraps streamed data in many shapes (``yield x``,
+        ``yield {"data": x.__dict__}``, ``yield from x``,
+        ``yield Chunk(text=x)``, …); a narrow check that only sees
+        bare identifiers misses the dominant production pattern.
+
+        ``for x in y: yield <anything>`` adds ``y`` (the iter source)
+        when the body actually yields.
         """
         out: set[str] = set()
         for node in self._iter_method_body(func_def):
             if node.type == "yield":
-                # Children: 'yield' keyword, optionally 'from', then expr.
-                for c in node.children:
-                    if c.is_named and c.type == "identifier":
-                        out.add(c.text.decode("utf-8"))
+                # Walk the yield subtree, collecting every identifier.
+                substack: list[Node] = list(node.children)
+                while substack:
+                    sub = substack.pop()
+                    # Don't dive into nested defs (their yields are
+                    # other functions' concern) — matches the body
+                    # walker's nesting policy.
+                    if sub.type in ("function_definition", "lambda"):
+                        continue
+                    if sub.type == "identifier":
+                        out.add(sub.text.decode("utf-8"))
+                        continue
+                    substack.extend(sub.children)
             elif node.type == "for_statement":
                 # `for x in <iter_source>: <body containing yield>`
                 # We only count the source if the body actually yields.
