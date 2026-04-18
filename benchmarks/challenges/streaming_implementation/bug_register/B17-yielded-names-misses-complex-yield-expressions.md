@@ -1,14 +1,26 @@
 # B17 — `_collect_yielded_names` misses identifiers inside complex yield expressions
 
-**Status:** resolved
+**Status:** superseded by semantic-review gate (alongside B9)
 **Impact:** 9/10 (final blocker for B9 firing on production patterns)
 **Opened:** 2026-04-18
-**Closed:** 2026-04-18
+**Superseded:** 2026-04-18
 
-**Fix:** Walk the entire yield-expression subtree for identifiers,
-not just `yield <bare_name>` / `yield from <bare_name>`. Models
-wrap streamed data in many shapes (`yield {"data": x.__dict__}`,
-`yield Chunk(text=x)`, etc.); the narrow check missed every one.
+**Supersession note (2026-04-18):** B17's broader yield-subtree walk
+existed only to make B9's streaming-sibling scanner fire on production
+code. Both were removed as part of the pivot to an LLM semantic-review
+gate — the gate looks at yielded values at the semantic level ("this
+code yields a dict wrapping the blocking call's result instead of the
+streaming call's chunks") without needing AST-level yield-target
+tracking. B17's pattern was itself a bandaid on B9, which was a bandaid
+on "artifacts are generated per-file without set-level semantic
+awareness" — the last in a B15 → B16 → B17 chain of narrowing
+tree-sitter predicates (CLAUDE rule 12).
+
+**Earlier fix (preserved for history):** Walk the entire yield-expression
+subtree for identifiers, not just `yield <bare_name>` / `yield from
+<bare_name>`. Models wrap streamed data in many shapes
+(`yield {"data": x.__dict__}`, `yield Chunk(text=x)`, etc.); the narrow
+check missed every one.
 
 ## Symptom
 

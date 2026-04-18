@@ -1,17 +1,31 @@
 # B9 — Engine stream method calls blocking `generate()` instead of `stream_generate()`
 
-**Status:** resolved
+**Status:** superseded by semantic-review gate
 **Impact:** 10/10
 **Opened:** 2026-04-17
-**Closed:** 2026-04-18
+**Superseded:** 2026-04-18
 
-**Fix:** Closure-set check `_StreamingSiblingScanner` (commits 35918a9 +
-5a15949) detects streaming methods that call blocking siblings on the
-same class. Required B15 (extract_provides surgical-class ownership),
-B16 (extract_init_self_attrs walks init helper methods), and B17
+**Supersession note (2026-04-18):** The streaming-sibling closure check
+(`_StreamingSiblingScanner` in `closure.py`) was removed along with its
+B15/B16/B17 metadata-extraction fixes. The check worked in unit tests
+but accumulated four narrow tree-sitter predicates to fire on production
+shapes — classic bandaid stacking (CLAUDE rule 12). Replaced with the
+LLM semantic-review gate in `fitz_forge/planning/artifact/semantic_review.py`
+which reads design intent + artifact contents together and reports
+contradictions like "engine yields from self._synthesizer.generate()
+but the plan defines stream_query — call that instead." Repair uses
+the same regeneration-with-feedback pathway as the old closure check,
+so the repair side of the fix is preserved; only the detection moves
+from shape matching to LLM semantics.
+
+**Earlier fix attempt (preserved for history):** Closure-set check
+`_StreamingSiblingScanner` (commits 35918a9 + 5a15949) detected
+streaming methods that called blocking siblings on the same class.
+Required B15 (extract_provides surgical-class ownership), B16
+(extract_init_self_attrs walks init helper methods), and B17
 (yielded-names walks complex yield expressions) to fire on production
-code shapes. Repair strategy: regenerate offending artifact with
-targeted feedback naming the streaming variant.
+code shapes. B15/B16 survive as real pre-existing fixes to grounding
+infrastructure; B17's broader yield walk is superseded alongside B9.
 
 **Validation:** Fresh 5-plan benchmark on streaming_implementation
 (run_031). Tier-1 avg 100.0/100, Tier-2 avg 77.3/100 (was 97.7/61.8).

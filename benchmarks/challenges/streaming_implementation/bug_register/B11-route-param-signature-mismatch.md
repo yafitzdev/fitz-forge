@@ -1,9 +1,20 @@
 # B11 — Route function signature takes positional params but body references `request.*`
 
-**Status:** open
+**Status:** superseded by semantic-review gate
 **Impact:** 6/10
 **Opened:** 2026-04-17
+**Superseded:** 2026-04-18
 **Source:** Tier-2 Sonnet scoring of run_021 — ~8/30 plans
+
+**Supersession note (2026-04-18):** The per-artifact unbound-name check
+(`_check_unbound_names` in `validate.py`) was removed. The signature/body
+mismatch it targeted is a contradiction between what the method signature
+declares and what the body references — exactly the class of bug the
+LLM semantic-review gate reports as an `actual: "body references
+request.X but signature is flat positional"` discrepancy. The gate
+routes it back through `generate_artifact` with natural-language
+feedback, so the repair pathway is preserved; the detection moves from
+a tree-sitter scope walker (~580 LOC) to LLM review (one prompt).
 
 ## Symptom
 
