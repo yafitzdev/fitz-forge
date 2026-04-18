@@ -1,10 +1,12 @@
 # fitz_forge/planning/schemas/architecture.py
 """Schema for architecture exploration stage output."""
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 
-class Approach(BaseModel):
+class Approach(LLMOutputModel):
     """A single architectural approach option."""
 
     model_config = ConfigDict(extra="ignore")
@@ -40,7 +42,7 @@ class Approach(BaseModel):
     )
 
 
-class ArchitectureOutput(BaseModel):
+class ArchitectureOutput(LLMOutputModel):
     """Output from architecture exploration stage.
 
     Explores multiple architectural approaches before committing to one.

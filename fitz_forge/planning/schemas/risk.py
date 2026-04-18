@@ -1,12 +1,14 @@
 # fitz_forge/planning/schemas/risk.py
 """Schema for risk analysis stage output."""
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 from fitz_forge.planning.schemas.roadmap import PhaseRef
 
 
-class Risk(BaseModel):
+class Risk(LLMOutputModel):
     """A single project risk with mitigation strategy."""
 
     model_config = ConfigDict(extra="ignore")
@@ -64,7 +66,7 @@ class Risk(BaseModel):
     )
 
 
-class RiskOutput(BaseModel):
+class RiskOutput(LLMOutputModel):
     """Output from risk analysis stage.
 
     Identifies project risks and mitigation strategies.

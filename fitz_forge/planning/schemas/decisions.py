@@ -3,10 +3,12 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 
-class AtomicDecision(BaseModel):
+class AtomicDecision(LLMOutputModel):
     """A single atomic decision to be resolved."""
 
     model_config = ConfigDict(extra="ignore")
@@ -57,7 +59,7 @@ class AtomicDecision(BaseModel):
     )
 
 
-class DecisionResolution(BaseModel):
+class DecisionResolution(LLMOutputModel):
     """The committed resolution of an atomic decision."""
 
     model_config = ConfigDict(extra="ignore")
@@ -94,7 +96,7 @@ class DecisionResolution(BaseModel):
     )
 
 
-class DecisionDecompositionOutput(BaseModel):
+class DecisionDecompositionOutput(LLMOutputModel):
     """Output of the decision decomposition stage."""
 
     model_config = ConfigDict(extra="ignore")
@@ -105,7 +107,7 @@ class DecisionDecompositionOutput(BaseModel):
     )
 
 
-class DecisionResolutionOutput(BaseModel):
+class DecisionResolutionOutput(LLMOutputModel):
     """Output of the per-decision resolution stage (all decisions)."""
 
     model_config = ConfigDict(extra="ignore")

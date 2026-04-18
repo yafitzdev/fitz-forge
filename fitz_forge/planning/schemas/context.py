@@ -1,10 +1,12 @@
 # fitz_forge/planning/schemas/context.py
 """Schema for context understanding stage output."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 
-class Assumption(BaseModel):
+class Assumption(LLMOutputModel):
     """An explicit assumption made due to ambiguity in the request."""
 
     model_config = ConfigDict(extra="ignore")
@@ -14,7 +16,7 @@ class Assumption(BaseModel):
     confidence: str = Field(default="medium", description="How confident: low, medium, high")
 
 
-class ContextOutput(BaseModel):
+class ContextOutput(LLMOutputModel):
     """Output from context understanding stage.
 
     Captures the essential understanding of what needs to be built,

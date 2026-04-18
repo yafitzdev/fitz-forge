@@ -4,7 +4,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 from fitz_forge.planning.schemas.architecture import ArchitectureOutput
 from fitz_forge.planning.schemas.context import ContextOutput
@@ -13,7 +15,7 @@ from fitz_forge.planning.schemas.risk import RiskOutput
 from fitz_forge.planning.schemas.roadmap import RoadmapOutput
 
 
-class PlanOutput(BaseModel):
+class PlanOutput(LLMOutputModel):
     """Complete planning output aggregating all stages.
 
     This is the final structured output from the multi-stage planning pipeline.

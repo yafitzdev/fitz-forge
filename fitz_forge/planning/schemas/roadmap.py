@@ -4,7 +4,9 @@
 import re
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BeforeValidator, ConfigDict, Field, model_validator
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 
 def _coerce_phase_number(value: object) -> int:
@@ -24,7 +26,7 @@ PhaseRef = Annotated[int, BeforeValidator(_coerce_phase_number)]
 """Int that auto-coerces LLM variants like ``"Phase 1"`` to ``1``."""
 
 
-class Phase(BaseModel):
+class Phase(LLMOutputModel):
     """A single implementation phase in the roadmap."""
 
     model_config = ConfigDict(extra="ignore")
@@ -83,7 +85,7 @@ class Phase(BaseModel):
     )
 
 
-class RoadmapOutput(BaseModel):
+class RoadmapOutput(LLMOutputModel):
     """Output from implementation roadmap stage.
 
     Defines the sequence of phases to build the system.

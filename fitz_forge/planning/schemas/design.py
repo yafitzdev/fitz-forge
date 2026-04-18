@@ -1,10 +1,12 @@
 # fitz_forge/planning/schemas/design.py
 """Schema for design decisions stage output."""
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
+
+from fitz_forge.planning.schemas._base import LLMOutputModel
 
 
-class ADR(BaseModel):
+class ADR(LLMOutputModel):
     """Architectural Decision Record.
 
     Documents a significant design decision with context and rationale.
@@ -43,7 +45,7 @@ class ADR(BaseModel):
     )
 
 
-class Artifact(BaseModel):
+class Artifact(LLMOutputModel):
     """A concrete deliverable file produced by the design."""
 
     model_config = ConfigDict(extra="ignore")
@@ -64,7 +66,7 @@ class Artifact(BaseModel):
     )
 
 
-class ComponentDesign(BaseModel):
+class ComponentDesign(LLMOutputModel):
     """Design specification for a system component."""
 
     model_config = ConfigDict(extra="ignore")
@@ -95,7 +97,7 @@ class ComponentDesign(BaseModel):
     )
 
 
-class DesignOutput(BaseModel):
+class DesignOutput(LLMOutputModel):
     """Output from design decisions stage.
 
     Captures concrete design choices and their rationale.
