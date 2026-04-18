@@ -171,7 +171,7 @@ print(r.deterministic_score)
 |------|----------|----------|------------------|--------------------|------|
 | streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 96.3 / 96.9 | 5 after semantic-gate (2026-04-18). Prior closure-era peak: 100.0 / 77.3 |
 | ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 98.2 / 70.2 | 5 after semantic-gate (2026-04-18). Closure was shape-only and couldn't lift T2; gate addresses signal-preservation semantics |
-| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 79.50 / 47.5 | 10 (T2 baselined 2026-04-18; semantic gate should run against TS too — pending benchmark) |
+| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 77.6 / 62.0 | 5 after semantic-gate (2026-04-18). Monorepo source-dir fix + null coercion fix unblocked reliable 5/5 runs; A3 dominates (4/5) — gate confirms implementation matches intent but doesn't push reasoning away from easy Shortcode reuse toward dedicated CollectionShare module (same ceiling shape as ranking_explanation) |
 
 T2 numbers backfilled as benchmarks get re-scored under automated Tier-2.
 Note: closure-layer invariants (B9 family, B10, B11) only fire on Python
