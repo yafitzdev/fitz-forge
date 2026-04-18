@@ -148,8 +148,11 @@ print(r.deterministic_score)
 
 | Task | Codebase | Language | Baseline (T1/T2) | After loop (T1/T2) | Runs |
 |------|----------|----------|------------------|--------------------|------|
-| streaming_implementation | fitz-sage | Python | 68.85 / — | 100.0 / 77.3 | 5 (T2 baselined 2026-04-18 at 61.8) |
-| ranking_explanation | fitz-sage | Python | 68.85 / — | 97.08 / — | 10 |
-| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / — | 79.50 / — | 10 |
+| streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 100.0 / 77.3 | 5 (T2 baselined 2026-04-18) |
+| ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 97.08 / 56.5 | 10 (T2 baselined 2026-04-18; gap is semantic ranking-signal preservation, not closure-shape — closure fixes don't apply) |
+| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 79.50 / 47.5 | 10 (T2 baselined 2026-04-18; closure invariants are Python-only, no TS port yet) |
 
 T2 numbers backfilled as benchmarks get re-scored under automated Tier-2.
+Note: closure-layer invariants (B9 family, B10, B11) only fire on Python
+artifacts. Languages other than Python need either a tree-sitter
+shape port of `closure.py` or task-specific deterministic checks.
