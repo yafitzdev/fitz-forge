@@ -25,22 +25,31 @@ For each decision, specify:
 4. Then SCOPE decisions: "What is out of scope for v1?" can reference earlier decisions.
 5. Finally TECHNICAL decisions: implementation details depend on all above.
 
-## Pattern decisions must evaluate build-new vs extend-existing
+## Pattern decisions must evaluate build-new vs extend-existing — when applicable
 
-Before asking *how* to extend an existing mechanism, the first PATTERN decision must ask *whether* a new module is warranted. Skipping this step locks the plan onto whatever existing class happens to be semantically nearest — even when a dedicated module would be cleaner.
+The build-new-vs-extend question applies when the task introduces a **new capability concept** (sharing, explainability, auth, billing) that could plausibly live in its own module with its own data model. Without this explicit meta-question, the plan will anchor onto whatever existing class happens to be semantically nearest and miss cleaner architectural separations.
 
-A pattern decision is ALLOWED to propose candidate new files/modules that do not yet exist in the manifest. Subsequent design decisions then name those new paths directly. Resolution still reads 1-3 files from the manifest to evaluate the tradeoff (typically the nearest existing mechanism, so the resolver can compare cost of extension vs cost of a new module).
+**SKIP this question and proceed directly to interface decisions when the task is clearly adding new BEHAVIOR to an existing class** (streaming on an engine, caching on a repository, metrics on a service, pagination on a query). In those cases the capability is a method/feature on a known surface — proposing a parallel module would be over-engineering and produces worse plans.
+
+How to tell which camp a task is in:
+- Could the task's capability name plausibly be a module name (e.g. "CollectionShare", "RankingExplainer", "AuthProvider")? → **new-capability concept**, ASK the build-new question as d1.
+- Is the task a new method on a specific known class (e.g. "stream_answer on Engine", "cache_lookup on Repository")? → **behavior-on-existing**, SKIP the build-new question; start with interface decisions on that class.
+
+Use the user prompt to decide: if it names a specific existing class/file as the thing to modify, it is extension territory. If it names a new capability without pinning an owner, it is new-capability territory.
+
+A pattern decision IS ALLOWED to propose candidate new files/modules that do not yet exist in the manifest (when the new-capability case applies). Subsequent design decisions then name those new paths directly. Resolution still reads 1-3 files from the manifest to evaluate the tradeoff (typically the nearest existing mechanism).
 
 Good pattern decisions look like:
-- "Should collection sharing live in a new `collection-share` module with its own Prisma model, or as new fields on the existing `Shortcode` model in `prisma/schema.prisma`?"
-- "Should ranking explanations be added as a new `RankingExplainer` service, or as `metadata` enrichment on the existing `Address` / `Ranker` pipeline?"
-- "Should streaming be a new `StreamingEngine` wrapper, or new methods on the existing `Engine` class in `engine.py`?"
+- (new-capability case) "Should collection sharing live in a new `collection-share` module with its own Prisma model, or as new fields on the existing `Shortcode` model in `prisma/schema.prisma`?"
+- (new-capability case) "Should ranking explanations be added as a new `RankingExplainer` service, or as `metadata` enrichment on the existing `Address` / `Ranker` pipeline?"
+- (behavior-on-existing case) "What is the signature of the new `stream_answer` method on `Engine` in `engine.py`, and where does it hook into the existing pipeline?"
 
 Bad pattern decisions look like:
-- "How should the relationship between `Shortcode` and `Collection` be modeled in `prisma/schema.prisma`?" (pre-commits to extending Shortcode)
+- "How should the relationship between `Shortcode` and `Collection` be modeled in `prisma/schema.prisma`?" (pre-commits to extending Shortcode for a new-capability task)
 - "What is the method signature for a new `createCollectionShortcode` method in `shortcode.service.ts`?" (interface decision disguised as pattern — the mechanism is already chosen)
+- "Should streaming live in a new `StreamingEngine` module or extend existing `Engine`?" (over-asking for a behavior-on-existing task where the user prompt already names `Engine` as the host)
 
-Only once the build-new-vs-extend axis is resolved can you ask interface and integration questions, and only relative to the chosen mechanism.
+Only once the mechanism is settled (either via the build-new decision OR directly because the host class is obvious) can you ask interface and integration questions.
 
 ## Downstream decisions must not pre-commit to an upstream branch
 
