@@ -581,46 +581,53 @@ def extract_init_self_attrs(
         if t:
             attrs[target.text.decode("utf-8")] = t
 
-    init_def = _find_method(class_def, "__init__")
-    if init_def is None:
-        return attrs
-
-    param_types = _init_param_types(init_def)
-
-    # Walk the init body for self.* assignments (including nested blocks,
-    # matching ast.walk). Nested function_definitions are skipped by
-    # _iter_body_skipping_nested.
-    for stmt in _iter_body_skipping_nested(init_def):
-        if stmt.type != "assignment":
-            continue
-        target, type_ann, value = _annotated_assignment_parts(stmt)
-        if target is None:
-            continue
-        attr_name = _attribute_self_target(target) if target.type == "attribute" else None
-        if attr_name is None:
+    # Walk __init__ AND any conventional init-helper methods (B16). Many
+    # production classes defer attribute setup to a helper called from
+    # __init__ (`_init_components`, `setup`, etc.); walking only __init__
+    # silently misses every attribute assigned in those helpers, breaking
+    # downstream type-tracking (closure invariants, etc.).
+    later_method_names = ("_init_components", "setup", "_setup")
+    for method_name in ("__init__", *later_method_names):
+        init_def = _find_method(class_def, method_name)
+        if init_def is None:
             continue
 
-        # self._x: T = ...  (annotated assignment wins over value inference)
-        if type_ann is not None:
-            t = extract_type_name(type_ann)
-            if t:
-                attrs[attr_name] = t
+        param_types = _init_param_types(init_def)
+
+        # Walk the body for self.* assignments (including nested blocks,
+        # matching ast.walk). Nested function_definitions are skipped by
+        # _iter_body_skipping_nested.
+        for stmt in _iter_body_skipping_nested(init_def):
+            if stmt.type != "assignment":
+                continue
+            target, type_ann, value = _annotated_assignment_parts(stmt)
+            if target is None:
+                continue
+            attr_name = _attribute_self_target(target) if target.type == "attribute" else None
+            if attr_name is None:
                 continue
 
-        if value is None:
-            continue
+            # self._x: T = ...  (annotated assignment wins over value inference)
+            if type_ann is not None:
+                t = extract_type_name(type_ann)
+                if t:
+                    attrs[attr_name] = t
+                    continue
 
-        # self._x = some_param
-        if value.type == "identifier":
-            pname = value.text.decode("utf-8")
-            if pname in param_types:
-                attrs[attr_name] = param_types[pname]
+            if value is None:
                 continue
-        # self._x = ClassName(...) / module.ClassName(...) / ClassName.from_x(...)
-        if value.type == "call":
-            cname = class_name_of_expr(value)
-            if cname and (known_classes is None or cname in known_classes):
-                attrs[attr_name] = cname
+
+            # self._x = some_param
+            if value.type == "identifier":
+                pname = value.text.decode("utf-8")
+                if pname in param_types:
+                    attrs[attr_name] = param_types[pname]
+                    continue
+            # self._x = ClassName(...) / module.ClassName(...) / ClassName.from_x(...)
+            if value.type == "call":
+                cname = class_name_of_expr(value)
+                if cname and (known_classes is None or cname in known_classes):
+                    attrs[attr_name] = cname
 
     return attrs
 
