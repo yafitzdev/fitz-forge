@@ -169,9 +169,9 @@ print(r.deterministic_score)
 
 | Task | Codebase | Language | Baseline (T1/T2) | After loop (T1/T2) | Runs |
 |------|----------|----------|------------------|--------------------|------|
-| streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 100.0 / 77.3 | 5 (T2 baselined 2026-04-18) |
-| ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 97.08 / 56.5 | 10 (T2 baselined 2026-04-18; gap is semantic ranking-signal preservation, not closure-shape — closure fixes don't apply) |
-| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 79.50 / 47.5 | 10 (T2 baselined 2026-04-18; closure invariants are Python-only, no TS port yet) |
+| streaming_implementation | fitz-sage | Python | 68.85 / 61.8 | 96.3 / 96.9 | 5 after semantic-gate (2026-04-18). Prior closure-era peak: 100.0 / 77.3 |
+| ranking_explanation | fitz-sage | Python | 68.85 / 56.5 | 98.2 / 70.2 | 5 after semantic-gate (2026-04-18). Closure was shape-only and couldn't lift T2; gate addresses signal-preservation semantics |
+| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / 47.5 | 79.50 / 47.5 | 10 (T2 baselined 2026-04-18; semantic gate should run against TS too — pending benchmark) |
 
 T2 numbers backfilled as benchmarks get re-scored under automated Tier-2.
 Note: closure-layer invariants (B9 family, B10, B11) only fire on Python
