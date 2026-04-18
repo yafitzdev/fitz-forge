@@ -1,9 +1,22 @@
 # B9 — Engine stream method calls blocking `generate()` instead of `stream_generate()`
 
-**Status:** open — partial fix landed, blocked by B15
+**Status:** resolved
 **Impact:** 10/10
 **Opened:** 2026-04-17
-**Last update:** 2026-04-17 — see "Implementation status" section below
+**Closed:** 2026-04-18
+
+**Fix:** Closure-set check `_StreamingSiblingScanner` (commits 35918a9 +
+5a15949) detects streaming methods that call blocking siblings on the
+same class. Required B15 (extract_provides surgical-class ownership),
+B16 (extract_init_self_attrs walks init helper methods), and B17
+(yielded-names walks complex yield expressions) to fire on production
+code shapes. Repair strategy: regenerate offending artifact with
+targeted feedback naming the streaming variant.
+
+**Validation:** Fresh 5-plan benchmark on streaming_implementation
+(run_031). Tier-1 avg 100.0/100, Tier-2 avg 77.3/100 (was 97.7/61.8).
+Architecture distribution: A1×4, A4×1 (was A4-dominant 14/30).
+engine.py: 5/5 classified E1.
 **Source:** Tier-2 Sonnet scoring of run_021 (30 plans, streaming_implementation)
 
 ## Symptom

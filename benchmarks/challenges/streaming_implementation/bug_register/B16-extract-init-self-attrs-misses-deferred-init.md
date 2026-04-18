@@ -1,8 +1,19 @@
 # B16 — `extract_init_self_attrs` misses self-attrs assigned in init helper methods
 
-**Status:** open
-**Impact:** 9/10 (blocks B9 even after B15 — third compounded blocker)
+**Status:** resolved
+**Impact:** 9/10 (blocked B9 even after B15)
 **Opened:** 2026-04-18
+**Closed:** 2026-04-18
+
+**Fix:** `extract_init_self_attrs` now walks `__init__` AND
+`_init_components` / `setup` / `_setup` (the same convention tuple
+used by the newer `iter_init_self_assignments` helper). Later methods
+override earlier ones so a final binding in `_init_components` wins
+over a placeholder in `__init__`. Backward-compatible — classes
+without init helpers behave identically.
+
+**Validation:** Direct repro: `_synthesizer = CodeSynthesizer` now
+resolves correctly (was missing). End-to-end via run_031 benchmark.
 
 ## Symptom
 

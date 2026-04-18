@@ -146,8 +146,10 @@ print(r.deterministic_score)
 
 ## Track record
 
-| Task | Codebase | Language | Baseline | After loop | Runs |
-|------|----------|----------|----------|------------|------|
-| streaming_implementation | fitz-sage | Python | 68.85 | 97.70 | 30 |
-| ranking_explanation | fitz-sage | Python | 68.85 | 97.08 | 10 |
-| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 | 79.50 | 10 |
+| Task | Codebase | Language | Baseline (T1/T2) | After loop (T1/T2) | Runs |
+|------|----------|----------|------------------|--------------------|------|
+| streaming_implementation | fitz-sage | Python | 68.85 / — | 100.0 / 77.3 | 5 (T2 baselined 2026-04-18 at 61.8) |
+| ranking_explanation | fitz-sage | Python | 68.85 / — | 97.08 / — | 10 |
+| hoppscotch_sharing | hoppscotch | TypeScript | 71.86 / — | 79.50 / — | 10 |
+
+T2 numbers backfilled as benchmarks get re-scored under automated Tier-2.
