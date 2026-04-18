@@ -25,12 +25,30 @@ For each decision, specify:
 4. Then SCOPE decisions: "What is out of scope for v1?" can reference earlier decisions.
 5. Finally TECHNICAL decisions: implementation details depend on all above.
 
+## Pattern decisions must evaluate build-new vs extend-existing
+
+Before asking *how* to extend an existing mechanism, the first PATTERN decision must ask *whether* a new module is warranted. Skipping this step locks the plan onto whatever existing class happens to be semantically nearest — even when a dedicated module would be cleaner.
+
+A pattern decision is ALLOWED to propose candidate new files/modules that do not yet exist in the manifest. Subsequent design decisions then name those new paths directly. Resolution still reads 1-3 files from the manifest to evaluate the tradeoff (typically the nearest existing mechanism, so the resolver can compare cost of extension vs cost of a new module).
+
+Good pattern decisions look like:
+- "Should collection sharing live in a new `collection-share` module with its own Prisma model, or as new fields on the existing `Shortcode` model in `prisma/schema.prisma`?"
+- "Should ranking explanations be added as a new `RankingExplainer` service, or as `metadata` enrichment on the existing `Address` / `Ranker` pipeline?"
+- "Should streaming be a new `StreamingEngine` wrapper, or new methods on the existing `Engine` class in `engine.py`?"
+
+Bad pattern decisions look like:
+- "How should the relationship between `Shortcode` and `Collection` be modeled in `prisma/schema.prisma`?" (pre-commits to extending Shortcode)
+- "What is the method signature for a new `createCollectionShortcode` method in `shortcode.service.ts`?" (interface decision disguised as pattern — the mechanism is already chosen)
+
+Only once the build-new-vs-extend axis is resolved can you ask interface and integration questions, and only relative to the chosen mechanism.
+
 ## Chain completeness rule
 
 When the task adds new behavior at an entry point (API route, CLI command, SDK method), trace the FULL call chain from the entry point to the implementation layer using the call graph edges. Generate a decision for EACH file in the chain. Skipping a middle layer (e.g., a service wrapper between a route and an engine) creates an impossible implementation gap — the entry point can't call methods that don't exist on its direct dependency.
 
 ## Good decisions look like:
-- "What existing method in `module.py` should be extended/wrapped for the new capability?"
+- "Should capability X live in a new module or as an extension of `module.py`?" (pattern; names both alternatives)
+- "What existing method in `module.py` should be extended/wrapped for the new capability?" (interface; valid *after* the pattern chose extension)
 - "What is the return type contract for the new interface on `core.py`?"
 - "How does the validation in `middleware.py` interact with the proposed change?"
 
@@ -38,6 +56,7 @@ When the task adds new behavior at an entry point (API route, CLI command, SDK m
 - "How should we implement the feature?" (too vague, not answerable from 1-3 files)
 - "What is the best approach?" (should be split into pattern + interface + integration)
 - "Should we use async?" (yes/no questions don't produce useful constraints)
+- "How should ExistingClass be extended?" as the FIRST pattern decision (pre-commits to extension without evaluating alternatives)
 
 Respond with ONLY valid JSON matching this schema:
 {{
