@@ -7,6 +7,7 @@ After max_attempts, returns a failure with the reason.
 """
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +22,7 @@ from .closure import (
     route_missing_symbol,
 )
 from .context import assemble_context
+from .semantic_review import Discrepancy, format_feedback, semantic_review
 from .strategy import (
     ArtifactStrategy,
     NewCodeStrategy,
@@ -313,6 +315,11 @@ class ArtifactSetResult:
     `results` is always returned. `closed=True` means the closure invariant
     holds over the final set. `closure_violations` lists remaining unsatisfied
     references when `closed=False`.
+
+    `semantic_review_iterations` counts semantic-review passes (0 when the
+    gate is disabled or had nothing to review).
+    `semantic_review_matched` is True when the final review pass returned
+    matches_intent=True (or the gate was skipped — no contradictions known).
     """
 
     results: list[ArtifactResult]
@@ -320,6 +327,9 @@ class ArtifactSetResult:
     closure_violations: list[ClosureViolation] = field(default_factory=list)
     repair_iterations: int = 0
     expanded_files: list[str] = field(default_factory=list)  # files added by repair
+    semantic_review_iterations: int = 0
+    semantic_review_matched: bool = True
+    semantic_review_discrepancies: list[Discrepancy] = field(default_factory=list)
 
     def as_artifact_dicts(self) -> list[dict[str, Any]]:
         """Convert successful results to the {filename, content, purpose, strategy}
@@ -351,19 +361,29 @@ async def generate_artifact_set(
     reasoning: str,
     prior_outputs: dict[str, Any] | None = None,
     max_repair_iters: int = 2,
+    resolved_decisions: list[dict[str, Any]] | None = None,
+    max_semantic_iters: int = 2,
 ) -> ArtifactSetResult:
     """Batch-level black box. Generate a closed, implementable artifact set.
 
-    Internally calls `generate_artifact` for each spec, then runs the plan-level
-    closure check. If any cross-file reference is unsatisfied, attempts to
-    repair by either:
-      1. Expanding the set — generate a new artifact for the file that should
-         own the missing symbol (e.g. `services/fitz_service.py` to add
-         `query_stream` when a route artifact references it).
-      2. (V1: not yet) Regenerating the violating artifact with feedback.
+    Two gates run after per-artifact generation:
 
-    Returns an ArtifactSetResult with the full set, closure status, and any
-    remaining violations.
+    1. **Closure pass** (deterministic) — catches parse/shape failures and
+       cross-file name existence. Cheap; runs first so the semantic gate
+       doesn't pay for obviously-broken artifacts. Repairs via set-expansion
+       (adding a missing sibling artifact) or per-artifact regeneration
+       with concrete signatures.
+    2. **Semantic review** (LLM) — reads reasoning + resolved decisions +
+       every artifact together and asks the same local model for
+       contradictions between design intent and produced code. Discrepancies
+       route back into regeneration with natural-language feedback.
+
+    The semantic gate is disabled when `max_semantic_iters <= 0` (tests,
+    dry runs). With `resolved_decisions=None` the gate still runs but with
+    no decision list — the reasoning text alone drives detection.
+
+    Returns an ArtifactSetResult with the full set, closure status, semantic
+    status, and any remaining violations.
 
     Synthesis stage uses `result.as_artifact_dicts()` to get the final clean
     set in its existing format.
@@ -401,8 +421,11 @@ async def generate_artifact_set(
 
     expanded_files: list[str] = []
     violations: list[ClosureViolation] = []
+    closure_closed = False
+    closure_iters = 0
 
     for iter_idx in range(max_repair_iters + 1):
+        closure_iters = iter_idx
         # Include strategy so closure analysis can use the canonical
         # surgical-vs-new_code classification instead of a content-shape
         # heuristic (see B15).
@@ -419,21 +442,17 @@ async def generate_artifact_set(
         violations = check_closure(artifact_dicts, lookup, source_dir=source_dir)
 
         if not violations:
+            closure_closed = True
             if iter_idx > 0:
                 logger.info(
                     "artifact_set: closure reached after %d repair iteration(s)",
                     iter_idx,
                 )
-            return ArtifactSetResult(
-                results=results,
-                closed=True,
-                closure_violations=[],
-                repair_iterations=iter_idx,
-                expanded_files=expanded_files,
-            )
+            break
 
         if iter_idx >= max_repair_iters:
-            # Out of repair budget — return with unclosed set.
+            # Out of repair budget — continue to semantic review with an
+            # unclosed set rather than returning early.
             break
 
         logger.info(
@@ -588,18 +607,136 @@ async def generate_artifact_set(
                     regen_result.failure_reason,
                 )
 
-    # Exhausted repair budget or had no routable repairs.
-    logger.warning(
-        "artifact_set: returning unclosed set (%d violation(s) remain after %d iter(s))",
-        len(violations),
-        max_repair_iters,
-    )
-    for v in violations[:10]:
-        logger.warning("artifact_set: unclosed: %s", v.pretty())
+    if not closure_closed:
+        logger.warning(
+            "artifact_set: closure unclosed (%d violation(s) remain after %d iter(s))",
+            len(violations),
+            closure_iters,
+        )
+        for v in violations[:10]:
+            logger.warning("artifact_set: unclosed: %s", v.pretty())
+
+    # Phase 3 — semantic-review gate.
+    #
+    # Closure only sees shape/name invariants. The semantic gate reads
+    # reasoning + decisions + every artifact together and reports
+    # contradictions between design intent and produced code — set-level
+    # by construction, no AST shape matching. Discrepancies route back
+    # through `generate_artifact` for regeneration with natural-language
+    # feedback.
+    semantic_iters = 0
+    semantic_matched = True
+    last_discrepancies: list[Discrepancy] = []
+
+    if max_semantic_iters > 0 and any(r.success for r in results):
+        decisions_for_review: list[dict[str, Any]] = resolved_decisions or []
+
+        for review_iter in range(max_semantic_iters):
+            current_artifact_dicts = [
+                {
+                    "filename": r.filename,
+                    "content": r.content,
+                    "purpose": r.purpose,
+                    "strategy": r.strategy,
+                }
+                for r in results
+                if r.success
+            ]
+            if not current_artifact_dicts:
+                break
+
+            review = await semantic_review(
+                reasoning=reasoning,
+                decisions=decisions_for_review,
+                artifacts=current_artifact_dicts,
+                client=client,
+            )
+            semantic_iters = review_iter + 1
+            semantic_matched = review.matches_intent
+            last_discrepancies = review.discrepancies
+
+            if review.matches_intent:
+                logger.info(
+                    "semantic_review: matches design intent after %d iter(s)",
+                    semantic_iters,
+                )
+                break
+
+            by_file: dict[str, list[Discrepancy]] = defaultdict(list)
+            for d in review.discrepancies:
+                by_file[d.file].append(d)
+
+            logger.info(
+                "semantic_review: %d discrepancy(ies) across %d file(s), regenerating (iter %d)",
+                len(review.discrepancies),
+                len(by_file),
+                semantic_iters,
+            )
+            for d in review.discrepancies[:5]:
+                logger.info(
+                    "  %s:%d — intent: %s | actual: %s",
+                    d.file,
+                    d.line,
+                    d.intent[:80],
+                    d.actual[:80],
+                )
+
+            for filename, discs in by_file.items():
+                offender_idx = next(
+                    (
+                        i
+                        for i, r in enumerate(results)
+                        if r.filename == filename and r.success
+                    ),
+                    None,
+                )
+                if offender_idx is None:
+                    logger.info(
+                        "semantic_review: %s not in result set — skipping regen", filename
+                    )
+                    continue
+                old_result = results[offender_idx]
+                feedback = format_feedback(discs)
+                regen_purpose = f"{old_result.purpose}\n\n{feedback}"
+                regen_decisions = (
+                    decisions_for(filename)
+                    if callable(decisions_for)
+                    else str(decisions_for or "")
+                )
+                regen_result = await generate_artifact(
+                    client=client,
+                    filename=filename,
+                    purpose=regen_purpose,
+                    source_dir=source_dir,
+                    structural_index=structural_index,
+                    decisions=regen_decisions,
+                    reasoning=reasoning,
+                    prior_outputs=prior_outputs,
+                    prior_sigs=prior_sigs if prior_sigs else None,
+                )
+                if regen_result.success:
+                    results[offender_idx] = regen_result
+                else:
+                    logger.warning(
+                        "semantic_review: regen of %s failed — %s",
+                        filename,
+                        regen_result.failure_reason,
+                    )
+
+        if semantic_iters and not semantic_matched:
+            logger.warning(
+                "semantic_review: %d discrepancy(ies) remain after %d iter(s)",
+                len(last_discrepancies),
+                semantic_iters,
+            )
+
     return ArtifactSetResult(
         results=results,
-        closed=False,
-        closure_violations=violations,
-        repair_iterations=max_repair_iters,
+        closed=closure_closed,
+        closure_violations=[] if closure_closed else violations,
+        repair_iterations=closure_iters,
         expanded_files=expanded_files,
+        semantic_review_iterations=semantic_iters,
+        semantic_review_matched=semantic_matched,
+        semantic_review_discrepancies=last_discrepancies,
     )

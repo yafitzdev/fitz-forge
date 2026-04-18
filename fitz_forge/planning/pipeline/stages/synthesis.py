@@ -2581,6 +2581,7 @@ class SynthesisStage(PipelineStage):
             decisions_for=decisions_for,
             reasoning=reasoning,
             prior_outputs=prior_outputs,
+            resolved_decisions=resolutions,
         )
 
         artifacts = set_result.as_artifact_dicts()
