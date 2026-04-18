@@ -64,9 +64,13 @@ class LMStudioClient(OpenAIApiClient):
     ) -> None:
         """Ensure the requested model is loaded in LM Studio.
 
-        ``lms load`` is a no-op when the target model is already loaded,
-        so we always invoke it and let the CLI decide.
+        Skips the ``lms load`` call when ``lms ps`` already shows the
+        target model loaded — avoids unnecessary CLI work and any
+        re-initialisation cost.
         """
+        if await self._is_loaded_in_lms(model_name):
+            logger.info(f"Model {model_name} already loaded — skipping lms load")
+            return
         await self._load_model_via_cli(model_name)
 
     async def health_check(self) -> bool:
@@ -91,9 +95,44 @@ class LMStudioClient(OpenAIApiClient):
             logger.error(f"LM Studio health check failed: {e}")
             return False
 
-        # ``lms load`` is idempotent — if the model is already loaded
-        # the CLI returns success without restarting it.
+        if await self._is_loaded_in_lms(self.model):
+            logger.info(f"Model {self.model} already loaded — skipping lms load")
+            return True
         return await self._load_model_via_cli(self.model)
+
+    async def _is_loaded_in_lms(self, model_name: str) -> bool:
+        """Return True if ``lms ps`` lists ``model_name`` as currently loaded.
+
+        Returns False if ``lms`` is not on PATH or the call errors — caller
+        falls through to ``lms load``, which will surface any real problem.
+        """
+        lms = shutil.which("lms")
+        if not lms:
+            return False
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [lms, "ps"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception:
+            return False
+        if result.returncode != 0:
+            return False
+        # Each loaded-model row starts with the IDENTIFIER column. Header
+        # row begins with literal "IDENTIFIER".
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("IDENTIFIER", "-")):
+                continue
+            ident = stripped.split()[0] if stripped.split() else ""
+            if ident == model_name:
+                return True
+        return False
 
     async def _load_model_via_cli(self, model_name: str | None = None) -> bool:
         """Load a model via ``lms load``."""
