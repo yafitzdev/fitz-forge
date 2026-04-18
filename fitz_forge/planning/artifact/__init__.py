@@ -15,6 +15,7 @@ from .generator import (
     generate_artifact,
     generate_artifact_set,
 )
+from .semantic_review import Discrepancy, ReviewResult, semantic_review
 from .validate import ArtifactError, validate
 
 __all__ = [
@@ -23,6 +24,8 @@ __all__ = [
     "ArtifactSetResult",
     "ArtifactError",
     "ClosureViolation",
+    "Discrepancy",
+    "ReviewResult",
     "SymbolRef",
     "assemble_context",
     "check_closure",
@@ -30,5 +33,6 @@ __all__ = [
     "extract_references",
     "generate_artifact",
     "generate_artifact_set",
+    "semantic_review",
     "validate",
 ]
