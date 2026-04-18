@@ -109,6 +109,15 @@ below records Tier-1 numbers. Tier-2 baselines will be filled in as
 tasks get re-scored. Expect the initial Tier-2 numbers to be well below
 Tier-1 until the B9-family invariants are enforced.
 
+**2026-04-18 — pivot from closure invariants to semantic-review gate.**
+The B9/B11/B17 closure-shape invariants have been removed and replaced
+by an LLM-based semantic-review pass that reads reasoning + decisions +
+artifacts and reports contradictions. The gate runs inside
+`generate_artifact_set` after the closure pass (closure is kept as a
+cheap deterministic pre-filter). Discrepancies route through the same
+`generate_artifact` regeneration path with natural-language feedback.
+See `fitz_forge/planning/artifact/semantic_review.py`.
+
 ## Commands
 
 ```bash
