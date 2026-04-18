@@ -1,8 +1,9 @@
 # B10 — Service calls fabricated engine method name across artifact boundary
 
-**Status:** open
+**Status:** resolved
 **Impact:** 7/10
 **Opened:** 2026-04-17
+**Closed:** 2026-04-17
 **Source:** Tier-2 Sonnet scoring of run_021 — ~12/30 plans
 
 ## Symptom
@@ -60,3 +61,38 @@ Related to but not the same as B2 (self-method fabrication within one file).
 - On replay, 0/5 plans show this specific cross-artifact drift.
 - Closure report lists concrete violations when they occur (so fixer loop
   can target them).
+
+## Resolution
+
+The B9-family infrastructure (B15 surgical method registration, B16
+deferred-init `self._x` typing, `_build_class_method_set` union of disk
++ siblings) was in place, but the **reference collector** was silently
+dropping `self._attr.method()` call shapes. The condition
+`len(idents) == 0` in `_emit_call`'s `self._attr.method` branch never
+matched because tree-sitter parses the outer attribute as
+`[attribute("self._attr"), identifier("method")]` (idents == 1, not 0).
+
+**Fix (`fitz_forge/planning/artifact/closure.py`):**
+
+1. `_ReferenceCollector._emit_call` — replace `len(idents) == 0` check
+   with the correct shape `len(idents) == 1 and len(inner_attrs) == 1`,
+   matching the streaming-sibling scanner's `_resolve_call_owner`.
+2. `_ReferenceCollector._resolve_call_target` — same fix so iterator-
+   kind propagation through `self._attr.method()` works too.
+3. `_check_existence` — when a missing method's owner class exists
+   (codebase or siblings), enrich the violation with concrete
+   suggestions: top-3 closest method names by Levenshtein distance
+   with shared-prefix bonus (`_close_method_matches`,
+   `_suggest_method_alternatives`).
+
+Worked example violation message:
+
+```
+self._engine.stream_answer() — Engine.stream_answer is not defined on
+Engine. Closest matches: Engine.stream_query.
+```
+
+**Tests:** `tests/unit/test_artifact_closure_cross_artifact_method.py`
+covers all three typing pathways (constructor param, `var =
+ClassName()`, `self._attr`), positive/negative shapes, multi-link
+chain integration, and close-match ordering.

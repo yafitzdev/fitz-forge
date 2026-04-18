@@ -560,28 +560,28 @@ class _ReferenceCollector:
                         )
                     )
                 return
-            # self._attr.method() — attribute of attribute
-            if len(idents) == 0:
-                inner_attr = next((c for c in callee.children if c.type == "attribute"), None)
-                if inner_attr is not None:
-                    inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
-                    if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
-                        attr_name = inner_idents[1].text.decode("utf-8")
-                        t = self.self_attrs.get(attr_name)
-                        method_ident = next(
-                            (c for c in callee.children if c.type == "identifier"), None
-                        )
-                        if t and t not in _SKIP_NAMES and method_ident is not None:
-                            method = method_ident.text.decode("utf-8")
-                            self._emit(
-                                Reference(
-                                    ref=SymbolRef(owner=t, name=method, kind="method"),
-                                    line=line,
-                                    context=f"self.{attr_name}.{method}()",
-                                    usage=usage,
-                                    kwargs=kwargs,
-                                )
+            # self._attr.method() — attribute of attribute. Outer attribute
+            # has children [attribute("self._attr"), identifier("method")],
+            # so idents == 1 (the method-name) and inner_attrs == 1.
+            inner_attrs = [c for c in callee.children if c.type == "attribute"]
+            if len(idents) == 1 and len(inner_attrs) == 1:
+                inner_attr = inner_attrs[0]
+                method_ident = idents[0]
+                inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+                if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
+                    attr_name = inner_idents[1].text.decode("utf-8")
+                    t = self.self_attrs.get(attr_name)
+                    if t and t not in _SKIP_NAMES:
+                        method = method_ident.text.decode("utf-8")
+                        self._emit(
+                            Reference(
+                                ref=SymbolRef(owner=t, name=method, kind="method"),
+                                line=line,
+                                context=f"self.{attr_name}.{method}()",
+                                usage=usage,
+                                kwargs=kwargs,
                             )
+                        )
                 return
             # self.method() — grounding handles; do not emit here
             return
@@ -982,26 +982,25 @@ class _ReferenceCollector:
                     return None
                 ref = SymbolRef(owner=obj_type, name=attr, kind="method")
                 return (ref, self._lookup_return_type(ref), f"{obj_name}.{attr}()")
-            # self._attr.method(...)
-            if len(idents) == 0:
-                inner_attr = next((c for c in callee.children if c.type == "attribute"), None)
-                method_ident = next(
-                    (c for c in callee.children if c.type == "identifier"), None
-                )
-                if inner_attr is not None and method_ident is not None:
-                    inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
-                    if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
-                        attr_name = inner_idents[1].text.decode("utf-8")
-                        method = method_ident.text.decode("utf-8")
-                        attr_type = self.self_attrs.get(attr_name)
-                        if not attr_type or attr_type in _SKIP_NAMES:
-                            return None
-                        ref = SymbolRef(owner=attr_type, name=method, kind="method")
-                        return (
-                            ref,
-                            self._lookup_return_type(ref),
-                            f"self.{attr_name}.{method}()",
-                        )
+            # self._attr.method(...) — outer attribute is
+            # [attribute("self._attr"), identifier("method")].
+            inner_attrs = [c for c in callee.children if c.type == "attribute"]
+            if len(idents) == 1 and len(inner_attrs) == 1:
+                inner_attr = inner_attrs[0]
+                method_ident = idents[0]
+                inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
+                if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
+                    attr_name = inner_idents[1].text.decode("utf-8")
+                    method = method_ident.text.decode("utf-8")
+                    attr_type = self.self_attrs.get(attr_name)
+                    if not attr_type or attr_type in _SKIP_NAMES:
+                        return None
+                    ref = SymbolRef(owner=attr_type, name=method, kind="method")
+                    return (
+                        ref,
+                        self._lookup_return_type(ref),
+                        f"self.{attr_name}.{method}()",
+                    )
             return None
 
         # top_level_func(...)
@@ -1321,6 +1320,71 @@ def _is_awaitable_type(return_type: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _close_method_matches(
+    target: str, candidates: "Iterator[str] | list[str] | set[str]", limit: int = 3
+) -> list[str]:
+    """Top-`limit` closest method-name matches by edit distance.
+
+    Used to enrich missing-method violations with concrete suggestions
+    ("did you mean X?"). Pure name comparison — no semantics, no
+    type-system assumptions, so it works for any language.
+    """
+    if not target:
+        return []
+    cands = [c for c in candidates if c and c != target]
+    if not cands:
+        return []
+    scored: list[tuple[int, str]] = []
+    for c in cands:
+        d = _levenshtein(target, c)
+        # Tighter shared-prefix bonus so siblings like ``stream_query`` rank
+        # ahead of unrelated methods when the offender is ``stream_answer``.
+        prefix = 0
+        for a, b in zip(target, c, strict=False):
+            if a == b:
+                prefix += 1
+            else:
+                break
+        scored.append((d - prefix, c))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [name for _, name in scored[:limit]]
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Iterative Levenshtein distance — small inputs, no need for numpy."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(cur[-1] + 1, prev[j] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
+
+
+def _suggest_method_alternatives(
+    owner: str,
+    method_name: str,
+    lookup: StructuralIndexLookup,
+    sibling_provides: dict[SymbolRef, Signature | None],
+) -> list[str]:
+    """All method names defined on `owner` (siblings ∪ disk source)."""
+    methods: set[str] = set()
+    for ref in sibling_provides:
+        if ref.kind == "method" and ref.owner == owner and ref.name:
+            methods.add(ref.name)
+    for cls in lookup.classes.get(owner, []):
+        for m in cls.methods:
+            methods.add(m)
+    return _close_method_matches(method_name, methods)
+
+
 def _check_existence(
     reference: Reference,
     artifact_file: str,
@@ -1338,13 +1402,41 @@ def _check_existence(
         for sib in sibling_provides:
             if sib.owner == reference.ref.owner:
                 return None
+
+    detail = reference.context
+    # For missing methods on a class that DOES exist (codebase or sibling),
+    # surface the actual method names so the model can pick the right one.
+    # Fixes the "method-name drift" class of bugs where one artifact calls
+    # `engine.stream_answer` but the sibling engine artifact provides only
+    # `stream_query` — pure spelling drift that's invisible per-artifact.
+    if reference.ref.kind == "method" and reference.ref.owner and reference.ref.name:
+        owner = reference.ref.owner
+        owner_exists = lookup.class_exists(owner) or any(
+            sib.owner == owner for sib in sibling_provides
+        )
+        if owner_exists:
+            close = _suggest_method_alternatives(
+                owner, reference.ref.name, lookup, sibling_provides
+            )
+            if close:
+                joined = ", ".join(f"{owner}.{m}" for m in close)
+                detail = (
+                    f"{reference.context} — {owner}.{reference.ref.name} is not "
+                    f"defined on {owner}. Closest matches: {joined}."
+                )
+            else:
+                detail = (
+                    f"{reference.context} — {owner}.{reference.ref.name} is not "
+                    f"defined on {owner} (class has no methods of similar name)."
+                )
+
     return ClosureViolation(
         artifact=artifact_file,
         ref=reference.ref,
         line=reference.line,
         context=reference.context,
         kind="missing" if reference.ref.kind != "import_name" else "import",
-        detail=reference.context,
+        detail=detail,
     )
 
 
