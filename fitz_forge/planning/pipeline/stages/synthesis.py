@@ -42,6 +42,7 @@ from fitz_forge.planning.reviews import (
     format_issues_feedback,
     review_architecture,
     review_assumptions,
+    review_design,
 )
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
@@ -4067,6 +4068,88 @@ class SynthesisStage(PipelineStage):
             lines.append("")
         return "\n".join(lines)
 
+    async def _senior_design_review_pass(
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
+        design: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Senior-engineer critique of the design section.
+
+        MVP: detection + surface. When the review finds under-specified
+        interfaces, rubric-missing detail, or missing components, the
+        issues are attached to design.review_findings so the downstream
+        coder sees the gaps. Regeneration of design (re-extract with
+        feedback, or rewrite reasoning + re-extract) is a follow-up
+        once we have a clean regeneration mechanism.
+        """
+        if not design:
+            return design
+        has_content = bool(
+            design.get("components")
+            or design.get("data_model")
+            or design.get("adrs")
+            or design.get("artifacts")
+        )
+        if not has_content:
+            return design
+
+        rubric_hints = prior_outputs.get("_rubric_hints") or None
+        gathered = self._get_gathered_context(prior_outputs) or ""
+
+        try:
+            review = await review_design(
+                task_description=job_description,
+                design=design,
+                client=client,
+                rubric_hints=rubric_hints,
+                gathered_context=gathered,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': design review errored ({e}); "
+                "no findings recorded"
+            )
+            return design
+
+        if review.passed:
+            logger.info(
+                f"Stage '{self.name}': design review passed "
+                f"({len(design.get('components') or [])} component(s), "
+                f"{len(design.get('artifacts') or [])} artifact(s))"
+            )
+            return design
+
+        logger.info(
+            f"Stage '{self.name}': design review found "
+            f"{review.issue_count} issue(s); attaching as review_findings"
+        )
+        for issue in review.issues[:5]:
+            logger.info(
+                "  %s — %s | %s",
+                issue.target,
+                issue.intent[:80],
+                issue.actual[:80],
+            )
+
+        findings = [
+            {
+                "scope": issue.scope,
+                "target": issue.target,
+                "intent": issue.intent,
+                "actual": issue.actual,
+                "suggestion": issue.suggestion,
+            }
+            for issue in review.issues
+        ]
+        existing_findings = design.get("review_findings") or []
+        design = {
+            **design,
+            "review_findings": existing_findings + findings,
+        }
+        return design
+
     async def _senior_assumption_review_pass(
         self,
         client: Any,
@@ -4631,6 +4714,21 @@ class SynthesisStage(PipelineStage):
             design_merged.setdefault("integration_points", [])
             design_merged.setdefault("artifacts", [])
             design = DesignOutput(**design_merged).model_dump()
+
+            # Senior-engineer design review (MVP: detect + surface).
+            # Fires before artifact generation so under-specified
+            # interfaces, rubric-missing detail, and missing components
+            # are caught when they can still influence downstream
+            # stages. Findings land on design.review_findings for the
+            # downstream coder; regeneration is a follow-up once the
+            # mechanism is battle-tested (see
+            # docs/senior-engineer-todo/).
+            design = await self._senior_design_review_pass(
+                client=client,
+                job_description=job_description,
+                prior_outputs=prior_outputs,
+                design=design,
+            )
 
             # Fix roadmap
             from fitz_forge.planning.pipeline.stages.roadmap_risk import (
