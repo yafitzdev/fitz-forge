@@ -139,25 +139,30 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 <br>
 
-#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · baseline n=1, harness n=5
+#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · n=5 per arm
 
 | Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge | Δ |
 |---|---:|---:|---:|
-| **Tier-1** (deterministic code quality) | 85.5 | **99.8** | +14.3 |
-| **Tier-2** (architectural correctness, mean) | 50.0 | **89.5** | +39.5 |
-| Tier-2 range | — | 72.5 – 100 (4/5 ≥ 87.5) | |
-| Architecture tier | **A5** (NotImplementedError-class) | **A1 × 4, A2 × 1** (full pipeline + streaming) | up to 5 tiers ↑ |
-| Files covered | 3 / 5 | 6–8 / 5 per plan | |
-| Latency | 28s | ~12 min | ~25× |
+| **Tier-1** (deterministic code quality, mean) | 94.5 | **99.8** | +5.3 |
+| **Tier-2** (architectural correctness, mean) | 38.8 | **89.5** | +50.7 |
+| Tier-2 range | 6.25 – 62.5 | 72.5 – 100 | |
+| Architecture distribution | A5 × 3, A2 × 2 | **A1 × 4**, A2 × 1 | |
+| engine.py fidelity | **E6 × 5** (absent from every plan) | **E1 × 5** (top tier, all 5) | |
+| Files covered per plan | 3 / 5 | 6–8 / 5 | |
+| Latency per plan | ~30s | ~12 min | ~25× |
 
 <br>
 
-**What changed:** the raw LLM touched only the surface files it could see in one shot (the route handler, the SDK entry, the `Answer` type) and produced a plausible-looking but architecturally-broken plan — classified A5 because the full RAG pipeline was never replicated for the streaming path. The harness decomposed the task, traced the call chain, and produced coherent changes across `engine.py`, `synthesizer.py`, `providers/base.py`, `services/fitz_service.py`, and the dependency wiring — 4 of 5 runs hit **A1** (the ideal: full pipeline + `generate_stream` through the synthesizer), the 5th hit A2 (one tier below — streams at the provider instead of through the synthesizer).
+**What the raw LLM does:** in a single prompt, the model touches whatever surface files it can see — the route handler, the SDK entry, the `Answer` type — and ships that as a plan. Across 5 runs, **every baseline plan skipped `engine.py` entirely** (scored E6 = "absent from plan"), and the architecture scorer classified 3 runs as A5 (gave up — NotImplementedError-class) and 2 as A2 (partial pipeline). Zero A1s. The single-run variance is huge (T2 range 6.25–62.5) — sometimes the model commits to a shape, sometimes it bails.
+
+**What the harness does:** decomposes the task, traces the call chain, and regenerates under review pressure at every stage boundary. All 5 runs produced `engine.py` (E1 × 5 — top tier every time), all 5 produced `synthesizer.py`, 4/5 reached the ideal A1 architecture (`answer_stream` replicating the full pipeline and calling `generate_stream` through the synthesizer), 1/5 hit A2.
+
+**+50.7 T2 points mean, but the shape matters more than the number:** raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain. And on T1 (pure code quality on whatever files do get produced) the gap is modest — 94.5 vs 99.8 — because the raw LLM writes decent code, it just doesn't write enough of it.
 
 <br>
 
 > [!NOTE]
-> Single-run variance on these benchmarks is ~±15 T2 points — the first harness run scored 72.5 on its own, which looked deflating until the other four (100, 87.5, 87.5, 100) showed it was the low tail of a distribution whose mean is 89.5. We're keeping the 5-plan harness mean + 1-plan baseline asymmetry for now; baseline variance will be filled in as the matrix grows across tasks and models. The takeaway isn't the exact delta, it's the *shape* of the gap: raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain.
+> Single-run variance on these benchmarks is ~±15 T2 points for the harness arm and much larger for the raw arm. Means are the right thing to report. One run is a data point, not a headline.
 
 <br>
 
