@@ -139,24 +139,25 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 <br>
 
-#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · 1 run each
+#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · baseline n=1, harness n=5
 
 | Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge | Δ |
 |---|---:|---:|---:|
-| **Tier-1** (deterministic code quality) | 85.5 | **100.0** | +14.5 |
-| **Tier-2** (architectural correctness) | 50.0 | **72.5** | +22.5 |
-| Architecture tier | **A5** (NotImplementedError-class) | **A2** (full pipeline + streaming) | 4 tiers ↑ |
-| Files covered | 3 / 5 | 8 / 5 | +5 |
-| Latency | 28s | 686s | 24× |
+| **Tier-1** (deterministic code quality) | 85.5 | **99.8** | +14.3 |
+| **Tier-2** (architectural correctness, mean) | 50.0 | **89.5** | +39.5 |
+| Tier-2 range | — | 72.5 – 100 (4/5 ≥ 87.5) | |
+| Architecture tier | **A5** (NotImplementedError-class) | **A1 × 4, A2 × 1** (full pipeline + streaming) | up to 5 tiers ↑ |
+| Files covered | 3 / 5 | 6–8 / 5 per plan | |
+| Latency | 28s | ~12 min | ~25× |
 
 <br>
 
-**What changed:** the raw LLM touched only the surface files it could see in one shot (the route handler, the SDK entry, the `Answer` type) and produced a plausible-looking but architecturally-broken plan — classified A5 because the full RAG pipeline was never replicated for the streaming path. The harness decomposed the task, traced the call chain, and produced coherent changes across `engine.py`, `synthesizer.py`, `providers/base.py`, `services/fitz_service.py`, and the dependency wiring — landing at A2 (one tier below the ideal, which would also stream *through* the synthesizer instead of directly at the provider).
+**What changed:** the raw LLM touched only the surface files it could see in one shot (the route handler, the SDK entry, the `Answer` type) and produced a plausible-looking but architecturally-broken plan — classified A5 because the full RAG pipeline was never replicated for the streaming path. The harness decomposed the task, traced the call chain, and produced coherent changes across `engine.py`, `synthesizer.py`, `providers/base.py`, `services/fitz_service.py`, and the dependency wiring — 4 of 5 runs hit **A1** (the ideal: full pipeline + `generate_stream` through the synthesizer), the 5th hit A2 (one tier below — streams at the provider instead of through the synthesizer).
 
 <br>
 
 > [!NOTE]
-> **Read this as a single data point, not a headline number.** One run each, one model, one task. The real study is the matrix — multiple runs × multiple tasks × multiple local models — that grows here as we extend it. The takeaway isn't "+22.5 points," it's the *shape* of the gap: raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain.
+> Single-run variance on these benchmarks is ~±15 T2 points — the first harness run scored 72.5 on its own, which looked deflating until the other four (100, 87.5, 87.5, 100) showed it was the low tail of a distribution whose mean is 89.5. We're keeping the 5-plan harness mean + 1-plan baseline asymmetry for now; baseline variance will be filled in as the matrix grows across tasks and models. The takeaway isn't the exact delta, it's the *shape* of the gap: raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain.
 
 <br>
 
