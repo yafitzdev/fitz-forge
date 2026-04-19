@@ -203,8 +203,8 @@ Results below are the output of this process.
 | Metric | 🤖 Raw gemma (no harness) | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code (Sonnet) |
 |---|---:|---:|---:|
 | **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 |
-| **Craft** (code quality on what shipped) | 96.1 | **100.0** | 80.4 |
-| **Groundedness** (references resolve in the real codebase) | 70.0 | **100.0** | 60.0 |
+| **Craft** (code quality on evaluated files, 0 if missing/stubbed) | 34.0 | **100.0** | 57.0 |
+| **Groundedness** (refs resolve in real codebase; missing/stubbed = ungrounded) | 26.6 | **100.0** | 40.0 |
 | **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 |
 | **Architectural correctness** | 38.8 | **89.5** | 83.0 |
 | Cost per plan (API tokens) | $0 | $0 | **$0.40** |
@@ -212,25 +212,26 @@ Results below are the output of this process.
 | Latency per plan | 28s | 12 min | 108s (wall clock parallel: 2.4 min) |
 | Tokens per plan | — | — | ~65K cache write + ~11K output |
 
-> Craft and Groundedness are scored only on the files the taxonomy evaluates (engine, routes, synthesizer, schemas, SDK). That keeps arms with different output scopes comparable — an arm that ships test fixtures or helper files doesn't get penalised or rewarded for them. The lookup that spots fabrications IS augmented with definitions from every artifact in the plan, so a class defined in a sibling file (e.g. `StreamEvent` in `schemas.py`) counts as real when it's referenced from elsewhere.
+> Craft and Groundedness are scored over the taxonomy's *evaluated* file set (engine, routes, synthesizer, schemas, SDK). A file that's missing from the plan, or shipped as a `raise NotImplementedError` stub, scores 0 for that file — an empty promise isn't "well-crafted code." The fabrication detector's lookup is augmented with definitions from every artifact in the plan, so a class defined in a sibling file (e.g. `StreamEvent` in `schemas.py`) counts as real when it's referenced from elsewhere.
 
 <br>
 
-The story this table tells has four parts.
+The story:
 
-**Raw gemma is the worst on every dimension.** One-shot local inference, no harness, no recovery loop. Half the required files missing or stubbed, zero roadmap, bottom-tier architecture.
+**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow — stubs can't carry Craft, missing files can't be grounded, no roadmap means no Actionability, and the Sonnet grader rates the overall architecture as bottom-tier.
 
-**Cold Claude Code is better than raw gemma on almost every dimension, and by a lot on Architectural correctness** (83.0 vs 38.8) — which is exactly what you'd expect from a frontier model. It writes code that parses, picks reasonable architectures, and covers most of the required files.
+**Cold Claude Code beats raw gemma on every dimension** — as you'd expect from a frontier model. More files shipped, better code on them, higher architectural tier. Real capability gap.
 
-**But Cold Claude Code still loses to fitz-forge on three of the four deterministic dimensions.** Not because Sonnet is a worse coder — because the harness enforces things a one-shot call can't.
+**But Cold Claude Code still loses to fitz-forge on every deterministic dimension.** Not because Sonnet is a worse coder — because the harness enforces things a one-shot call can't.
 
-- **Craft** (80.4 vs 100.0): one-shot Sonnet writes ambitious code that occasionally references methods it hasn't defined (`self._prepare_query`, `self._post_generate`). fitz-forge's grounding + repair loop catches these before the plan finalizes.
-- **Groundedness** (60.0 vs 100.0): same shape. 5 baseline plans produced 11 unresolved references (some real fabrications, some third-party library imports our scorer doesn't know about). fitz-forge's closure check expands missing symbols into sibling artifacts or repairs the reference, landing at 0.
-- **Actionability** (0.0 vs 100.0): neither one-shot arm emits a roadmap with verification commands. fitz-forge's synthesis stage produces structured phases every time because that's what its schema demands.
+- **Coverage** (90 vs 100): 1/5 Sonnet plans still drops a required file. The harness's coverage review catches this and regenerates the missing artifact.
+- **Craft** (57 vs 100): one-shot Sonnet has real fabrications — methods it references but never defines (`self._prepare_query`, `self._post_generate`). It also doesn't cover every evaluated file in every plan. fitz-forge's grounding + repair loop + coverage review catch both classes of defect before the plan finalizes.
+- **Groundedness** (40 vs 100): same shape. Real fabrications plus third-party imports the scorer can't verify. fitz-forge's closure check expands missing symbols into sibling artifacts or repairs the reference, landing at 0 violations on every run.
+- **Actionability** (0 vs 100): neither one-shot arm emits a roadmap with verification commands. fitz-forge's synthesis stage produces structured phases every time because that's what its schema demands.
 
-**Architectural correctness is where Claude Code and fitz-forge are closest** (83.0 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5 (with 4/5 at A2, one tier below).
+**Architectural correctness is the one dimension where Claude Code and fitz-forge are close** (83 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5.
 
-**The headline:** frontier models write great code per file. fitz-forge adds *structure + rigor + end-to-end coverage* — the things a closed-loop agent needs — at 20× less cost per plan than Claude Code. That's the value prop: **rigor on a budget, not competing-with-Sonnet on raw capability**.
+**The headline:** fitz-forge adds *structure + rigor + end-to-end coverage* — the things a closed-loop agent needs — at 20× less cost per plan than Claude Code. That's the value prop: **rigor on a budget, not competing-with-Sonnet on raw capability**.
 
 <br>
 

@@ -278,6 +278,36 @@ def run_deterministic_checks(
         artifact_mean = 0.0
     artifact_quality_score = round(artifact_mean * 0.5, 1)
 
+    # "Effective" per-file artifact score — for Craft reporting only.
+    # A file the taxonomy evaluates that is missing from the plan, or
+    # shipped as a ``raise NotImplementedError`` stub, contributes 0
+    # (missing) or 5 (stub) to the mean instead of being excluded.
+    # Without this, a plan that ships half its files as stubs scores
+    # the same Craft as a plan with full implementations — the stub
+    # has nothing to flag, so per-file checks give it ~90.
+    effective_per_file_scores: list[float] = []
+    if evaluated_filenames:
+        check_by_filename = {ac.filename: ac for ac in artifact_checks}
+        for ef in evaluated_filenames:
+            matching = None
+            for path, ac in check_by_filename.items():
+                if _matches_evaluated(path, {ef}):
+                    matching = ac
+                    break
+            if matching is None:
+                effective_per_file_scores.append(0.0)
+            elif matching.has_not_implemented:
+                effective_per_file_scores.append(5.0)
+            else:
+                effective_per_file_scores.append(float(matching.score))
+    else:
+        effective_per_file_scores = [float(ac.score) for ac in artifact_checks]
+    effective_artifact_mean = (
+        sum(effective_per_file_scores) / len(effective_per_file_scores)
+        if effective_per_file_scores
+        else 0.0
+    )
+
     if consistency_checks:
         consistency_passed = sum(1 for c in consistency_checks if c.passed)
         consistency_ratio = consistency_passed / len(consistency_checks)
@@ -292,23 +322,27 @@ def run_deterministic_checks(
     # NotImplementedError stub as uncovered, so a 'raise NotImplementedError'
     # engine.py doesn't silently count against the harness.
     coverage_strict = _compute_strict_coverage(completeness, artifact_checks)
-    # Craft = normalized average of artifact_quality (/50) and consistency (/20),
-    # so both Craft and Coverage live on the same 0-100 scale.
-    craft = round(
-        (artifact_mean + consistency_ratio * 100) / 2,
-        1,
-    )
+    # Craft = per-file code quality on the evaluated-file set.
+    # Missing file → 0, stubbed file → 5, shipped real code → the
+    # per-artifact score. Unweighted mean over the evaluated set.
+    # Cross-file consistency is NOT rolled into Craft — it's a
+    # separate concern (orthogonal to per-file quality) and averaging
+    # it in here lets tiny 1-file plans that have nothing to be
+    # inconsistent about beat larger plans with real cross-file code.
+    craft = round(effective_artifact_mean, 1)
     # Groundedness — full-codebase grounding check on the evaluated
-    # artifact set, but the lookup is enriched with defs from the FULL
-    # artifact set so sibling artifacts outside the filter still count
-    # (a plan can legitimately define ``StreamEvent`` in ``schemas.py``
-    # and reference it from ``engine.py``; filtering to "evaluated"
-    # files shouldn't make the reference look fabricated).
+    # artifact set, with missing and stubbed evaluated files counting
+    # as ungrounded (they can't be grounded if they aren't there).
+    # The lookup that flags fabrications is enriched with defs from the
+    # FULL artifact set so sibling artifacts outside the filter still
+    # count (a plan can legitimately define ``StreamEvent`` in
+    # ``schemas.py`` and reference it from ``engine.py``).
     groundedness, grounding_violations = _compute_groundedness(
         artifact_dicts_evaluated,
         structural_index,
         source_dir,
         augment_from=artifact_dicts,
+        evaluated_filenames=evaluated_filenames,
     )
     # Actionability — can an agent execute this plan end-to-end?
     # Phases with a real verification_command can be closed-loop tested.
@@ -368,22 +402,68 @@ def _compute_groundedness(
     structural_index: str,
     source_dir: str,
     augment_from: list[dict] | None = None,
+    evaluated_filenames: set[str] | None = None,
 ) -> tuple[float, int]:
-    """Fraction of artifacts free of grounding violations against the real codebase.
+    """Fraction of evaluated files that are shipped, implemented, and grounded.
 
-    Runs the same ``check_all_artifacts`` pass the pipeline uses to gate
-    artifact emission. Returns ``(score, total_violations)``. Score is
-    100 when no artifact has any violation, 0 when every artifact has
-    at least one. An empty artifact set scores 100 (nothing to ground).
+    Returns ``(score, total_violations)``. A file counts as "grounded"
+    only if all three hold: it was shipped, it isn't a
+    ``NotImplementedError`` stub, and it has zero unresolved symbol
+    references.
 
-    ``augment_from`` forwards to ``check_all_artifacts``'s lookup-
-    augmentation hook: when scoring an evaluated subset, passing the
-    full artifact set here preserves sibling-artifact cross-references.
+    When ``evaluated_filenames`` is supplied, the denominator is the
+    full evaluated-file set — missing and stubbed files count against
+    the score even though they can't produce violations (an absent
+    file has nothing to ground). Without a taxonomy's evaluated set,
+    the function falls back to scoring only shipped artifacts.
     """
-    if not artifact_dicts:
-        return 100.0, 0
     from fitz_forge.planning.validation.grounding.check import check_all_artifacts
 
+    if evaluated_filenames:
+        violations = (
+            check_all_artifacts(
+                artifact_dicts,
+                structural_index,
+                source_dir=source_dir,
+                augment_from=augment_from,
+            )
+            if artifact_dicts
+            else []
+        )
+        dirty_files = {v.artifact for v in violations}
+        stub_files = {
+            (a.get("filename") or "").replace("\\", "/").strip("/")
+            for a in artifact_dicts
+            if isinstance(a, dict) and "raise NotImplementedError" in (a.get("content") or "")
+        }
+
+        # Build map: evaluated filename → shipped-real-non-stub-grounded?
+        shipped_paths = {
+            (a.get("filename") or "").replace("\\", "/").strip("/")
+            for a in artifact_dicts
+            if isinstance(a, dict)
+        }
+        shipped_paths.discard("")
+        clean = 0
+        for ef in evaluated_filenames:
+            matching_path = None
+            for sp in shipped_paths:
+                if _matches_evaluated(sp, {ef}):
+                    matching_path = sp
+                    break
+            if matching_path is None:
+                continue  # missing → ungrounded
+            if matching_path in stub_files:
+                continue  # stub → ungrounded
+            if matching_path in dirty_files:
+                continue  # has violations → ungrounded
+            clean += 1
+        score = round(clean / len(evaluated_filenames) * 100, 1)
+        return score, len(violations)
+
+    # No evaluated set — fall back to the old "shipped-only" behaviour.
+    if not artifact_dicts:
+        return 100.0, 0
     violations = check_all_artifacts(
         artifact_dicts,
         structural_index,
