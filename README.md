@@ -133,7 +133,11 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
-### How we know the pipeline works
+<details>
+
+<summary><strong>📦 How we verify the pipeline works</strong></summary>
+
+<br>
 
 > [!IMPORTANT]
 > **Plans you generate with `fitz-forge` do not come with a score.** The evaluation framework below is how we (the developers) measure the pipeline's quality — for regression testing, for comparing changes, and for driving improvements. It never runs in production. Your plan is just a plan.
@@ -157,6 +161,8 @@ The first four are deterministic. Same plan in, same score out, forever. The fif
 **The Fixer Loop** ([benchmarks/FIXER_LOOP.md](benchmarks/FIXER_LOOP.md)). The methodology that ties it all together. When a task is scoring below where we want it: enumerate the failure patterns from Tier-2's qualitative classifications, log each into a task-specific bug register with an impact score, fix the highest-impact one first, re-benchmark, confirm the fix lands on both tiers. Every fix has to be codebase- and language-agnostic — task-specific hacks don't ship. The track record section of FIXER_LOOP.md lists every benchmark improvement cycle and what changed.
 
 Results below are the output of this process.
+
+</details>
 
 ---
 
