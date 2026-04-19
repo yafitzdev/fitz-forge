@@ -19,6 +19,7 @@ feedback and regenerates the relevant stage output.
 """
 
 from .architecture import review_architecture
+from .assumptions import review_assumptions
 from .base import ReviewIssue, ReviewResult, format_issues_feedback
 from .decomposition import review_decomposition
 from .semantic import Discrepancy, format_feedback, review_artifacts
@@ -31,5 +32,6 @@ __all__ = [
     "format_issues_feedback",
     "review_architecture",
     "review_artifacts",
+    "review_assumptions",
     "review_decomposition",
 ]

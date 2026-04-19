@@ -41,6 +41,7 @@ from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.reviews import (
     format_issues_feedback,
     review_architecture,
+    review_assumptions,
 )
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
@@ -4066,6 +4067,78 @@ class SynthesisStage(PipelineStage):
             lines.append("")
         return "\n".join(lines)
 
+    async def _senior_assumption_review_pass(
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Adversarial review of recorded assumptions against the codebase.
+
+        MVP: pure detection. When the senior engineer flags
+        contradictions or high-impact unverifiable assumptions, they
+        are attached to the output context as ``review_findings`` so
+        the downstream coder (human or agent) sees what to double-check.
+        Regeneration of context to correct the assumptions is a
+        follow-up — the MVP is additive only.
+        """
+        assumptions = context.get("assumptions") or []
+        if not assumptions:
+            return context
+
+        gathered = self._get_gathered_context(prior_outputs) or ""
+
+        try:
+            review = await review_assumptions(
+                task_description=job_description,
+                assumptions=assumptions,
+                client=client,
+                gathered_context=gathered,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': assumption review errored ({e}); "
+                "no findings recorded"
+            )
+            return context
+
+        if review.passed:
+            logger.info(
+                f"Stage '{self.name}': assumption review passed "
+                f"({len(assumptions)} assumption(s))"
+            )
+            return context
+
+        logger.info(
+            f"Stage '{self.name}': assumption review found "
+            f"{review.issue_count} issue(s); attaching as review_findings"
+        )
+        for issue in review.issues[:5]:
+            logger.info(
+                "  %s — %s | %s",
+                issue.target,
+                issue.intent[:80],
+                issue.actual[:80],
+            )
+
+        findings = [
+            {
+                "scope": issue.scope,
+                "target": issue.target,
+                "intent": issue.intent,
+                "actual": issue.actual,
+                "suggestion": issue.suggestion,
+            }
+            for issue in review.issues
+        ]
+        existing_findings = context.get("review_findings") or []
+        context = {
+            **context,
+            "review_findings": existing_findings + findings,
+        }
+        return context
+
     async def _senior_arch_review_pass(
         self,
         client: Any,
@@ -4481,6 +4554,21 @@ class SynthesisStage(PipelineStage):
 
             # 4. Validate through Pydantic
             context = ContextOutput(**context_merged).model_dump()
+
+            # Senior-engineer adversarial review of recorded assumptions.
+            # MVP: detect and surface. Contradicted / high-impact
+            # unverifiable assumptions are attached to the context
+            # output as `review_findings` so the downstream coder can
+            # see what a senior engineer would challenge. No
+            # regeneration yet — that's a follow-up once we have a
+            # clean regeneration mechanism (see
+            # docs/senior-engineer-todo/).
+            context = await self._senior_assumption_review_pass(
+                client=client,
+                job_description=job_description,
+                prior_outputs=prior_outputs,
+                context=context,
+            )
 
             # Handle recommended approach matching
             approach_names = [a["name"] for a in arch_merged.get("approaches", [])]
