@@ -104,6 +104,26 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
+### Measured cost per plan
+
+Concrete numbers for the "planning is the most expensive phase" premise. Same task (`streaming_implementation` on the `fitz-sage` repo), same user prompt, two modes:
+
+| Mode | What it does | Tokens | Cost/plan | Time |
+|---|---|---|---:|---:|
+| 🤖 Pure Claude Code (Sonnet 4.6, plan-mode) | Reads the codebase, reasons, produces a plan | ~12K output + ~194K cached context | **$0.96** | 6.5 min |
+| 🔨 fitz-forge (gemma-4-26b on RTX 5090) | Same job, local pipeline | 0 API tokens | **~$0.02** electricity | 12 min |
+
+**Per-plan savings: ~$0.94.** Trivial on a single plan, compounds on real usage.
+
+At conservative workloads — one plan a workday, ~30 plans/month — that's **$28/month, or $336/year**, on planning alone. Power users hitting several plans a day see it scale linearly: 100 plans/month is ~$93/month of Claude Code planning spend → ~$1,100/year. All of it runs overnight on hardware you already own.
+
+<br>
+
+> [!NOTE]
+> N=1 data point, Sonnet 4.6 pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates. Pricing, token usage, and your own usage pattern will shift the numbers — run `python -m benchmarks.claude_code_baseline` with your own task to calibrate. The point isn't the exact dollar figure; it's the order of magnitude.
+
+---
+
 ### Why `fitz-forge`?
 
 **Cut your Opus bill — plan locally, implement with Sonnet 💸**
