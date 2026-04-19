@@ -1,9 +1,9 @@
 # benchmarks/end_to_end_cost.py
 """End-to-end feature cost: pure Claude Code vs fitz-forge plan + Claude Code.
 
-Two arms, each running against a fresh git worktree of the target
-codebase so they don't interfere. Both get full Claude Code tool
-access (read/write/bash) and are instructed to implement + verify.
+Three arms, each running against a fresh git worktree of the target
+codebase so they don't interfere. All get full Claude Code tool
+access by default and are instructed to implement + verify.
 
 * Arm A — Pure Claude Code: user task only. Agent must discover the
   codebase, decide an approach, implement it, and verify. This is what
@@ -12,6 +12,12 @@ access (read/write/bash) and are instructed to implement + verify.
   also feed a fitz-forge plan (JSON) for reference. The plan already
   contains artifacts with full code bodies, a roadmap, and ADRs, so
   implementation reduces to transcription + integration + testing.
+* Arm C — fitz-forge plan + guarded Claude Code: Arm B plus a
+  PreToolUse hook (``benchmarks/guard_hook.py``) that restricts file
+  reads to the set of paths the plan actually references (plus a small
+  always-allowed set: pyproject.toml, conftest.py, __init__.py chain,
+  test-runner configs). Tests whether constraining the agent's read
+  surface meaningfully cuts cache-read tokens.
 
 We measure tokens, cost (USD), and wall time per arm. The agent's own
 self-report is the success signal — we don't run a separate pytest,
@@ -110,6 +116,138 @@ def _prepare_worktree(source_git_root: Path, worktree_dir: Path, base_ref: str) 
         check=True,
     )
     logger.info(f"worktree ready at {worktree_dir} (from {base_ref})")
+
+
+# Files we always want the agent to be able to read, regardless of plan
+# coverage. Keeps the test runner happy and lets the agent orient itself
+# in the repo without blowing the token budget on broad exploration.
+_ALWAYS_ALLOWED_RELATIVE = [
+    "pyproject.toml",
+    "setup.cfg",
+    "setup.py",
+    "pytest.ini",
+    "tox.ini",
+    "conftest.py",
+    "tests/conftest.py",
+    "tests/unit/conftest.py",
+    "tests/integration/conftest.py",
+    "README.md",
+    "CLAUDE.md",
+]
+
+
+def _init_chain(rel: str) -> list[str]:
+    """Return every package __init__.py on the path from repo root to ``rel``."""
+    parts = rel.replace("\\", "/").strip("/").split("/")
+    # Drop the file itself; walk the directory chain.
+    dirs = parts[:-1]
+    out: list[str] = []
+    for i in range(1, len(dirs) + 1):
+        out.append("/".join(dirs[:i]) + "/__init__.py")
+    return out
+
+
+def _derive_allowlist(plan: dict, worktree_dir: Path) -> list[str]:
+    """Collect all plan-referenced paths plus always-allowed infra files.
+
+    Paths are returned relative to the worktree root. The guard hook
+    resolves them against its cwd at decision time.
+    """
+    collected: set[str] = set()
+
+    # Plan artifacts
+    for art in (plan.get("design", {}) or {}).get("artifacts", []) or []:
+        fn = (art.get("filename") or "").replace("\\", "/").strip("/")
+        if fn:
+            collected.add(fn)
+
+    # Decomposed decisions' relevant_files
+    decomp = plan.get("decomposed_decisions", {}) or {}
+    for dec in decomp.get("decisions", []) or []:
+        for rel in dec.get("relevant_files", []) or []:
+            rel_clean = (rel or "").replace("\\", "/").strip("/")
+            if rel_clean:
+                collected.add(rel_clean)
+
+    # __init__.py chain for every artifact (so imports work, and the
+    # agent can verify package export paths without being blocked)
+    for rel in list(collected):
+        for init in _init_chain(rel):
+            collected.add(init)
+
+    # Always-allowed infrastructure files that exist in the worktree
+    for candidate in _ALWAYS_ALLOWED_RELATIVE:
+        if (worktree_dir / candidate).exists():
+            collected.add(candidate)
+
+    # Allow the whole tests/ directory so the agent can add + run tests.
+    # The hypothesis is that restricting *source* reads cuts tokens;
+    # tests are a constant regardless of plan shape.
+    collected.add("tests")
+
+    return sorted(collected)
+
+
+def _install_guard(
+    worktree_dir: Path,
+    allowlist: list[str],
+    hook_script: Path,
+    python_exe: Path,
+    log_path: Path,
+) -> Path:
+    """Write Claude Code settings.json + allowlist JSON into the worktree.
+
+    The hook command is just ``python guard_hook.py`` — no env vars. The
+    hook locates the allowlist at ``<cwd>/.claude/fitzforge_allowlist.json``
+    (cwd comes from the payload Claude Code writes to the hook's stdin),
+    avoiding cmd.exe / bash / PowerShell env-var quoting fragility.
+
+    ``log_path`` is a *tee* path: the hook always writes to
+    ``<cwd>/.claude/guard_log.txt`` inside the worktree; after the run we
+    copy that file to ``log_path`` (next to the benchmark results).
+
+    Returns the settings-file path so the caller can pass it to
+    ``claude -p --settings <path> --setting-sources user,project,local``
+    (required — ``-p`` mode silently drops project-level settings unless
+    ``--setting-sources`` names ``project``).
+    """
+    guard_dir = worktree_dir / ".claude"
+    guard_dir.mkdir(exist_ok=True)
+
+    allowlist_path = guard_dir / "fitzforge_allowlist.json"
+    allowlist_path.write_text(
+        json.dumps({"allowed": allowlist}, indent=2), encoding="utf-8"
+    )
+
+    # Pre-create the in-worktree log so the copy step at the end has
+    # something to copy even if the hook never fired.
+    (guard_dir / "guard_log.txt").write_text("", encoding="utf-8")
+
+    hook_cmd = f'"{python_exe}" "{hook_script}"'
+
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Read|Bash|Grep",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": hook_cmd,
+                            "timeout": 15,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    settings_path = guard_dir / "settings.json"
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    logger.info(
+        f"guard installed at {worktree_dir}: "
+        f"{len(allowlist)} allowlist entries"
+    )
+    return settings_path.resolve()
 
 
 def _build_arm_a_prompt(task: str) -> str:
@@ -215,12 +353,40 @@ def _build_arm_b_prompt(task: str, plan_markdown: str) -> str:
     )
 
 
+def _build_arm_c_prompt(task: str, plan_markdown: str) -> str:
+    return (
+        "You are implementing a feature in the repository at your current "
+        "working directory. You have full tool access (Read, Edit, Write, "
+        "Bash, etc.), but a PreToolUse hook restricts file reads to the "
+        "set of paths explicitly referenced in the plan below (plus test "
+        "files, package __init__.py, and standard project config). "
+        "Attempting to read outside that set will be blocked with an "
+        "explanatory error — don't treat the block as a wall, treat it "
+        "as a nudge to stay within the plan's scope.\n\n"
+        f"User task:\n{task}\n\n"
+        "Below is the plan. Work only from these files + the infrastructure "
+        "files above. If the plan is missing something you would need to "
+        "read, note it in your final answer instead of trying to read it.\n\n"
+        "-----\n\n"
+        f"{plan_markdown}\n\n"
+        "-----\n\n"
+        "Do the following:\n"
+        "1. Implement each artifact listed in the plan, adapting only "
+        "where it doesn't match the real codebase.\n"
+        "2. Run the project's test suite and iterate until it passes.\n"
+        "3. At the end of your response, report whether tests pass, list "
+        "the files you modified, and list any read-blocks you hit (files "
+        "you wanted but couldn't read).\n"
+    )
+
+
 async def _run_arm(
     arm_label: str,
     worktree_dir: Path,
     prompt: str,
     timeout_s: int,
     out_dir: Path,
+    settings_path: Path | None = None,
 ) -> dict:
     """Run a single Claude Code arm in ``worktree_dir``. Captures cost + output."""
     cmd = [
@@ -230,6 +396,18 @@ async def _run_arm(
         "json",
         "--dangerously-skip-permissions",
     ]
+    if settings_path is not None:
+        # Two flags required for -p mode to load our PreToolUse hook:
+        # * ``--settings`` — points at the settings file we wrote (git
+        #   worktrees can silently break project-root discovery)
+        # * ``--setting-sources user,project,local`` — WITHOUT this, -p
+        #   mode quietly drops project-level settings even when the file
+        #   is found. Global hooks (UserPromptSubmit etc.) fire, but a
+        #   PreToolUse defined only in the project file never does.
+        cmd.extend([
+            "--settings", str(settings_path),
+            "--setting-sources", "user,project,local",
+        ])
     logger.info(f"arm {arm_label}: launching claude in {worktree_dir} (timeout={timeout_s}s)")
     t0 = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
@@ -314,10 +492,12 @@ def run(
     source_git_root: str = typer.Option(..., help="Git root of the target codebase (main checkout)"),
     base_ref: str = typer.Option("main", help="Git ref that each worktree starts from"),
     task_file: str = typer.Option(..., help="Path to user_prompt.txt for the feature"),
-    plan_json: str = typer.Option(..., help="fitz-forge plan JSON for Arm B"),
+    plan_json: str = typer.Option(..., help="fitz-forge plan JSON for Arm B / C"),
     out_root: str = typer.Option("", help="Output root (default: benchmarks/end_to_end_results/)"),
     timeout_s: int = typer.Option(2700, help="Per-arm timeout in seconds (default 45min)"),
-    skip_arm: str = typer.Option("", help="Skip an arm ('a' or 'b') — useful for re-runs"),
+    skip_arm: str = typer.Option("", help="Comma-separated arms to skip ('a', 'b', 'c'). Example: --skip-arm a,b"),
+    run_arm_c: bool = typer.Option(False, "--arm-c", help="Also run Arm C (plan + guarded Claude Code)"),
+    python_exe: str = typer.Option("", help="Python executable used by guard hook (default: current interpreter)"),
 ) -> None:
     """Measure end-to-end feature cost: pure Claude Code vs fitz-forge plan + Claude Code."""
     src_root = Path(source_git_root).resolve()
@@ -328,17 +508,25 @@ def run(
     plan = json.loads(Path(plan_json).read_text(encoding="utf-8"))
     plan_md = _plan_to_markdown(plan)
 
+    skip_set = {s.strip().lower() for s in skip_arm.split(",") if s.strip()}
+
     ts = time.strftime("%Y-%m-%d_%H-%M-%S")
     out_dir = Path(out_root) if out_root else Path("benchmarks/end_to_end_results") / ts
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "plan_used.md").write_text(plan_md, encoding="utf-8")
     logger.info(f"output dir: {out_dir}")
 
+    # Resolve hook-runner paths up front (fail loud if missing).
+    guard_hook_script = (Path(__file__).parent / "guard_hook.py").resolve()
+    if not guard_hook_script.exists():
+        raise typer.BadParameter(f"guard hook missing: {guard_hook_script}")
+    guard_python = Path(python_exe).resolve() if python_exe else Path(sys.executable).resolve()
+
     results: list[dict] = []
 
     async def _execute() -> None:
         # Arm A: pure Claude Code
-        if skip_arm != "a":
+        if "a" not in skip_set:
             wt_a = src_root.parent / f"{src_root.name}-arm-a"
             _prepare_worktree(src_root, wt_a, base_ref)
             prompt_a = _build_arm_a_prompt(task)
@@ -349,7 +537,7 @@ def run(
             logger.info("skipping arm A")
 
         # Arm B: fitz-forge plan + Claude Code
-        if skip_arm != "b":
+        if "b" not in skip_set:
             wt_b = src_root.parent / f"{src_root.name}-arm-b"
             _prepare_worktree(src_root, wt_b, base_ref)
             prompt_b = _build_arm_b_prompt(task, plan_md)
@@ -358,6 +546,42 @@ def run(
             results.append(r_b)
         else:
             logger.info("skipping arm B")
+
+        # Arm C: fitz-forge plan + guarded Claude Code (allowlist hook)
+        if run_arm_c and "c" not in skip_set:
+            wt_c = src_root.parent / f"{src_root.name}-arm-c"
+            _prepare_worktree(src_root, wt_c, base_ref)
+            allowlist = _derive_allowlist(plan, wt_c)
+            (out_dir / "arm_c_allowlist.json").write_text(
+                json.dumps(allowlist, indent=2), encoding="utf-8"
+            )
+            guard_log_dest = (out_dir / "arm_c_guard_log.txt").resolve()
+            settings_c = _install_guard(
+                wt_c, allowlist, guard_hook_script, guard_python, guard_log_dest
+            )
+            prompt_c = _build_arm_c_prompt(task, plan_md)
+            (out_dir / "arm_c_prompt.md").write_text(prompt_c, encoding="utf-8")
+            r_c = await _run_arm(
+                "c", wt_c, prompt_c, timeout_s, out_dir, settings_path=settings_c
+            )
+            # Copy the in-worktree guard log to the results dir and
+            # summarise block/allow counts.
+            worktree_log = wt_c / ".claude" / "guard_log.txt"
+            try:
+                if worktree_log.exists():
+                    guard_log_dest.write_text(
+                        worktree_log.read_text(encoding="utf-8"), encoding="utf-8"
+                    )
+                log_lines = guard_log_dest.read_text(encoding="utf-8").splitlines()
+                r_c["guard_blocks"] = sum(1 for ln in log_lines if ln.startswith("BLOCK"))
+                r_c["guard_allows"] = sum(1 for ln in log_lines if ln.startswith("ALLOW"))
+            except Exception as e:
+                logger.warning(f"guard log summary failed: {e}")
+            results.append(r_c)
+        elif not run_arm_c:
+            logger.info("skipping arm C (pass --arm-c to enable)")
+        else:
+            logger.info("skipping arm C")
 
     asyncio.run(_execute())
     (out_dir / "results.json").write_text(
@@ -368,11 +592,13 @@ def run(
     by_arm = {r["arm"]: r for r in results if r.get("success")}
     a = by_arm.get("a", {})
     b = by_arm.get("b", {})
+    c = by_arm.get("c", {})
     a_cost = a.get("cost_usd")
     b_cost = b.get("cost_usd")
+    c_cost = c.get("cost_usd")
 
     lines = [
-        "# End-to-end Feature Cost — Pure Claude Code vs fitz-forge plan + Claude Code",
+        "# End-to-end Feature Cost",
         "",
         f"Task file: `{task_file}`",
         f"Plan used: `{plan_json}`",
@@ -380,7 +606,14 @@ def run(
         "| Arm | Wall time | Input | Output | Cache write | Cache read | Cost (USD) |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for label, r in (("A — Pure Claude Code", a), ("B — fitz-forge + Claude Code", b)):
+    row_defs = [
+        ("A — Pure Claude Code", a),
+        ("B — fitz-forge + Claude Code", b),
+    ]
+    if run_arm_c:
+        row_defs.append(("C — fitz-forge + guarded Claude Code", c))
+
+    for label, r in row_defs:
         if not r:
             lines.append(f"| {label} | (missing) | — | — | — | — | — |")
             continue
@@ -393,14 +626,31 @@ def run(
             f"${r.get('cost_usd', 0):.4f} |"
         )
     lines.append("")
+
+    def _pct(a_val: float, b_val: float) -> str:
+        if not a_val:
+            return ""
+        return f"{(a_val - b_val) / a_val * 100:.0f}%"
+
     if a_cost is not None and b_cost is not None:
-        savings = a_cost - b_cost
-        pct = (savings / a_cost * 100) if a_cost else 0
         lines.append(
-            f"**Savings per feature:** ${savings:.2f} "
-            f"({pct:.0f}% cheaper with fitz-forge)"
+            f"**Arm A → B savings:** ${a_cost - b_cost:.2f} ({_pct(a_cost, b_cost)} cheaper)"
         )
-        lines.append("")
+    if a_cost is not None and c_cost is not None:
+        lines.append(
+            f"**Arm A → C savings:** ${a_cost - c_cost:.2f} ({_pct(a_cost, c_cost)} cheaper)"
+        )
+    if b_cost is not None and c_cost is not None:
+        lines.append(
+            f"**Arm B → C savings:** ${b_cost - c_cost:.2f} "
+            f"({_pct(b_cost, c_cost)} cheaper; isolates the guard effect)"
+        )
+    if c and "guard_blocks" in c:
+        lines.append(
+            f"**Arm C guard activity:** {c['guard_blocks']} blocks, "
+            f"{c.get('guard_allows', 0)} allows — see `arm_c_guard_log.txt`"
+        )
+    lines.append("")
 
     lines.append("## Pricing assumption")
     lines.append(f"- Input: ${_PRICE_INPUT_PER_MTOK:.2f}/MTok")
