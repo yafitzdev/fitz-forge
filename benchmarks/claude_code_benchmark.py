@@ -1,22 +1,20 @@
 # benchmarks/claude_code_benchmark.py
-"""Benchmark arm: cold Claude Code agents with the same input as raw gemma.
+"""Benchmark arm: Claude Code agents (cold or hot) with V2-scorable output.
 
-Companion to ``no_harness.py``. Same interface, same prompt-building,
-same parsing, same V2 scoring path — only difference is that the
-generation call shells out to ``claude -p`` instead of the local LLM
-client. Tools are disabled so the agent works only from the file
-content embedded in the prompt (exact parity with the raw-gemma arm,
-which also had no file-reading capability beyond its prompt).
+Two modes:
 
-The three benchmark arms thus share a single methodology:
+* ``--mode cold`` (default): files embedded in prompt, all tools
+  disabled. Exact parity with ``no_harness.py`` — the agent works only
+  from the content in the user message. Measures one-shot planning
+  ability of the frontier model on the same input the raw local model
+  sees.
+* ``--mode agentic``: no files in prompt, cwd set to the source repo,
+  read-only tools enabled (Read/Glob/Grep/Bash/WebFetch/WebSearch/Task),
+  write-class tools disallowed. Measures what a user would actually pay
+  for Claude Code today in normal-workflow planning.
 
-    no_harness.py              raw local model, files in prompt
-    plan_factory.py decomposed local model + fitz-forge harness
-    claude_code_benchmark.py   frontier model (Sonnet), files in prompt
-
-All three produce plan_NN.json in the same shape, all three get
-scored by the V2 scorer, all three slot into the same Benchmarks
-table on equal terms.
+Both modes share prompt shape, parsing, and V2 scoring, so they slot
+into the same benchmarks table on equal terms.
 
 Example:
 
@@ -25,7 +23,7 @@ Example:
       --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \\
       --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \\
       --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \\
-      --runs 5 --score-v2
+      --runs 5 --mode agentic --score-v2
 """
 
 from __future__ import annotations
@@ -96,7 +94,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-_DISALLOWED_TOOLS = [
+_DISALLOWED_TOOLS_COLD = [
     "Read",
     "Bash",
     "Glob",
@@ -112,6 +110,43 @@ _DISALLOWED_TOOLS = [
     "Agent",
     "ExitPlanMode",
 ]
+
+
+# Agentic mode: read-only tools allowed, everything that modifies the
+# repo denied. ExitPlanMode is denied too so the agent can't short-circuit
+# to implementation mode mid-response.
+_DISALLOWED_TOOLS_AGENTIC = [
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "ExitPlanMode",
+]
+
+
+_SYSTEM_PROMPT_AGENTIC = (
+    "You are a senior software engineer. A user has a task to complete "
+    "on the existing codebase in your current working directory. Use "
+    "your read-only tools (Read, Glob, Grep, Bash for read-only queries) "
+    "to explore the codebase as needed, then produce a complete "
+    "implementation plan. For every file you need to create or modify, "
+    "output a section in this exact shape:\n\n"
+    "## path/to/file.py\n"
+    "```python\n"
+    "<full file content or the complete modified function / class>\n"
+    "```\n\n"
+    "Rules:\n"
+    "1. Real filenames only — paths exactly as they appear in the "
+    "codebase you just read.\n"
+    "2. Real code only — full, runnable implementation, not pseudocode.\n"
+    "3. Cover every file that needs a change.\n"
+    "4. Be specific about field names and method signatures — not "
+    "'record the signals' but the actual dict keys / parameter names.\n"
+    "5. Do NOT modify any files. Do NOT exit plan mode. Emit the plan "
+    "text directly in your response.\n\n"
+    "Do not output anything outside the '## filename' + code-fence "
+    "structure. No preamble, no summary at the end."
+)
 
 
 def _cost_usd(usage: dict) -> float:
@@ -170,20 +205,34 @@ async def _one_run(
     max_file_bytes: int,
     max_prompt_chars: int,
     timeout_s: int,
+    mode: str,
 ) -> dict:
     """One parallel Claude Code invocation; writes plan_NN.json in place."""
-    file_contents: dict[str, str] = {}
-    for rel in file_list:
-        content = _load_source_file(source_dir, rel, max_file_bytes)
-        if content:
-            file_contents[rel] = content
-
-    user_prompt = _build_user_prompt(query, file_contents, max_prompt_chars)
-    full_prompt = (
-        _SYSTEM_PROMPT
-        + "\n\n-----\n\n"
-        + user_prompt
-    )
+    if mode == "cold":
+        file_contents: dict[str, str] = {}
+        for rel in file_list:
+            content = _load_source_file(source_dir, rel, max_file_bytes)
+            if content:
+                file_contents[rel] = content
+        user_prompt = _build_user_prompt(query, file_contents, max_prompt_chars)
+        full_prompt = _SYSTEM_PROMPT + "\n\n-----\n\n" + user_prompt
+        disallowed = _DISALLOWED_TOOLS_COLD
+        cwd = None
+        input_desc = f"{len(file_contents)} files embedded"
+    elif mode == "agentic":
+        # No files in the prompt — the agent uses read tools to discover
+        # what it needs. cwd points at the target repo so relative paths
+        # work out of the box.
+        full_prompt = (
+            _SYSTEM_PROMPT_AGENTIC
+            + "\n\n-----\n\n"
+            + f"User task: {query}\n"
+        )
+        disallowed = _DISALLOWED_TOOLS_AGENTIC
+        cwd = str(source_dir)
+        input_desc = f"agentic, cwd={source_dir}"
+    else:
+        raise ValueError(f"unknown mode: {mode}")
 
     # Prompt goes on stdin — Windows argv caps at ~8 KB, far below the
     # typical ~100 KB multi-file prompt. Same technique score_taxonomy.py
@@ -194,11 +243,11 @@ async def _one_run(
         "--output-format",
         "json",
         "--disallowed-tools",
-        ",".join(_DISALLOWED_TOOLS),
+        ",".join(disallowed),
     ]
 
     logger.info(
-        f"run {run_id}: {len(file_contents)} files, {len(full_prompt)} chars in prompt"
+        f"run {run_id} [{mode}]: {input_desc}, {len(full_prompt)} chars in prompt"
     )
     t0 = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
@@ -206,6 +255,7 @@ async def _one_run(
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -306,26 +356,30 @@ def run(
     query: str = typer.Option(..., help="Task description / user prompt"),
     taxonomy: str | None = typer.Option(None, help="taxonomy.json (required for --score-v2)"),
     runs: int = typer.Option(5, help="Number of parallel agents"),
-    max_file_bytes: int = typer.Option(_MAX_FILE_BYTES_DEFAULT, help="Per-file truncation"),
-    max_prompt_chars: int = typer.Option(_MAX_PROMPT_CHARS_DEFAULT, help="Total prompt size cap"),
+    mode: str = typer.Option("cold", help="'cold' (files in prompt, no tools) or 'agentic' (tools enabled, cwd=source_dir)"),
+    max_file_bytes: int = typer.Option(_MAX_FILE_BYTES_DEFAULT, help="Per-file truncation (cold only)"),
+    max_prompt_chars: int = typer.Option(_MAX_PROMPT_CHARS_DEFAULT, help="Total prompt size cap (cold only)"),
     timeout_s: int = typer.Option(_DEFAULT_TIMEOUT_S, help="Per-run timeout"),
     score_v2: bool = typer.Option(False, "--score-v2", help="Run V2 scoring after"),
     no_tier2: bool = typer.Option(False, "--no-tier2", help="Skip Tier-2 Sonnet scoring"),
     out_root: str = typer.Option("", help="Output root (default: alongside context_file)"),
 ) -> None:
-    """N cold Claude Code agents, in parallel, same input as raw gemma arm."""
+    """N Claude Code agents, in parallel. Mode = cold (one-shot) or agentic (tools)."""
+    if mode not in ("cold", "agentic"):
+        raise typer.BadParameter(f"--mode must be 'cold' or 'agentic', got: {mode}")
+
     ctx_path = Path(context_file)
     ctx = json.loads(ctx_path.read_text(encoding="utf-8"))
     file_list: list[str] = ctx.get("file_list") or []
-    if not file_list:
-        raise typer.BadParameter(f"{context_file} has no 'file_list'")
+    if mode == "cold" and not file_list:
+        raise typer.BadParameter(f"{context_file} has no 'file_list' (required in cold mode)")
 
     challenge_root = ctx_path.parent
     results_root = Path(out_root) if out_root else challenge_root / "results"
     ts = time.strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = results_root / f"{ts}_claude_code"
+    out_dir = results_root / f"{ts}_claude_code_{mode}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Running {runs} Claude Code agent(s) in parallel -> {out_dir}")
+    logger.info(f"Running {runs} Claude Code agent(s) [{mode}] in parallel -> {out_dir}")
 
     async def _main() -> list[dict]:
         tasks = [
@@ -338,6 +392,7 @@ def run(
                 max_file_bytes=max_file_bytes,
                 max_prompt_chars=max_prompt_chars,
                 timeout_s=timeout_s,
+                mode=mode,
             )
             for i in range(runs)
         ]
@@ -355,7 +410,7 @@ def run(
     max_elapsed = max((r.get("elapsed_s", 0.0) for r in results), default=0.0)
 
     summary_lines = [
-        "# Claude Code Benchmark (parallel cold agents)",
+        f"# Claude Code Benchmark (parallel {mode} agents)",
         "",
         f"- Runs: {len(ok)}/{len(results)} successful",
         f"- Parallel wall time: {max_elapsed:.1f}s (sum of serial times: {total_elapsed:.1f}s)",
