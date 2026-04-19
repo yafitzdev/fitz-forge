@@ -35,5 +35,6 @@ benchmarks/test_*.py
 .claude/
 docs/roadmap
 docs/archive
+docs/senior-engineer-todo
 CLAUDE.md
 
