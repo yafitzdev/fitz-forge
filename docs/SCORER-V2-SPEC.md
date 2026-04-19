@@ -1,216 +1,269 @@
-# Plan Scorer V2 — Specification
+# Plan Scorer V2 — Reference
 
-## Problem with Scorer V1
+How a benchmark-produced plan gets scored. This is the **evaluation harness**
+we use to measure the planning pipeline itself — it never runs in production
+and the plans users receive never carry a score. It's an internal tool for
+catching regressions, comparing model/config changes, and validating that
+pipeline improvements actually improve plan quality.
 
-The 6-dimension Sonnet-as-Judge scorer (file_identification, contract_preservation, internal_consistency, codebase_alignment, implementability, scope_calibration) has fundamental flaws:
+## What gets scored
 
-1. **Rewards incompleteness**: A plan with 1 clean artifact scores higher than a plan with 5 artifacts where 4 are good and 1 has a bug. Run 67 (45.3 avg) had 33% of plans with only 1-2 tiny artifacts.
-2. **Scorer drift**: Same plan rescored on different days gives -2.5pts difference.
-3. **Abstract dimensions**: "consistency" and "alignment" are vague — the scorer interprets them differently each time.
-4. **No structured output**: Free-text justifications make it impossible to aggregate or compare systematically.
+A plan JSON produced by `fitz-forge` (either via the CLI, the MCP server, or
+a benchmark run). The scorer reads:
 
-## Design Goals
+- `design.artifacts` — the generated code, one dict per file with `filename`
+  and `content`.
+- `roadmap.phases` — the ordered work plan with verification commands.
+- `context.needed_artifacts`, `decision_decomposition.decisions` — used by
+  the completeness check to know what the task required.
 
-1. **Reward completeness** — more files covered = better, not worse.
-2. **Deterministic where possible** — AST-based checks have zero variance.
-3. **Per-artifact scoring** — each artifact scored independently, not averaged into abstract dimensions.
-4. **Solution taxonomy** — valid architectural approaches enumerated upfront so Sonnet scores against a rubric, not its own judgment.
-5. **Reproducible** — same plan always gets the same deterministic score. Sonnet layer adds qualitative assessment but doesn't override deterministic findings.
+Given those, the scorer produces a report with six numbers and a qualitative
+taxonomy classification.
 
-## Architecture
+## Inputs the scorer needs
 
-```
-Plan JSON
-  │
-  ├── Tier 1: Deterministic Checks (zero variance)
-  │     ├── Completeness check (which required files are present?)
-  │     ├── Per-artifact AST validation
-  │     │     ├── Parseable? (syntax errors)
-  │     │     ├── Correct field access? (F25 typed attr validation)
-  │     │     ├── No fabricated methods? (F10 check against structural index)
-  │     │     ├── Has required behavior? (yield for streaming, async for async)
-  │     │     └── Correct function signatures? (matches reference)
-  │     └── Cross-artifact consistency
-  │           ├── Method name agreement (service.answer_stream vs service.query_stream)
-  │           └── Type agreement (Iterator[str] vs AsyncGenerator)
-  │
-  ├── Tier 2: Taxonomy Classification (Sonnet, deterministic rubric)
-  │     ├── Which architectural pattern does the plan follow?
-  │     ├── Per-artifact: which implementation pattern was used?
-  │     └── Scoring against enumerated valid/invalid patterns
-  │
-  └── Combined Report
-        ├── Deterministic score (0-100)
-        ├── Taxonomy classification
-        ├── Sonnet qualitative notes
-        └── Per-artifact breakdown
-```
+To score a plan, the scorer needs three things besides the plan itself:
 
-## Tier 1: Deterministic Checks
+| Input | Purpose | Where |
+|---|---|---|
+| Structural index of the target codebase | Validating that symbols in the plan resolve to real classes / methods / functions | `ideal_context.json` → `synthesized` field, or `source_dir` for a full rescan |
+| Task taxonomy | Defines the quality tiers for the overall architecture + each critical file | `benchmarks/challenges/<task>/taxonomy.json` |
+| Task query | The original user prompt | Recorded per run, replayed to the Sonnet grader so it can assess relevance |
 
-### 1.1 Completeness Score
+## Two tiers
 
-For the streaming task, the required files are:
+### Tier 1 — deterministic
 
-| File | Required? | Why |
-|------|-----------|-----|
-| `fitz_sage/engines/fitz_krag/engine.py` | YES | `answer_stream()` — the core streaming method |
-| `fitz_sage/api/routes/query.py` | YES | `/chat/stream` and/or `/query/stream` endpoints |
-| `fitz_sage/engines/fitz_krag/generation/synthesizer.py` | RECOMMENDED | `generate_stream()` — streaming through synthesis |
-| `fitz_sage/api/models/schemas.py` | OPTIONAL | Streaming response schema |
-| `fitz_sage/sdk/fitz.py` | OPTIONAL | SDK streaming method |
-| `fitz_sage/services/*` | OPTIONAL | Service layer delegation |
+No LLM calls. Same plan in, same score out. Produces one composite number
+(`deterministic_score`, 0–100) and four dimension scores (each 0–100) that
+measure orthogonal qualities of the plan.
 
-**Score**: count of required files present / total required. Bonus for recommended/optional files.
+#### The four dimensions
 
-For a **codebase-agnostic** version: the required files come from the task's decision decomposition — each decision names files. Files referenced in 3+ decisions are "required."
+**Coverage** — what fraction of the files the task *requires* actually
+shipped with real implementations. Strict: a file that ships as `raise
+NotImplementedError` counts as uncovered, even though it technically exists.
+Computed against the `required_files` list in the task's taxonomy.
 
-### 1.2 Per-Artifact AST Validation
+**Craft** — on the files that did ship, how good is the code? The mean of
+artifact-quality (parseability, fabrication checks, correct return types,
+correct behaviour like `yield` for streaming artifacts, no
+`NotImplementedError`, no `sys.stdout`) and cross-file consistency
+(method-name agreement, type agreement, no duplicate content), both
+normalized to 0–100.
 
-For each artifact, run these checks (all deterministic, 0 LLM cost):
+**Groundedness** — do the references in the plan resolve against the real
+codebase? Runs the same full-codebase grounding check the production
+pipeline uses (`fitz_forge.planning.validation.grounding.check.
+check_all_artifacts`) and reports the fraction of artifacts free of
+violations. Catches chained fabrications that per-artifact quality checks
+miss — a route calling `service.query_stream()` where a sibling artifact
+invents a matching stub so both look self-consistent.
 
-| Check | How | Pass/Fail |
-|-------|-----|-----------|
-| **Parseable** | `ast.parse(content)` — ignore indent errors for code fragments | bool |
-| **No fabricated `self.method()`** | Existing `check_artifact` from grounding.py | count of violations |
-| **No fabricated `self._xxx.method()`** | Resolve `_xxx` type from init attrs, check method exists | count of violations |
-| **No fabricated `request.field`** | F25 typed attr validation | count of violations |
-| **No fabricated classes** | Check `ClassName()` constructors against index | count of violations |
-| **Has yield** (streaming artifacts) | `yield` keyword present in AST | bool |
-| **Has correct return type** | Check function annotation matches purpose | bool |
-| **No NotImplementedError** | String check | bool |
-| **No sys.stdout** | String check | bool |
+**Actionability** — can an agent actually execute this plan end-to-end?
+Measures the fraction of roadmap phases that carry a concrete
+`verification_command` (non-empty, non-placeholder). Plans with no roadmap
+score 0.
 
-**Per-artifact score**: `(checks_passed / total_checks) * 100`
+These four dimensions don't mechanically combine into `deterministic_score`
+— they're a more interpretable split of *similar* underlying checks and
+show up alongside the composite in `SCORE_V2_SUMMARY.md`. The composite
+formula is kept for backward compatibility with older runs.
 
-### 1.3 Cross-Artifact Consistency
-
-| Check | How |
-|-------|-----|
-| **Method name agreement** | If artifact A calls `service.answer_stream()`, artifact B for services must define `answer_stream()` (not `query_stream()`) |
-| **Type agreement** | If engine returns `Iterator[str]`, route must consume `Iterator[str]` (not `AsyncGenerator`) |
-| **No duplicates** | Same file shouldn't appear with identical content twice |
-
-### 1.4 Deterministic Score Formula
+#### The composite formula
 
 ```
-completeness = required_files_present / required_files_total  (0-1)
-artifact_quality = mean(per_artifact_scores)                   (0-100)
-consistency = consistency_checks_passed / total                (0-1)
+completeness     = required_files_present / required_files_total   (0-1)
+artifact_quality = size-weighted mean of per-artifact scores         (0-100)
+consistency      = consistency_checks_passed / total                 (0-1)
 
-deterministic_score = (completeness * 30) + (artifact_quality * 0.5) + (consistency * 20)
+deterministic_score = completeness * 30
+                    + artifact_quality * 0.5
+                    + consistency * 20
 ```
 
-Max = 30 + 50 + 20 = **100 points**.
+Max = 100.
 
-## Tier 2: Solution Taxonomy
+#### Per-artifact checks
 
-### 2.1 Architecture Taxonomy (task-specific)
+Each artifact runs a battery of deterministic checks:
 
-For the streaming task, valid architectural patterns:
+| Check | Method | Output |
+|---|---|---|
+| Parseable | `ast.parse(content)` with import-split + class-wrap fallbacks | bool |
+| No fabricated `self.method()` | Resolve against target class's real method list on disk | violation count |
+| No fabricated `self._xxx.method()` | Resolve `_xxx` type from `__init__` attrs, check method exists | violation count |
+| No fabricated `request.field` | Typed-attribute validation against known request models | violation count |
+| No fabricated classes | `ClassName(...)` constructors validated against full codebase index | violation count |
+| Has yield (streaming artifacts) | `yield` statement present in AST | bool |
+| Has correct return type | Function annotation matches streaming / generator expectations | bool |
+| No `NotImplementedError` | String check | bool |
+| No `sys.stdout` | String check | bool |
 
-| ID | Pattern | Quality | Description |
-|----|---------|---------|-------------|
-| A1 | **Full pipeline + generate_stream** | BEST | `answer_stream()` replicates all pipeline steps, calls `generate_stream()` at the end which wraps `chat_stream()`. All RAG context preserved. |
-| A2 | **Full pipeline + direct chat_stream** | GOOD | `answer_stream()` replicates pipeline, calls `self._chat.chat_stream()` at the final step instead of going through synthesizer. Loses synthesis logic but keeps RAG. |
-| A3 | **Provider shortcut** | POOR | Calls `chat_stream()` directly, skipping the entire pipeline. No RAG, no context, no guardrails. |
-| A4 | **Blocking + split** | BAD | Calls `answer()` then splits `answer.text` into fake tokens. Not real streaming. |
-| A5 | **NotImplementedError** | FAIL | Gives up. |
+Per-artifact score = `(checks_passed / total_checks) * 100`. Weights by line
+count so a 222-line engine.py drives the artifact-quality average more than
+a 25-line stub.
 
-### 2.2 Per-File Implementation Taxonomy
+#### Cross-artifact consistency
 
-**engine.py:**
+| Check | What it catches |
+|---|---|
+| Method-name agreement | Artifact A calls `service.query_stream()`, artifact B defining the service must expose `query_stream()` — not `answer_stream()`. |
+| Type agreement | Engine returns `Iterator[str]` → route must consume `Iterator[str]`, not `AsyncGenerator`. |
+| No duplicate content | Same filename can't appear twice with identical content. |
+| Parallel-method signatures | `generate_stream()` must share parameters with `generate()` it parallels. |
 
-| ID | Pattern | Quality |
-|----|---------|---------|
-| E1 | Full pipeline, yield, correct return type | BEST |
-| E2 | Full pipeline, yield, wrong return type (Answer instead of Iterator) | PARTIAL |
-| E3 | Partial pipeline (missing steps), yield | PARTIAL |
-| E4 | No pipeline, direct chat_stream call | POOR |
-| E5 | No yield (returns Answer, blocking) | BAD |
-| E6 | NotImplementedError | FAIL |
+### Tier 2 — taxonomy classification
 
-**routes/query.py:**
+One Sonnet call per plan, invoked headless via `claude -p`. Sonnet receives:
 
-| ID | Pattern | Quality |
-|----|---------|---------|
-| R1 | StreamingResponse + async generator, correct fields | BEST |
-| R2 | StreamingResponse, wrong field names (F2/F25) | PARTIAL |
-| R3 | StreamingResponse, fabricated service methods | POOR |
-| R4 | Not streaming (returns JSON response) | BAD |
-| R5 | sys.stdout.flush | BAD |
+1. The plan JSON.
+2. The Tier 1 deterministic report.
+3. The task's taxonomy tables (architecture + per-file).
+4. The structural index of the target codebase.
+5. The original task query.
 
-**synthesizer.py:**
+Sonnet's job is **to classify, not to score**. It picks:
 
-| ID | Pattern | Quality |
-|----|---------|---------|
-| S1 | `generate_stream()` wrapping `chat_stream()`, correct interface | BEST |
-| S2 | Present but raises NotImplementedError | PARTIAL |
-| S3 | Absent from plan | ABSENT |
+- Which architecture taxonomy entry (A1, A2, …) the plan's recommendation
+  matches.
+- Which per-file taxonomy entry (E1–E6 for engine, R1–R5 for routes, …) each
+  critical file's implementation matches.
 
-### 2.3 Sonnet's Role with Taxonomy
+The classifications map to pre-defined scores via the taxonomy's own
+`score` field. Sonnet cannot override deterministic findings — if Tier 1
+flagged 3 fabricated methods in engine.py, Sonnet cannot classify it above
+a "has fabrications" tier.
 
-Sonnet receives:
-1. The plan JSON
-2. The deterministic check results (Tier 1)
-3. The taxonomy tables above
-4. The structural index (codebase context)
-
-Sonnet's job:
-1. **Classify** each artifact into its taxonomy entry (E1-E6, R1-R5, S1-S3)
-2. **Classify** the overall architecture (A1-A5)
-3. **Note** any issues the deterministic checks missed (e.g., semantic errors, wrong algorithm choices)
-4. **Do NOT** override deterministic findings — if Tier 1 says "3 fabricated methods," Sonnet cannot say "actually it's fine"
-
-### 2.4 Taxonomy Score
+#### Taxonomy score
 
 ```
-architecture_score = {A1: 100, A2: 75, A3: 30, A4: 10, A5: 0}
-per_file_score = mean of per-file taxonomy scores
-taxonomy_score = (architecture_score * 0.4) + (per_file_score * 0.6)
+architecture_score = entry score for the plan's classified architecture
+per_file_mean      = mean of per-file classified scores
+taxonomy_score     = architecture_score * 0.4 + per_file_mean * 0.6
 ```
 
-## Combined Score
+## Combined final score
 
 ```
-final_score = (deterministic_score * 0.6) + (taxonomy_score * 0.4)
+final_score = deterministic_score * 0.6 + taxonomy_score * 0.4
 ```
 
-- 60% weight on deterministic (reproducible, zero variance)
-- 40% weight on taxonomy (Sonnet classification, low variance due to rubric)
+60/40 in favour of deterministic because deterministic has zero variance
+and the taxonomy grader has some noise (Sonnet calls on the same plan on
+different days can land ±2–3 points). Final score is what you compare
+across runs to say "benchmark X is better than benchmark Y."
 
-## Implementation Plan
+## Taxonomies live per task
 
-### Phase 1: Deterministic checker
-- Extend `check_artifact` with all Tier 1 checks
-- Add completeness check based on decision file references
-- Add cross-artifact consistency checks
-- Output: structured JSON report
+Taxonomies are authored per challenge as `benchmarks/challenges/<task>/
+taxonomy.json` — the scorer loads them via `load_taxonomy`. Schema:
 
-### Phase 2: Taxonomy definition
-- Define taxonomy tables for the streaming task
-- Make taxonomy format task-agnostic (loaded from JSON/YAML)
-- For new tasks: generate taxonomy from an "ideal plan" or from analyzing 5+ plan variants
+```json
+{
+  "task_name": "streaming_implementation",
+  "task_description": "Add query result streaming …",
+  "required_files": ["engine.py", "routes/query.py"],
+  "architecture_taxonomy": {
+    "entries": [
+      {"id": "A1", "pattern": "…", "quality": "BEST", "score": 100, "description": "…"},
+      …
+    ]
+  },
+  "file_taxonomies": {
+    "engine.py": {"entries": [{"id": "E1", "pattern": "…", "score": 100, "description": "…"}, …]},
+    "routes/query.py": {"entries": […]},
+    …
+  }
+}
+```
 
-### Phase 3: Sonnet classifier
-- Prompt that receives plan + deterministic results + taxonomy
-- Outputs taxonomy classification per artifact + overall
-- Structured JSON output (no free text scores)
+The framework is codebase-agnostic; the taxonomy captures what "good"
+means for a specific task. Authoring a new taxonomy for a new benchmark:
+run 5 plans against the task, manually classify them into 4–6 quality
+tiers, write the JSON.
 
-### Phase 4: Score aggregation
-- Combine deterministic + taxonomy scores
-- Generate per-plan report card
-- Support comparison across runs
+## Running the scorer
 
-## Migration from Scorer V1
+End-to-end on a fresh 5-plan benchmark (T1 + T2, bundled):
 
-- V1 score prompts (`score_prompt_NN.md`) still generated for backwards compat
-- V2 runs alongside V1 during transition
-- Once V2 is validated on 10+ plans, V1 is removed
+```bash
+python -m benchmarks.plan_factory decomposed \
+  --runs 5 --source-dir ../your-codebase \
+  --context-file benchmarks/challenges/<task>/ideal_context.json \
+  --query "$(cat benchmarks/challenges/<task>/user_prompt.txt)" \
+  --taxonomy benchmarks/challenges/<task>/taxonomy.json \
+  --score-v2
+```
 
-## Key Design Decisions
+Re-scoring an existing run directory without regenerating plans:
 
-1. **Taxonomy is task-specific** but the FRAMEWORK is task-agnostic. Each task gets its own taxonomy tables. For a new task, generate 5 plans, manually classify them, and the taxonomy emerges.
-2. **Deterministic checks are codebase-agnostic** — they use the structural index, not hardcoded patterns.
-3. **Sonnet classifies, it doesn't score** — the scoring formula is fixed. Sonnet only picks which taxonomy entry each artifact matches. This eliminates scorer drift.
-4. **Completeness is rewarded** — more required files present = higher score. No more penalizing ambitious plans.
+```bash
+python -m benchmarks.plan_factory prepare-scoring-v2 \
+  --results-dir benchmarks/challenges/<task>/results/<timestamp>_run_NNN \
+  --context-file benchmarks/challenges/<task>/ideal_context.json \
+  --source-dir ../your-codebase \
+  --taxonomy benchmarks/challenges/<task>/taxonomy.json
+```
+
+Skip Tier 2 (deterministic only, no Sonnet calls — useful for quick
+iteration):
+
+```bash
+… --no-tier2
+```
+
+## Outputs
+
+| File | Content |
+|---|---|
+| `scores_v2.json` | Full structured results: per-plan deterministic report (all four dimensions + composite), taxonomy classifications, final scores, batch averages |
+| `SCORE_V2_SUMMARY.md` | Human-readable Tier 1 summary: per-plan table with Coverage / Craft / Groundedness / Actionability / Final, batch averages and ranges |
+| `scores_v2_taxonomy.json` | Tier 2 structured results: per-plan taxonomy IDs + architecture distribution + file-id distribution |
+| `SCORE_V2_TAXONOMY.md` | Human-readable Tier 2 summary: distributions + per-plan taxonomy classification table |
+| `score_v2_prompt_NN.md` | The exact prompt sent to Sonnet for plan NN (reproduces Tier 2 offline) |
+
+## Design principles
+
+- **Zero variance on Tier 1.** A plan scored today and a year from now gives
+  the same numbers if the scorer code is unchanged. No LLM calls in the
+  deterministic path.
+- **Sonnet classifies, it doesn't score.** The scoring formula is fixed
+  once a taxonomy is authored. Sonnet picks entries from a rubric;
+  scores come from the rubric's `score` fields. Eliminates scorer drift.
+- **Four named dimensions, not one opaque composite.** Coverage / Craft /
+  Groundedness / Actionability each catch a specific failure mode. The
+  composite `deterministic_score` is kept for backward compatibility but
+  the dimensions are what's reportable.
+- **Deterministic findings override LLM judgement.** Sonnet can flag
+  additional issues (semantic errors, wrong algorithms) but cannot
+  contradict Tier 1.
+- **Taxonomies are task-specific, framework is task-agnostic.** A new
+  benchmark needs a new `taxonomy.json`. The scorer code doesn't change.
+
+## Limitations
+
+- **Taxonomy authoring is manual.** Creating `taxonomy.json` for a new task
+  requires running ~5 plans and hand-classifying them. There's no
+  automated taxonomy generator yet.
+- **Completeness requires a taxonomy to declare `required_files`.**
+  Without one, completeness falls back to "files referenced in ≥3 resolved
+  decisions," which is a weaker signal.
+- **Per-artifact checks are partly language-specific.** Python artifacts
+  get the full battery (AST parse, typed attr validation, fabrication
+  checks). Non-Python artifacts get the cross-language
+  keyword-presence check and not much else. Adding a new language means
+  porting the AST checks.
+- **Sonnet classification has residual variance.** Same plan on different
+  days scores within ~2–3 points. We mitigate by reporting 5-plan means,
+  not single runs.
+
+## Related docs
+
+- [FIXER_LOOP.md](../benchmarks/FIXER_LOOP.md) — the benchmark-improvement
+  methodology that consumes scorer output.
+- [Features guide](features/) — each pipeline stage and infrastructure
+  component that the scorer evaluates the output of.
+- [Senior-engineer reviews](features/infrastructure/senior-engineer-reviews.md)
+  — the production-time review layer the scorer was built to measure the
+  impact of.

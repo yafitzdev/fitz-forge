@@ -133,21 +133,40 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
+### How we know the pipeline works
+
+> [!IMPORTANT]
+> **Plans you generate with `fitz-forge` do not come with a score.** The evaluation framework below is how we (the developers) measure the pipeline's quality — for regression testing, for comparing changes, and for driving improvements. It never runs in production. Your plan is just a plan.
+
+Ideally we'd want every local-model output to come with an "is this plan any good?" number. Running a Sonnet-grader on every plan would defeat the purpose of local-first — you're back to paying API tokens on the critical path. So instead we judge the *pipeline* rigorously offline, and ship a pipeline we've measured.
+
+Three evaluation mechanisms, each operating at a different timescale:
+
+**Benchmarks** (~60 min per run). The full A/B: run the pipeline N times on a challenge task, score each plan. Lives in `benchmarks/challenges/<task>/`. Each challenge has a fixed user prompt, a curated file list (so retrieval isn't a variable), and a hand-authored taxonomy that defines what "good" means for that task in 4-6 quality tiers. The `plan_factory.py` runner produces plans; the V2 scorer (see [SCORER-V2-SPEC.md](docs/SCORER-V2-SPEC.md)) evaluates them on five dimensions:
+
+- **Coverage** — did the required files ship with real implementations (not `raise NotImplementedError` stubs)?
+- **Craft** — is the code quality good on what was produced?
+- **Groundedness** — do the plan's references resolve in the real codebase?
+- **Actionability** — can an agent execute the plan end-to-end (are there concrete verification commands)?
+- **Architectural correctness** — is the plan's overall approach right? Graded by Sonnet against the task's taxonomy, which means this is the one dimension that depends on a frontier model — but it runs *only at evaluation time*, not during the pipeline.
+
+The first four are deterministic. Same plan in, same score out, forever. The fifth adds Sonnet's judgment for the architectural-level question, which a deterministic checker can't assess.
+
+**Replay** (~5-10 min). When we change something in a single stage — a review's prompt, a regeneration mechanism, the artifact coverage check — we don't want to re-run decomposition and resolution (which are expensive and irrelevant to the change). `benchmarks/plan_factory.py replay` loads a checkpoint snapshot from a previous run and continues from there. Changed the design review? Replay from `snapshot_after_decision_resolution.json` to validate the fix in 5 minutes instead of 12. Most of our iteration happens at this speed.
+
+**The Fixer Loop** ([benchmarks/FIXER_LOOP.md](benchmarks/FIXER_LOOP.md)). The methodology that ties it all together. When a task is scoring below where we want it: enumerate the failure patterns from Tier-2's qualitative classifications, log each into a task-specific bug register with an impact score, fix the highest-impact one first, re-benchmark, confirm the fix lands on both tiers. Every fix has to be codebase- and language-agnostic — task-specific hacks don't ship. The track record section of FIXER_LOOP.md lists every benchmark improvement cycle and what changed.
+
+Results below are the output of this process.
+
+---
+
 ### Benchmarks
 
-**How much does the harness actually matter?** We're running an A/B where the *only* variable is the presence of `fitz-forge` — same model, same files, same scorer. A raw single-prompt baseline gets the user task + the same relevant source files the harness sees. Both outputs are scored by the same two-tier judge (deterministic Tier-1 + Sonnet taxonomy Tier-2 that classifies the plan's architectural pattern and per-file fidelity against a pre-defined ideal).
+**How much does the harness actually matter?** The A/B that drives everything above. Same model, same files, same scorer — only variable is the presence of `fitz-forge`. A raw single-prompt baseline gets the user task + the same relevant source files the harness sees. Both outputs go through the same five-dimension evaluation.
 
 <br>
 
 #### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · n=5 per arm
-
-Five dimensions, each measuring something different:
-
-- **Coverage** — what fraction of the files the task *requires* actually shipped with real implementations. A file that ships as `raise NotImplementedError` counts as uncovered, even though it technically exists.
-- **Craft** — on the files that did ship, how good is the code? Per-file quality averaging parseability, fabrication checks, correct return types, and cross-file consistency.
-- **Groundedness** — do the references in the plan resolve against the real codebase? Catches chained fabrications (a route calling `service.query_stream()` that doesn't exist anywhere, with a sibling artifact inventing a stub) that per-artifact quality checks miss.
-- **Actionability** — can an agent actually execute this plan end-to-end? Measures what fraction of roadmap phases carry a concrete verification command instead of placeholder text.
-- **Architectural correctness** — Sonnet-graded judgment of whether the plan implements the *right* architecture for the task. End-to-end coherence: did it replicate the full pipeline, wire the provider through the synthesizer, preserve RAG context, return the right types at each boundary?
 
 | Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge |
 |---|---:|---:|
