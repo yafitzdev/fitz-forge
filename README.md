@@ -190,59 +190,80 @@ Results below are the output of this process.
 
 ### Benchmarks
 
-**How much does the harness actually matter?** The A/B that drives everything above. Same model, same files, same scorer — only variable is the presence of `fitz-forge`. A raw single-prompt baseline gets the user task + the same relevant source files the harness sees. Both outputs go through the same five-dimension evaluation.
+**Three arms, same task, same five-dimension evaluation.** All three arms get the same user prompt and the same 30 relevant source files (curated in `ideal_context.json`) embedded in their prompt. Tools are disabled so no arm can read additional files agentically — this is a controlled experiment. The only variables are *which model* and *whether the fitz-forge harness runs*.
+
+- 🤖 **Raw gemma** — one shot, local model, no harness.
+- 🔨 **fitz-forge** — same local model, wrapped in the harness.
+- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no harness.
 
 <br>
 
-#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · n=5 per arm
+#### Streaming implementation on `fitz-sage` · n=5 per arm
 
-| Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge |
-|---|---:|---:|
-| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** |
-| **Craft** (code quality on what shipped) | 97.4 | **99.8** |
-| **Groundedness** (references resolve in the real codebase) | 81.7 | **100.0** |
-| **Actionability** (phases with real verification commands) | 0.0 | **100.0** |
-| **Architectural correctness** | 38.8 | **89.5** |
-| Latency per plan | ~30s | ~12 min |
+| Metric | 🤖 Raw gemma (no harness) | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code (Sonnet) |
+|---|---:|---:|---:|
+| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 |
+| **Craft** (code quality on what shipped) | 97.4 | **99.8** | 72.1 |
+| **Groundedness** (references resolve in the real codebase) | 81.7 | **100.0** | 64.7 |
+| **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 |
+| **Architectural correctness** | 38.8 | **89.5** | 83.0 |
+| Cost per plan (API tokens) | $0 | $0 | **$0.40** |
+| Cost per plan (electricity) | ~$0.00 | ~$0.02 | — |
+| Latency per plan | 28s | 12 min | 108s (wall clock parallel: 2.4 min) |
+| Tokens per plan | — | — | ~65K cache write + ~11K output |
 
 <br>
 
-**Craft is almost a tie.** The raw LLM writes decent code on the files it does ship — 97.4 vs 99.8 is within noise. Everything else is where the gap opens up.
+The story this table tells has four parts.
 
-**Coverage is the obvious failure mode.** Across 5 baseline runs, the required `engine.py` was either missing entirely or shipped as a stub like `raise NotImplementedError("Streaming logic to be implemented")` every single time. The raw model wrote the route handler, the SDK entry, and the response types, then ran out of conviction when the real work (extending the KRAG engine with a streaming path) would have required tracing the full call chain.
+**Raw gemma is the worst on every dimension.** One-shot local inference, no harness, no recovery loop. Half the required files missing or stubbed, zero roadmap, bottom-tier architecture.
 
-**Groundedness exposes a subtler one.** Even on the files that did ship, raw baselines had 3 fabrication violations across 5 plans — calls to functions that don't exist, parse errors that suggest the model invented syntax. The harness lands at 0 because its grounding validation stage catches and repairs these before the plan finalizes.
+**Cold Claude Code is better than raw gemma across the board, and by a lot on Architectural correctness** (83.0 vs 38.8) — which is exactly what you'd expect from a frontier model. It writes code that parses, it mostly picks reasonable architectures, it covers most of the required files.
 
-**Actionability is a complete miss for the baseline** — 0 of 0, because the raw LLM output format is just `## filename` + code blocks, with no roadmap, no phases, no verification commands. Hand that to an agent and it has no structure to follow. The harness emits a full roadmap with a verification command per phase that an agent (or a human) can actually run.
+**But Cold Claude Code loses to fitz-forge on three of the four deterministic dimensions.** That sounds wrong at first — gemma is a fraction of Sonnet's size — but it's not about model capability, it's about what the harness enforces.
 
-**Architectural correctness is the consequence of the above.** If the engine doesn't implement streaming, nothing downstream can. If the plan has no roadmap, there's no ordering to the work. The Sonnet grader flags all of this: 3 of 5 raw baselines graded at the worst architectural tier ("gave up on the hard problem"), 2 at a middle tier. The harness landed on the ideal architecture in 4 of 5 runs, one tier below ideal once.
+- **Craft** (72.1 vs 99.8): Sonnet writes ambitious code with test fixtures and intermediate types that don't exist in the target codebase. Per-file fabrication checks flag them. The harness's grounding + repair loop catches these before the plan finalizes; a one-shot frontier call can't.
+- **Groundedness** (64.7 vs 100.0): same shape, bigger gap. 5 baseline plans produced 35+ unresolved references. The harness hits 0 because its closure check expands missing symbols into sibling artifacts rather than shipping them as fabrications.
+- **Actionability** (0.0 vs 100.0): neither one-shot arm emits a roadmap with verification commands. fitz-forge's synthesis stage produces structured phases every time because that's what its schema demands.
 
-The harness doesn't make a dumb model smart. It forces a dumb model to trace the call chain, stay grounded in the real codebase, and produce the scaffolding an agent needs to actually close the loop.
+**Architectural correctness is the dimension where Claude Code and fitz-forge are closest** (83.0 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5 (with 4/5 at A2, one tier below).
+
+**The headline:** frontier models produce *better code per file* but *less structure* and *more fabrications* than a harness'd local model. fitz-forge gives you end-to-end plans an agent can execute, for $0 API spend, at 20× less cost than Claude Code per plan.
 
 <br>
 
 > [!NOTE]
-> Variance on a single run is significant (Tier-2 range for baseline was 6.25–62.5, harness was 72.5–100). We report 5-plan means and ranges. One run is a data point, not a headline.
+> Variance on a single run is significant (Tier-2 range for raw gemma was 6.25–62.5, harness 72.5–100, Claude Code 75.0–87.5). We report 5-plan means. One run is a data point, not a headline.
+>
+> Sonnet pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates.
 
 <br>
 
 Reproduction:
 ```bash
-# Baseline (no harness)
+# Arm 1: raw gemma (no harness)
 python -m benchmarks.no_harness \
   --source-dir ../fitz-sage \
   --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
   --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
   --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --runs 1 --score-v2
+  --runs 5 --score-v2
 
-# With harness
+# Arm 2: gemma + fitz-forge harness
 python -m benchmarks.plan_factory decomposed \
-  --runs 1 --source-dir ../fitz-sage \
+  --runs 5 --source-dir ../fitz-sage \
   --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
   --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
   --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
   --score-v2
+
+# Arm 3: cold Claude Code (Sonnet, parallel one-shots, tools disabled)
+python -m benchmarks.claude_code_benchmark \
+  --source-dir ../fitz-sage \
+  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
+  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
+  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
+  --runs 5 --score-v2
 ```
 
 ---
