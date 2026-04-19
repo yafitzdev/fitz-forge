@@ -229,6 +229,20 @@ def format_batch_report(batch: BatchScoreV2) -> str:
         f"- Deterministic avg: {batch.deterministic_average}/100 "
         f"(range: {batch.deterministic_min}-{batch.deterministic_max})"
     )
+    # Coverage + Craft averages (separates 'did we deliver the required
+    # files?' from 'is the code we delivered any good?' — surface-area
+    # effects otherwise inflate Tier-1 when few files ship).
+    coverages = [s.deterministic.coverage_strict for s in batch.scores]
+    crafts = [s.deterministic.craft for s in batch.scores]
+    if coverages:
+        lines.append(
+            f"- Coverage (strict): avg {round(sum(coverages) / len(coverages), 1)}/100 "
+            f"(range: {min(coverages)}-{max(coverages)})"
+        )
+        lines.append(
+            f"- Craft: avg {round(sum(crafts) / len(crafts), 1)}/100 "
+            f"(range: {min(crafts)}-{max(crafts)})"
+        )
     if batch.taxonomy_average is not None:
         lines.append(f"- Taxonomy avg: {batch.taxonomy_average}/100")
     lines.append(
@@ -237,12 +251,17 @@ def format_batch_report(batch: BatchScoreV2) -> str:
 
     # Per-plan table
     lines.append("\n## Per-Plan Scores")
-    lines.append("| Plan | Deterministic | Completeness | Artifact Qual | Consistency | Final |")
-    lines.append("|------|---------------|--------------|---------------|-------------|-------|")
+    lines.append(
+        "| Plan | Deterministic | Coverage | Craft | Completeness | Artifact Qual | Consistency | Final |"
+    )
+    lines.append(
+        "|------|---------------|----------|-------|--------------|---------------|-------------|-------|"
+    )
     for s in batch.scores:
         det = s.deterministic
         lines.append(
             f"| {s.plan_file} | {det.deterministic_score} | "
+            f"{det.coverage_strict} | {det.craft} | "
             f"{det.completeness_score}/30 | {det.artifact_quality_score}/50 | "
             f"{det.consistency_score}/20 | {s.final_score} |"
         )

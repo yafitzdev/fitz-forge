@@ -141,28 +141,31 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 #### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · n=5 per arm
 
-| Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge | Δ |
-|---|---:|---:|---:|
-| **Tier-1** (deterministic code quality, mean) | 94.5 | **99.8** | +5.3 |
-| **Tier-2** (architectural correctness, mean) | 38.8 | **89.5** | +50.7 |
-| Tier-2 range | 6.25 – 62.5 | 72.5 – 100 | |
-| Architecture distribution | A5 × 3, A2 × 2 | **A1 × 4**, A2 × 1 | |
-| engine.py fidelity | **E6 × 5** (absent from every plan) | **E1 × 5** (top tier, all 5) | |
-| Files covered per plan | 3 / 5 | 6–8 / 5 | |
-| Latency per plan | ~30s | ~12 min | ~25× |
+Three metrics, each measuring something different:
+
+- **Coverage** — what fraction of the files the task *requires* actually shipped with real implementations. A file that ships as `raise NotImplementedError` counts as uncovered, even though it technically exists.
+- **Craft** — on the files that did ship, how good is the code? This is a per-file quality score averaging artifact-level checks (parseability, no fabricated APIs, correct return types) and cross-file consistency.
+- **Architectural correctness** — a Sonnet-graded judgment of whether the plan implements the *right* architecture for the task. Measures end-to-end coherence: did the plan replicate the full pipeline, wire the provider through the synthesizer, preserve RAG context, return the right types at each boundary?
+
+| Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge |
+|---|---:|---:|
+| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** |
+| **Craft** (code quality on what shipped) | 97.4 | **99.8** |
+| **Architectural correctness** | 38.8 | **89.5** |
+| Latency per plan | ~30s | ~12 min |
 
 <br>
 
-**What the raw LLM does:** in a single prompt, the model touches whatever surface files it can see — the route handler, the SDK entry, the `Answer` type — and ships that as a plan. Across 5 runs, **every baseline plan skipped `engine.py` entirely** (scored E6 = "absent from plan"), and the architecture scorer classified 3 runs as A5 (gave up — NotImplementedError-class) and 2 as A2 (partial pipeline). Zero A1s. The single-run variance is huge (T2 range 6.25–62.5) — sometimes the model commits to a shape, sometimes it bails.
+**The striking result is Coverage, not Craft.** The raw LLM writes *decent code* on the files it does ship — 97.4 vs 99.8 is within noise. What it consistently fails to do is ship enough files. Across 5 baseline runs, the required `engine.py` was either missing entirely or shipped as a stub like `raise NotImplementedError("Streaming logic to be implemented")` every single time. The model wrote the route handler, the SDK entry, and the response types, then ran out of conviction when the real work (extending the KRAG engine with a streaming path) would have required tracing the full call chain.
 
-**What the harness does:** decomposes the task, traces the call chain, and regenerates under review pressure at every stage boundary. All 5 runs produced `engine.py` (E1 × 5 — top tier every time), all 5 produced `synthesizer.py`, 4/5 reached the ideal A1 architecture (`answer_stream` replicating the full pipeline and calling `generate_stream` through the synthesizer), 1/5 hit A2.
+The architectural correctness gap is the consequence. If the engine doesn't implement streaming, nothing downstream can — the plan is architecturally coherent only for a narrow surface definition of the task. The Sonnet grader flags this immediately: 3 of 5 raw baselines graded at the worst architectural tier (gave up on the hard problem), 2 at a middle tier (partial pipeline). The harness ran the same task with the same files 5 times and landed on the ideal architecture 4 times, one tier below ideal once.
 
-**+50.7 T2 points mean, but the shape matters more than the number:** raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain. And on T1 (pure code quality on whatever files do get produced) the gap is modest — 94.5 vs 99.8 — because the raw LLM writes decent code, it just doesn't write enough of it.
+The harness doesn't make a dumb model smart. It forces a dumb model to *trace the call chain*.
 
 <br>
 
 > [!NOTE]
-> Single-run variance on these benchmarks is ~±15 T2 points for the harness arm and much larger for the raw arm. Means are the right thing to report. One run is a data point, not a headline.
+> Variance on a single run is significant (Tier-2 range for baseline was 6.25–62.5, harness was 72.5–100). We report 5-plan means and ranges. One run is a data point, not a headline.
 
 <br>
 

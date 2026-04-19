@@ -253,6 +253,18 @@ def run_deterministic_checks(
 
     deterministic_score = round(completeness_score + artifact_quality_score + consistency_score, 1)
 
+    # Coverage + Craft split — see DeterministicReport for the motivation.
+    # Strict coverage treats a required file that shipped as a
+    # NotImplementedError stub as uncovered, so a 'raise NotImplementedError'
+    # engine.py doesn't silently count against the harness.
+    coverage_strict = _compute_strict_coverage(completeness, artifact_checks)
+    # Craft = normalized average of artifact_quality (/50) and consistency (/20),
+    # so both Craft and Coverage live on the same 0-100 scale.
+    craft = round(
+        (artifact_mean + consistency_ratio * 100) / 2,
+        1,
+    )
+
     return DeterministicReport(
         completeness=completeness,
         artifact_checks=artifact_checks,
@@ -261,4 +273,48 @@ def run_deterministic_checks(
         artifact_quality_score=artifact_quality_score,
         consistency_score=consistency_score,
         deterministic_score=deterministic_score,
+        coverage_strict=coverage_strict,
+        craft=craft,
     )
+
+
+def _compute_strict_coverage(completeness, artifact_checks) -> float:
+    """Fraction of required files present AND not a NotImplementedError stub.
+
+    The existing completeness.score gives partial credit for files that
+    exist in the plan but doesn't know they may be stubs. A required
+    engine.py that ships as ``raise NotImplementedError`` with helpful
+    comments is classified 'present' by file-path matching even though
+    it delivers nothing. Strict coverage treats such stubs as uncovered.
+    """
+    required_files = completeness.required_files
+    present_required = set(completeness.present_required)
+    if not required_files:
+        return 100.0
+
+    ac_by_name: dict[str, object] = {}
+    for ac in artifact_checks:
+        ac_by_name[ac.filename] = ac
+        tail = ac.filename.split("/")[-1]
+        ac_by_name[tail] = ac
+
+    covered = 0
+    for req in required_files:
+        if req not in present_required:
+            continue
+        # Find the matching artifact check — may live under a deeper path
+        # in the plan (e.g. ``fitz_sage/engines/fitz_krag/engine.py`` vs
+        # the short ``engine.py`` listed in the taxonomy).
+        ac = ac_by_name.get(req)
+        if ac is None:
+            for fname, candidate in ac_by_name.items():
+                if fname.endswith("/" + req) or req.endswith("/" + fname):
+                    ac = candidate
+                    break
+        if ac is None:
+            covered += 1
+            continue
+        if getattr(ac, "has_not_implemented", False):
+            continue
+        covered += 1
+    return round(covered / len(required_files) * 100, 1)

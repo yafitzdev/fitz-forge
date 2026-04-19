@@ -850,6 +850,15 @@ def prepare_scoring_v2(
         "Add query result streaming so answers are delivered token-by-token instead of waiting for the full response",
         help="The task query these plans address",
     ),
+    source_dir: str = typer.Option(
+        "",
+        help="Target codebase dir — threaded into augment_from_source_dir so full class index is used for fabrication detection. Without it, classes outside the retrieval subset get false-positive flags.",
+    ),
+    taxonomy_file: str = typer.Option(
+        "",
+        "--taxonomy",
+        help="Path to taxonomy.json (defaults to streaming_implementation).",
+    ),
     no_tier2: bool = typer.Option(False, "--no-tier2", help="Skip Tier-2 Sonnet scoring"),
 ):
     """Run Scorer V2 on existing plans (Tier-1 deterministic + Tier-2 taxonomy)."""
@@ -859,7 +868,14 @@ def prepare_scoring_v2(
         logger.error("No 'synthesized' field in context file")
         raise typer.Exit(1)
 
-    _prepare_scoring_v2(results_dir, query, structural_index, skip_tier2=no_tier2)
+    _prepare_scoring_v2(
+        results_dir,
+        query,
+        structural_index,
+        source_dir=source_dir,
+        taxonomy_file=taxonomy_file,
+        skip_tier2=no_tier2,
+    )
 
 
 @app.command("score-taxonomy")

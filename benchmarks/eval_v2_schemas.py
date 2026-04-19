@@ -108,6 +108,21 @@ class DeterministicReport(BaseModel):
     consistency_score: float = Field(description="0-20 points")
     deterministic_score: float = Field(description="Sum of above, 0-100")
 
+    # Coverage + Craft split: separates "did we deliver what was required"
+    # from "is the code we delivered any good" so surface-area effects
+    # (few artifacts = less chance for a flaw to land) don't inflate the
+    # headline. Craft is the average of artifact_quality and consistency
+    # re-scaled to 0-100; Coverage is strict — a required file that ships
+    # as a NotImplementedError stub doesn't count as covered.
+    coverage_strict: float = Field(
+        default=0.0,
+        description="Required files shipped AND not a stub (0-100)",
+    )
+    craft: float = Field(
+        default=0.0,
+        description="Code quality + cross-file consistency on what was shipped (0-100)",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Tier 2: Taxonomy classification
