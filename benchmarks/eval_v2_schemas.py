@@ -122,6 +122,28 @@ class DeterministicReport(BaseModel):
         default=0.0,
         description="Code quality + cross-file consistency on what was shipped (0-100)",
     )
+    # Groundedness catches Craft's blind spot: intra-plan consistency can
+    # hide chained fabrications where sibling artifacts reinforce each
+    # other's invented APIs. Runs the full-codebase grounding check (the
+    # one the pipeline uses to gate artifact emission) and reports the
+    # fraction of artifacts free of fabrication violations.
+    groundedness: float = Field(
+        default=0.0,
+        description="% of artifacts free of grounding violations against the real codebase (0-100)",
+    )
+    grounding_violations: int = Field(
+        default=0,
+        description="Total grounding violations across all artifacts",
+    )
+    # Actionability: can an agent actually execute this plan? Checks that
+    # roadmap phases carry a concrete verification command — if every
+    # phase declares how success is measured, downstream automation can
+    # close the loop end-to-end without a human inventing acceptance
+    # criteria.
+    actionability: float = Field(
+        default=0.0,
+        description="% of roadmap phases with a non-empty verification command (0-100)",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -141,26 +141,36 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 #### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · n=5 per arm
 
-Three metrics, each measuring something different:
+Five dimensions, each measuring something different:
 
 - **Coverage** — what fraction of the files the task *requires* actually shipped with real implementations. A file that ships as `raise NotImplementedError` counts as uncovered, even though it technically exists.
-- **Craft** — on the files that did ship, how good is the code? This is a per-file quality score averaging artifact-level checks (parseability, no fabricated APIs, correct return types) and cross-file consistency.
-- **Architectural correctness** — a Sonnet-graded judgment of whether the plan implements the *right* architecture for the task. Measures end-to-end coherence: did the plan replicate the full pipeline, wire the provider through the synthesizer, preserve RAG context, return the right types at each boundary?
+- **Craft** — on the files that did ship, how good is the code? Per-file quality averaging parseability, fabrication checks, correct return types, and cross-file consistency.
+- **Groundedness** — do the references in the plan resolve against the real codebase? Catches chained fabrications (a route calling `service.query_stream()` that doesn't exist anywhere, with a sibling artifact inventing a stub) that per-artifact quality checks miss.
+- **Actionability** — can an agent actually execute this plan end-to-end? Measures what fraction of roadmap phases carry a concrete verification command instead of placeholder text.
+- **Architectural correctness** — Sonnet-graded judgment of whether the plan implements the *right* architecture for the task. End-to-end coherence: did it replicate the full pipeline, wire the provider through the synthesizer, preserve RAG context, return the right types at each boundary?
 
 | Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge |
 |---|---:|---:|
 | **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** |
 | **Craft** (code quality on what shipped) | 97.4 | **99.8** |
+| **Groundedness** (references resolve in the real codebase) | 81.7 | **100.0** |
+| **Actionability** (phases with real verification commands) | 0.0 | **100.0** |
 | **Architectural correctness** | 38.8 | **89.5** |
 | Latency per plan | ~30s | ~12 min |
 
 <br>
 
-**The striking result is Coverage, not Craft.** The raw LLM writes *decent code* on the files it does ship — 97.4 vs 99.8 is within noise. What it consistently fails to do is ship enough files. Across 5 baseline runs, the required `engine.py` was either missing entirely or shipped as a stub like `raise NotImplementedError("Streaming logic to be implemented")` every single time. The model wrote the route handler, the SDK entry, and the response types, then ran out of conviction when the real work (extending the KRAG engine with a streaming path) would have required tracing the full call chain.
+**Craft is almost a tie.** The raw LLM writes decent code on the files it does ship — 97.4 vs 99.8 is within noise. Everything else is where the gap opens up.
 
-The architectural correctness gap is the consequence. If the engine doesn't implement streaming, nothing downstream can — the plan is architecturally coherent only for a narrow surface definition of the task. The Sonnet grader flags this immediately: 3 of 5 raw baselines graded at the worst architectural tier (gave up on the hard problem), 2 at a middle tier (partial pipeline). The harness ran the same task with the same files 5 times and landed on the ideal architecture 4 times, one tier below ideal once.
+**Coverage is the obvious failure mode.** Across 5 baseline runs, the required `engine.py` was either missing entirely or shipped as a stub like `raise NotImplementedError("Streaming logic to be implemented")` every single time. The raw model wrote the route handler, the SDK entry, and the response types, then ran out of conviction when the real work (extending the KRAG engine with a streaming path) would have required tracing the full call chain.
 
-The harness doesn't make a dumb model smart. It forces a dumb model to *trace the call chain*.
+**Groundedness exposes a subtler one.** Even on the files that did ship, raw baselines had 3 fabrication violations across 5 plans — calls to functions that don't exist, parse errors that suggest the model invented syntax. The harness lands at 0 because its grounding validation stage catches and repairs these before the plan finalizes.
+
+**Actionability is a complete miss for the baseline** — 0 of 0, because the raw LLM output format is just `## filename` + code blocks, with no roadmap, no phases, no verification commands. Hand that to an agent and it has no structure to follow. The harness emits a full roadmap with a verification command per phase that an agent (or a human) can actually run.
+
+**Architectural correctness is the consequence of the above.** If the engine doesn't implement streaming, nothing downstream can. If the plan has no roadmap, there's no ordering to the work. The Sonnet grader flags all of this: 3 of 5 raw baselines graded at the worst architectural tier ("gave up on the hard problem"), 2 at a middle tier. The harness landed on the ideal architecture in 4 of 5 runs, one tier below ideal once.
+
+The harness doesn't make a dumb model smart. It forces a dumb model to trace the call chain, stay grounded in the real codebase, and produce the scaffolding an agent needs to actually close the loop.
 
 <br>
 

@@ -15,6 +15,7 @@ re-packages library results into the benchmark's Pydantic schemas.
 """
 
 import logging
+import re
 from collections import Counter
 
 from fitz_forge.planning.validation.scoring import (
@@ -264,6 +265,15 @@ def run_deterministic_checks(
         (artifact_mean + consistency_ratio * 100) / 2,
         1,
     )
+    # Groundedness — full-codebase grounding check on the artifact set.
+    # Catches chained fabrications that per-artifact quality checks miss
+    # (sibling artifacts reinforcing each other's invented APIs).
+    groundedness, grounding_violations = _compute_groundedness(
+        artifact_dicts, structural_index, source_dir
+    )
+    # Actionability — can an agent execute this plan end-to-end?
+    # Phases with a real verification_command can be closed-loop tested.
+    actionability = _compute_actionability(plan_data)
 
     return DeterministicReport(
         completeness=completeness,
@@ -275,7 +285,66 @@ def run_deterministic_checks(
         deterministic_score=deterministic_score,
         coverage_strict=coverage_strict,
         craft=craft,
+        groundedness=groundedness,
+        grounding_violations=grounding_violations,
+        actionability=actionability,
     )
+
+
+def _compute_groundedness(
+    artifact_dicts: list[dict],
+    structural_index: str,
+    source_dir: str,
+) -> tuple[float, int]:
+    """Fraction of artifacts free of grounding violations against the real codebase.
+
+    Runs the same ``check_all_artifacts`` pass the pipeline uses to gate
+    artifact emission. Returns ``(score, total_violations)``. Score is
+    100 when no artifact has any violation, 0 when every artifact has
+    at least one. An empty artifact set scores 100 (nothing to ground).
+    """
+    if not artifact_dicts:
+        return 100.0, 0
+    from fitz_forge.planning.validation.grounding.check import check_all_artifacts
+
+    violations = check_all_artifacts(
+        artifact_dicts, structural_index, source_dir=source_dir
+    )
+    dirty_files = {v.artifact for v in violations}
+    clean = len(artifact_dicts) - len(dirty_files)
+    score = round(clean / len(artifact_dicts) * 100, 1)
+    return score, len(violations)
+
+
+_ACTIONABILITY_PLACEHOLDER_RE = re.compile(
+    r"^\s*(todo|tbd|write tests|run tests|verify manually|manual verification)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _compute_actionability(plan_data: dict) -> float:
+    """Fraction of roadmap phases that carry a concrete verification command.
+
+    A phase is actionable if its ``verification_command`` field is non-
+    empty, non-whitespace, and isn't one of a few placeholder phrases
+    that mean "figure it out yourself." Plans with no phases score 0 —
+    you can't execute a plan that doesn't describe what to do.
+    """
+    phases = plan_data.get("roadmap", {}).get("phases", [])
+    if not phases:
+        return 0.0
+
+    actionable = 0
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        cmd = str(phase.get("verification_command") or "").strip()
+        if not cmd:
+            continue
+        if _ACTIONABILITY_PLACEHOLDER_RE.match(cmd):
+            continue
+        actionable += 1
+    return round(actionable / len(phases) * 100, 1)
 
 
 def _compute_strict_coverage(completeness, artifact_checks) -> float:

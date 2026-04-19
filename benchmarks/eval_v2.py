@@ -229,11 +229,15 @@ def format_batch_report(batch: BatchScoreV2) -> str:
         f"- Deterministic avg: {batch.deterministic_average}/100 "
         f"(range: {batch.deterministic_min}-{batch.deterministic_max})"
     )
-    # Coverage + Craft averages (separates 'did we deliver the required
-    # files?' from 'is the code we delivered any good?' — surface-area
-    # effects otherwise inflate Tier-1 when few files ship).
+    # Quality dimensions — four orthogonal axes of "is this plan any good":
+    #   Coverage    — did we ship what was required (strict: no NotImplementedError stubs)
+    #   Craft       — is the code quality good on what shipped
+    #   Groundedness — are the references real, not chained fabrications
+    #   Actionability — can an agent actually execute this end-to-end
     coverages = [s.deterministic.coverage_strict for s in batch.scores]
     crafts = [s.deterministic.craft for s in batch.scores]
+    groundednesses = [s.deterministic.groundedness for s in batch.scores]
+    actionabilities = [s.deterministic.actionability for s in batch.scores]
     if coverages:
         lines.append(
             f"- Coverage (strict): avg {round(sum(coverages) / len(coverages), 1)}/100 "
@@ -243,27 +247,36 @@ def format_batch_report(batch: BatchScoreV2) -> str:
             f"- Craft: avg {round(sum(crafts) / len(crafts), 1)}/100 "
             f"(range: {min(crafts)}-{max(crafts)})"
         )
+        lines.append(
+            f"- Groundedness: avg {round(sum(groundednesses) / len(groundednesses), 1)}/100 "
+            f"(range: {min(groundednesses)}-{max(groundednesses)})"
+        )
+        lines.append(
+            f"- Actionability: avg {round(sum(actionabilities) / len(actionabilities), 1)}/100 "
+            f"(range: {min(actionabilities)}-{max(actionabilities)})"
+        )
     if batch.taxonomy_average is not None:
         lines.append(f"- Taxonomy avg: {batch.taxonomy_average}/100")
     lines.append(
         f"- Final avg: {batch.final_average}/100 (range: {batch.final_min}-{batch.final_max})"
     )
 
-    # Per-plan table
+    # Per-plan table — keeps the raw deterministic composite for backward
+    # compatibility and adds the four-dimensional split alongside.
     lines.append("\n## Per-Plan Scores")
     lines.append(
-        "| Plan | Deterministic | Coverage | Craft | Completeness | Artifact Qual | Consistency | Final |"
+        "| Plan | Det | Coverage | Craft | Grounded | Action | Final |"
     )
     lines.append(
-        "|------|---------------|----------|-------|--------------|---------------|-------------|-------|"
+        "|------|----:|---------:|------:|---------:|-------:|------:|"
     )
     for s in batch.scores:
         det = s.deterministic
         lines.append(
             f"| {s.plan_file} | {det.deterministic_score} | "
             f"{det.coverage_strict} | {det.craft} | "
-            f"{det.completeness_score}/30 | {det.artifact_quality_score}/50 | "
-            f"{det.consistency_score}/20 | {s.final_score} |"
+            f"{det.groundedness} | {det.actionability} | "
+            f"{s.final_score} |"
         )
 
     # Common issues across plans
