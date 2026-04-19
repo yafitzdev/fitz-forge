@@ -713,12 +713,16 @@ class DecomposedPipeline:
         progress_callback: Callable[[float, str], None] | Callable[[float, str], Any] | None = None,
         agent: "AgentContextGatherer | None" = None,
         pre_gathered_context: str | None = None,
+        rubric_hints: str | None = None,
         _bench_override_files: list[str] | None = None,
         event_emitter: Callable[[Any], Any] | None = None,
     ) -> PipelineResult:
         """Execute the decomposed planning pipeline.
 
         Same signature as PlanningPipeline.execute() for drop-in replacement.
+
+        rubric_hints: optional free-form quality criteria (any language,
+        any codebase) surfaced to the synthesis reasoning prompt.
 
         event_emitter: optional async callback(event) for typed progress events
         (e.g. DecisionResolved). When provided, each stage's rich-event
@@ -734,6 +738,15 @@ class DecomposedPipeline:
         else:
             prior_outputs = {}
             await self._checkpoint_mgr.clear_checkpoint(job_id)
+
+        # Inject rubric hints so downstream stages that consume them
+        # (currently synthesis) can read without a per-stage signature
+        # change. See PlanningPipeline.execute for the parallel path.
+        if rubric_hints:
+            prior_outputs["_rubric_hints"] = rubric_hints
+            logger.info(
+                f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria"
+            )
 
         # Pre-gathered context injection
         if pre_gathered_context is not None and "_agent_context" not in prior_outputs:
