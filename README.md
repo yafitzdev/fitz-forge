@@ -92,9 +92,9 @@ Two premises behind `fitz-forge`:
 
 **1. Agentic coding tools are heavily subsidized today.** A $100/month Claude Code subscription gets you enough frontier-model inference that the raw API cost, if metered, would run multiples of the price. This works while AI providers are still buying mindshare. It doesn't work forever.
 
-**2. Planning is the most expensive phase of agentic coding.** More tokens than implementation. More than debugging. More than code review. A single "plan this refactor" request reads the whole codebase, reasons about architecture, and emits a structured plan — the phase with the highest context requirement and the fuzziest stopping condition.
+**2. Planning has the highest concentrated cost per LLM call.** A single "plan this refactor" request has to hold the whole codebase in context, reason about architecture, and emit a structured output — the phase with the highest context requirement and the fuzziest stopping condition. Frontier models do it well but charge accordingly; local models need scaffolding to do it reliably.
 
-Put those two together: when subsidies normalize, the cost of agentic coding will rise, and the biggest single line item will be planning. `fitz-forge` moves that phase onto hardware you already own. A local 26B model produces the plan overnight; you hand it to Claude Code (or an agent, or a human) for implementation. The subsidized-but-metered tokens go to the cheaper-per-token phases. The planning tokens never leave your machine.
+Put those two together: when subsidies normalize, the biggest single line item will be the planning step that front-loads every coding session. `fitz-forge` moves that phase onto hardware you already own, and — crucially — produces plans so specific that Claude Code's implementation loop becomes transcription, not discovery. Every artifact in a fitz-forge plan contains real code bodies (not pseudocode), every roadmap phase carries verification commands, every cross-file reference resolves. You hand Claude Code the plan; it lands the diff. The planning tokens never leave your machine, and the implementation tokens flow through a tighter loop.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
@@ -104,23 +104,36 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
-### Measured cost per plan
+### Measured cost
 
-Concrete numbers for the "planning is the most expensive phase" premise. Same task (`streaming_implementation` on the `fitz-sage` repo), same user prompt, two modes:
+Concrete numbers for the planning-cost premise. Same task (`streaming_implementation` on the `fitz-sage` repo), same user prompt.
+
+#### Planning-only cost (one plan produced)
 
 | Mode | What it does | Tokens | Cost/plan | Time |
 |---|---|---|---:|---:|
 | 🤖 Pure Claude Code (Sonnet 4.6, plan-mode) | Reads the codebase, reasons, produces a plan | ~12K output + ~194K cached context | **$0.96** | 6.5 min |
 | 🔨 fitz-forge (gemma-4-26b on RTX 5090) | Same job, local pipeline | 0 API tokens | **~$0.02** electricity | 12 min |
 
-**Per-plan savings: ~$0.94.** Trivial on a single plan, compounds on real usage.
+**Per-plan savings: ~$0.94.** Trivial on a single plan, compounds on real usage. At conservative workloads — one plan a workday, ~30 plans/month — that's **$28/month, or $336/year**, on planning alone. Power users hitting several plans a day see it scale linearly: 100 plans/month → ~$1,100/year.
 
-At conservative workloads — one plan a workday, ~30 plans/month — that's **$28/month, or $336/year**, on planning alone. Power users hitting several plans a day see it scale linearly: 100 plans/month is ~$93/month of Claude Code planning spend → ~$1,100/year. All of it runs overnight on hardware you already own.
+#### End-to-end cost (plan + implementation delivered)
+
+Planning is upstream of the real work. To see what the plan *does* for the downstream implementation, we ran a second experiment: same feature, two clean `fitz-sage` git worktrees, Claude Code with full tools in each. Arm A got only the user prompt; Arm B also got a fitz-forge plan.
+
+| Arm | Wall time | API cost | Files changed | Scope delivered |
+|---|---:|---:|---:|---|
+| 🟢 **Arm A** — Pure Claude Code | **18.4 min** | **$3.04** | 4 files | Core engine + synthesizer + tests. **Missed the API SSE endpoints.** |
+| 🟣 **Arm B** — fitz-forge plan + Claude Code | **15.0 min** | **$2.80** | 7 files | Core engine + synthesizer + service + SDK + `/query/stream` + `/chat/stream` SSE + tests. |
+
+**Arm B was 18% faster, 8% cheaper, and covered 3 more files** (including the HTTP SSE endpoints Arm A skipped). Both arms' tests pass. Same budget → wider implementation: the plan tells Claude Code *which files to touch*, so it doesn't stop early.
+
+The dollar savings headline is modest (~$0.24 per feature) — much smaller than the planning-only savings. The scope-completeness effect matters more than the cost delta: a plan that specifies the full surface area nudges the implementer past "it compiles" toward "it ships the feature end-to-end."
 
 <br>
 
 > [!NOTE]
-> N=1 data point, Sonnet 4.6 pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates. Pricing, token usage, and your own usage pattern will shift the numbers — run `python -m benchmarks.claude_code_baseline` with your own task to calibrate. The point isn't the exact dollar figure; it's the order of magnitude.
+> N=1 end-to-end run per arm. The vague user prompt ("add streaming") leaves a lot of scope-interpretation room — a more prescriptive prompt would likely collapse the scope-completeness gap. The point isn't the 8% cost delta; it's that a specific, grounded plan materially changes what the implementing agent ships. Sonnet 4.6 pricing as of 2026-04-19. Reproduce with `python -m benchmarks.end_to_end_cost` on your own codebase / task.
 
 ---
 
@@ -190,55 +203,51 @@ Results below are the output of this process.
 
 ### Benchmarks
 
-**Three arms, same task, same five-dimension evaluation.** All three arms get the same user prompt and the same 30 relevant source files (curated in `ideal_context.json`) embedded in their prompt. Tools are disabled so no arm can read additional files agentically — this is a controlled experiment. The only variables are *which model* and *whether the fitz-forge harness runs*.
+**Four arms, same task, same five-dimension evaluation.** Each arm produces a plan for the same feature on the same codebase and gets scored the same way. The variables are *which model* and *whether a harness runs* — either fitz-forge's (for the local model), or Claude Code's own read-write-test loop (for Sonnet).
 
-- 🤖 **Raw gemma** — one shot, local model, no harness.
+- 🤖 **Raw gemma** — one shot, local model, no harness, files in prompt.
 - 🔨 **fitz-forge** — same local model, wrapped in the harness.
-- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no harness.
+- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no tools, files in prompt. Parity with raw gemma.
+- 🔥 **Hot Claude Code** (Sonnet 4.6) — agentic planning, tools enabled, cwd set to the repo. This is the mode a user invokes day to day.
 
 <br>
 
 #### Streaming implementation on `fitz-sage` · n=5 per arm
 
-| Metric | 🤖 Raw gemma (no harness) | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code (Sonnet) |
-|---|---:|---:|---:|
-| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 |
-| **Craft** (code quality on evaluated files, 0 if missing/stubbed) | 34.0 | **100.0** | 57.0 |
-| **Groundedness** (refs resolve in real codebase; missing/stubbed = ungrounded) | 26.6 | **100.0** | 40.0 |
-| **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 |
-| **Architectural correctness** | 38.8 | **89.5** | 83.0 |
-| Cost per plan (API tokens) | $0 | $0 | **$0.40** |
-| Cost per plan (electricity) | ~$0.00 | ~$0.02 | — |
-| Latency per plan | 28s | 12 min | 108s (wall clock parallel: 2.4 min) |
-| Tokens per plan | — | — | ~65K cache write + ~11K output |
+| Metric | 🤖 Raw gemma | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code | 🔥 Hot Claude Code |
+|---|---:|---:|---:|---:|
+| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 | 90.0 |
+| **Craft** (code quality on evaluated files, 0 if missing/stubbed) | 34.2 | **100.0** | 55.0 | 82.7 |
+| **Groundedness** (refs resolve in real codebase; missing/stubbed = ungrounded) | 25.0 | **100.0** | 33.3 | 33.3 |
+| **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 | 0.0 |
+| **Architectural correctness** (Tier-2, Sonnet grader) | 35.9 | 93.8 | 83.0 | **98.8** |
+| Cost per plan (API tokens) | $0 | $0 | $0.40 | **$1.17** |
+| Cost per plan (electricity) | ~$0.00 | ~$0.02 | — | — |
+| Latency per plan | 28s | 12 min | 108s | 6–10 min |
 
-> Craft and Groundedness are scored over the taxonomy's *evaluated* file set (engine, routes, synthesizer, schemas, SDK). A file that's missing from the plan, or shipped as a `raise NotImplementedError` stub, scores 0 for that file — an empty promise isn't "well-crafted code." The fabrication detector's lookup is augmented with definitions from every artifact in the plan, so a class defined in a sibling file (e.g. `StreamEvent` in `schemas.py`) counts as real when it's referenced from elsewhere.
+> Craft and Groundedness are scored over the taxonomy's *evaluated* file set (engine, routes, synthesizer, schemas, SDK). A file that's missing from the plan, or shipped as a `raise NotImplementedError` stub, scores 0 for that file — an empty promise isn't "well-crafted code." When a plan ships multiple variants of the same evaluated file (e.g. a `core/engine.py` protocol + an `engines/fitz_krag/engine.py` implementation, both matching the taxonomy's `engine.py` key), the scorer takes MIN across the matches — the worst implementation dominates so a clean sibling can't mask a fabricated one.
 
 <br>
 
 The story:
 
-**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow — stubs can't carry Craft, missing files can't be grounded, no roadmap means no Actionability, and the Sonnet grader rates the overall architecture as bottom-tier.
+**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow — stubs can't carry Craft, missing files can't be grounded, no roadmap means no Actionability, bottom-tier architecture.
 
-**Cold Claude Code beats raw gemma on every dimension** — as you'd expect from a frontier model. More files shipped, better code on them, higher architectural tier. Real capability gap.
+**Hot Claude Code is the strongest model on architectural correctness** (98.8, the top score). Sonnet with tools enabled writes architecturally crisp plans — it reads real file signatures and chooses patterns that fit.
 
-**But Cold Claude Code still loses to fitz-forge on every deterministic dimension.** Not because Sonnet is a worse coder — because the harness enforces things a one-shot call can't.
+**But Hot Claude Code still loses to fitz-forge on Coverage, Craft, Groundedness, and Actionability.** Not because Sonnet is a worse coder — because the harness enforces invariants a free-form agent trajectory doesn't:
 
-- **Coverage** (90 vs 100): 1/5 Sonnet plans still drops a required file. The harness's coverage review catches this and regenerates the missing artifact.
-- **Craft** (57 vs 100): one-shot Sonnet has real fabrications — methods it references but never defines (`self._prepare_query`, `self._post_generate`). It also doesn't cover every evaluated file in every plan. fitz-forge's grounding + repair loop + coverage review catch both classes of defect before the plan finalizes.
-- **Groundedness** (40 vs 100): same shape. Real fabrications plus third-party imports the scorer can't verify. fitz-forge's closure check expands missing symbols into sibling artifacts or repairs the reference, landing at 0 violations on every run.
-- **Actionability** (0 vs 100): neither one-shot arm emits a roadmap with verification commands. fitz-forge's synthesis stage produces structured phases every time because that's what its schema demands.
+- **Coverage** (90 vs 100): 1/5 Hot CC plans drops a required file. fitz-forge's coverage-review stage catches this and regenerates the missing artifact.
+- **Craft** (82.7 vs 100): Hot CC's per-file code quality on evaluated files is noticeably better than Cold CC (55 → 82.7) because the agent reads real signatures instead of hallucinating them — but it still has residual fabrications and fixtures the scorer flags. fitz-forge's grounding + repair loop closes these.
+- **Groundedness** (33.3 vs 100): even with full codebase access, Sonnet produces references that don't resolve in the evaluated-file set (imports that won't exist, sibling classes it assumes are defined). The harness's closure check expands missing symbols into sibling artifacts or repairs the reference.
+- **Actionability** (0 vs 100): neither Claude Code mode emits a structured roadmap with verification commands. That's a schema, not a capability — fitz-forge's synthesis stage produces phases every time because that's what its schema demands.
 
-**Architectural correctness is the one dimension where Claude Code and fitz-forge are close** (83 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5.
-
-**The headline:** fitz-forge adds *structure + rigor + end-to-end coverage* — the things a closed-loop agent needs — at 20× less cost per plan than Claude Code. That's the value prop: **rigor on a budget, not competing-with-Sonnet on raw capability**.
+**Cost gap:** fitz-forge runs at zero API cost, ~$0.02 of electricity. Hot Claude Code costs $1.17/plan. The $0 number is the whole point — when subsidies normalize, this is the difference between free planning on hardware you own and paying every time.
 
 <br>
 
 > [!NOTE]
-> Variance on a single run is significant (Tier-2 range for raw gemma was 6.25–62.5, harness 72.5–100, Claude Code 75.0–87.5). We report 5-plan means. One run is a data point, not a headline.
->
-> Sonnet pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates.
+> Variance on a single Hot CC run is significant (Grounded 0–66.7 across 5 plans, Coverage 50–100). We report 5-plan means. One run is a data point, not a headline. Sonnet pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $3.75/MTok cache write, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates.
 
 <br>
 
@@ -266,7 +275,21 @@ python -m benchmarks.claude_code_benchmark \
   --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
   --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
   --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --runs 5 --score-v2
+  --runs 5 --mode cold --score-v2
+
+# Arm 4: hot Claude Code (Sonnet, tools enabled, cwd=source repo)
+python -m benchmarks.claude_code_benchmark \
+  --source-dir ../fitz-sage \
+  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
+  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
+  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
+  --runs 5 --mode agentic --score-v2
+
+# End-to-end feature cost (Arm A vs Arm B, Claude Code implementing)
+python -m benchmarks.end_to_end_cost \
+  --source-git-root ../fitz-sage --base-ref main \
+  --task-file benchmarks/challenges/streaming_implementation/user_prompt.txt \
+  --plan-json benchmarks/challenges/streaming_implementation/results/<run>/plan_01.json
 ```
 
 ---
