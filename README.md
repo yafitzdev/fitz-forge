@@ -143,7 +143,9 @@ TBD
 
 A 10-stage pipeline that decomposes architectural planning into small, focused LLM calls interleaved with deterministic 
 AST work. Retrieval + implementation check feed a decision-based reasoning core (decompose → resolve → synthesize), then 
-artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written.
+artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written. **A senior-
+engineer review layer wraps the whole pipeline** — six narrow critique passes, each scoped to one stage's output, that 
+regenerate the affected stage when a review flags issues.
 
 <br>
 
@@ -151,32 +153,36 @@ artifacts are generated, closure-checked, and grounded against the real codebase
      USER PROMPT
           │
           ▼
-┌─────────────────────────────────────────┐
-│ 1. Agent Context Gathering    [6-8 LLM] │  retrieval + compression
-├─────────────────────────────────────────┤
-│ 2. Implementation Check       [1 LLM]   │  already built?
-├─────────────────────────────────────────┤
-│ 3. Call Graph Extraction      [0 · AST] │  deterministic
-├─────────────────────────────────────────┤
-│ 4. Decision Decomposition     [2-4 LLM] │  adaptive best-of-N
-├─────────────────────────────────────────┤
-│ 5. Decision Resolution        [10-15]   │  1 call per decision
-├─────────────────────────────────────────┤
-│ 6. Synthesis                  [~15 LLM] │  reasoning + 13 extractions
-├─────────────────────────────────────────┤
-│ 7. Artifact Generation        [3-8 LLM] │  per-artifact + closure checks
-├─────────────────────────────────────────┤
-│ 8. Grounding Validation       [0-5 LLM] │  AST + repair
-├─────────────────────────────────────────┤
-│ 9. Coherence Check            [1 LLM]   │  cross-stage sanity
-├─────────────────────────────────────────┤
-│ 10. Render + Write            [0]       │  markdown to disk
-└─────────────────────────────────────────┘
+┌─── 🧑‍💼 SENIOR ENGINEER REVIEW LAYER ─────────────────────────────┐
+│   detect → regenerate → re-review → keep whichever is better      │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐      │
+│  │                                                         │      │
+│  │   1. Agent Context Gathering       [6-8 LLM]            │      │
+│  │   2. Implementation Check          [1 LLM]              │      │
+│  │   3. Call Graph Extraction         [0 · AST]            │      │
+│  │   4. Decision Decomposition        [2-4 LLM]   ◂────────┤── decomposition review
+│  │   5. Decision Resolution           [10-15]              │      │
+│  │   6. Synthesis                     [~18 LLM]            │      │
+│  │      ├─ context assumptions                    ◂────────┤── assumption review
+│  │      ├─ architecture pick                      ◂────────┤── architecture review
+│  │      └─ design spec                            ◂────────┤── design review
+│  │   7. Artifact Generation           [3-8 LLM]            │      │
+│  │      ├─ per-file code                          ◂────────┤── semantic review
+│  │      └─ set-level coverage                     ◂────────┤── coverage review
+│  │   8. Grounding Validation          [0-5 LLM]            │      │
+│  │   9. Coherence Check               [1 LLM]              │      │
+│  │  10. Render + Write                [0]                  │      │
+│  │                                                         │      │
+│  └─────────────────────────────────────────────────────────┘      │
+│                                                                   │
+│  Fail-safe: any review error keeps the original output unchanged. │
+└───────────────────────────────────────────────────────────────────┘
           │
           ▼
     ~/.fitz-forge/plans/plan_<id>.md
 
-Total: ~40-60 LLM calls · ~7-9 min on RTX 5090
+Total: ~45-70 LLM calls · ~8-12 min on RTX 5090
 ```
 
 | # | Stage | Docs |
@@ -191,6 +197,7 @@ Total: ~40-60 LLM calls · ~7-9 min on RTX 5090
 | 8 | Grounding Validation | [08_grounding-validation.md](docs/features/pipeline/08_grounding-validation.md) |
 | 9 | Coherence Check | [09_coherence-check.md](docs/features/pipeline/09_coherence-check.md) |
 | 10 | Render + Write | — |
+| ★ | **Senior Engineer Reviews** (wraps every stage) | **[senior-engineer-reviews.md](docs/features/infrastructure/senior-engineer-reviews.md)** |
 
 <br>
 
@@ -198,6 +205,14 @@ Total: ~40-60 LLM calls · ~7-9 min on RTX 5090
 > The pipeline decomposes a problem that would overwhelm a small model into many small LLM calls it can handle reliably. 
 > Each per-field JSON extraction is under 2000 chars — small enough for a 3B quantized model to produce valid output. 
 > Deterministic AST work (call graph, grounding check) carries the structural load so LLMs only do what LLMs are good at.
+
+> [!TIP]
+> **The senior-engineer review layer is the quality multiplier.** A local model writing a plan is a junior engineer left 
+> unsupervised — it picks plausible-sounding wrong patterns, under-specifies interfaces, and builds on assumptions the 
+> codebase contradicts. Each review is one narrow LLM critique ("what would a senior say about this stage's output?") 
+> that hands its feedback back to the stage for regeneration. Reviews are strictly additive: they can only improve the 
+> plan or leave it unchanged. See **[Senior Engineer Reviews](docs/features/infrastructure/senior-engineer-reviews.md)** 
+> for the full design.
 
 Full pipeline docs: **[docs/features/](docs/features/)** — detailed docs covering every stage and infrastructure component.
 

@@ -25,6 +25,7 @@ Cross-cutting concerns used by the pipeline.
 | Doc | Description |
 |-----|-------------|
 | [Per-Field Extraction](infrastructure/per-field-extraction.md) | How small models produce reliable structured output |
+| [Senior Engineer Reviews](infrastructure/senior-engineer-reviews.md) | Composable review framework that critiques each stage output and regenerates on issues |
 | [Crash Recovery](infrastructure/crash-recovery.md) | Checkpoint-based pipeline resumption |
 | [LLM Providers](infrastructure/llm-providers.md) | Ollama, LM Studio, llama.cpp backends |
 
