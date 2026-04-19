@@ -567,6 +567,10 @@ class BackgroundWorker:
         if isinstance(agent_ctx, dict) and "agent_files" in agent_ctx:
             diagnostics["agent_files"] = agent_ctx["agent_files"]
 
+        quality = result.outputs.get("_quality_indicators")
+        if isinstance(quality, dict) and "error" not in quality:
+            diagnostics["quality_indicators"] = quality
+
         # Pipeline outputs are dicts from model_dump(), need to reconstruct Pydantic models
         await self._set_phase(job.job_id, "rendering", progress=0.97)
 

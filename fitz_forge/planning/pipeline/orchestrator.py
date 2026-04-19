@@ -1047,6 +1047,34 @@ class DecomposedPipeline:
         end_sha = get_git_sha()
         head_advanced = start_sha is not None and end_sha is not None and start_sha != end_sha
 
+        # Compute runtime quality indicators. Four deterministic
+        # dimensions (Coverage, Craft, Groundedness, Actionability) that
+        # cost nothing extra and give the user honest signals alongside
+        # the plan. The fifth evaluation axis (Architectural
+        # correctness) needs a Sonnet pass and stays offline — see
+        # docs/SCORER-V2-SPEC.md.
+        try:
+            from fitz_forge.planning.quality import compute_quality_indicators
+
+            q_structural = prior_outputs.get("_agent_context", {}).get(
+                "full_structural_index", ""
+            ) or prior_outputs.get("_gathered_context", "")
+            q_source_dir = prior_outputs.get("_source_dir", "") or ""
+            indicators = compute_quality_indicators(
+                plan_data=prior_outputs,
+                structural_index=q_structural,
+                source_dir=q_source_dir,
+            )
+            prior_outputs["_quality_indicators"] = indicators.as_dict()
+            logger.info(
+                f"Quality indicators: coverage={indicators.coverage:.1f}, "
+                f"craft={indicators.craft:.1f}, grounded={indicators.groundedness:.1f}, "
+                f"actionable={indicators.actionability:.1f}"
+            )
+        except Exception as e:
+            logger.warning(f"Quality indicators failed (non-fatal): {e}")
+            prior_outputs["_quality_indicators"] = {"error": str(e)}
+
         return PipelineResult(
             success=True,
             outputs=prior_outputs,

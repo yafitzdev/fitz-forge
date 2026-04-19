@@ -262,6 +262,32 @@ class PlanRenderer:
                 sections.append("API review pending.")
                 sections.append("")
 
+        # Quality Indicators — rendered before Diagnostics so users see
+        # the honest signals first, not the debug metadata.
+        q_raw = (plan.diagnostics or {}).get("quality_indicators")
+        if isinstance(q_raw, dict):
+            from fitz_forge.planning.quality import (
+                QualityIndicators,
+                format_indicators_markdown,
+            )
+
+            try:
+                indicators = QualityIndicators(
+                    coverage=float(q_raw.get("coverage", 0.0)),
+                    craft=float(q_raw.get("craft", 0.0)),
+                    groundedness=float(q_raw.get("groundedness", 0.0)),
+                    actionability=float(q_raw.get("actionability", 0.0)),
+                    coverage_detail=q_raw.get("coverage_detail") or {},
+                    craft_detail=q_raw.get("craft_detail") or {},
+                    groundedness_detail=q_raw.get("groundedness_detail") or {},
+                    actionability_detail=q_raw.get("actionability_detail") or {},
+                )
+                sections.append(format_indicators_markdown(indicators))
+                sections.append("")
+            except (TypeError, ValueError):
+                # Malformed diagnostics shouldn't take down the render.
+                pass
+
         # Diagnostics
         if plan.diagnostics:
             sections.append("## Diagnostics")
