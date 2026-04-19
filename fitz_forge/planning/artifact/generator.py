@@ -22,7 +22,11 @@ from .closure import (
     route_missing_symbol,
 )
 from .context import assemble_context
-from fitz_forge.planning.reviews import Discrepancy, format_feedback, review_artifacts as semantic_review
+from fitz_forge.planning.reviews import (
+    ReviewIssue,
+    format_issues_feedback,
+    review_artifacts as semantic_review,
+)
 from .strategy import (
     ArtifactStrategy,
     NewCodeStrategy,
@@ -318,8 +322,10 @@ class ArtifactSetResult:
 
     `semantic_review_iterations` counts semantic-review passes (0 when the
     gate is disabled or had nothing to review).
-    `semantic_review_matched` is True when the final review pass returned
-    matches_intent=True (or the gate was skipped — no contradictions known).
+    `semantic_review_passed` is True when the final review pass returned no
+    issues (or the gate was skipped — no contradictions known).
+    `semantic_review_issues` carries the unified ``ReviewIssue`` list from
+    the last review pass so downstream consumers can render / re-raise it.
     """
 
     results: list[ArtifactResult]
@@ -328,8 +334,8 @@ class ArtifactSetResult:
     repair_iterations: int = 0
     expanded_files: list[str] = field(default_factory=list)  # files added by repair
     semantic_review_iterations: int = 0
-    semantic_review_matched: bool = True
-    semantic_review_discrepancies: list[Discrepancy] = field(default_factory=list)
+    semantic_review_passed: bool = True
+    semantic_review_issues: list[ReviewIssue] = field(default_factory=list)
 
     def as_artifact_dicts(self) -> list[dict[str, Any]]:
         """Convert successful results to the {filename, content, purpose, strategy}
@@ -621,12 +627,11 @@ async def generate_artifact_set(
     # Closure only sees shape/name invariants. The semantic gate reads
     # reasoning + decisions + every artifact together and reports
     # contradictions between design intent and produced code — set-level
-    # by construction, no AST shape matching. Discrepancies route back
-    # through `generate_artifact` for regeneration with natural-language
-    # feedback.
+    # by construction, no AST shape matching. Issues route back through
+    # `generate_artifact` for regeneration with natural-language feedback.
     semantic_iters = 0
-    semantic_matched = True
-    last_discrepancies: list[Discrepancy] = []
+    semantic_passed = True
+    last_issues: list[ReviewIssue] = []
 
     if max_semantic_iters > 0 and any(r.success for r in results):
         decisions_for_review: list[dict[str, Any]] = resolved_decisions or []
@@ -652,36 +657,40 @@ async def generate_artifact_set(
                 client=client,
             )
             semantic_iters = review_iter + 1
-            semantic_matched = review.matches_intent
-            last_discrepancies = review.discrepancies
+            semantic_passed = review.passed
+            last_issues = list(review.issues)
 
-            if review.matches_intent:
+            if review.passed:
                 logger.info(
                     "semantic_review: matches design intent after %d iter(s)",
                     semantic_iters,
                 )
                 break
 
-            by_file: dict[str, list[Discrepancy]] = defaultdict(list)
-            for d in review.discrepancies:
-                by_file[d.file].append(d)
+            # Group issues by artifact filename. ReviewIssue.target is
+            # `filename:line` for artifact reviews — strip the line off
+            # to get the regeneration target.
+            by_file: dict[str, list[ReviewIssue]] = defaultdict(list)
+            for issue in review.issues:
+                filename = issue.target.split(":", 1)[0] if issue.target else ""
+                if filename:
+                    by_file[filename].append(issue)
 
             logger.info(
-                "semantic_review: %d discrepancy(ies) across %d file(s), regenerating (iter %d)",
-                len(review.discrepancies),
+                "semantic_review: %d issue(s) across %d file(s), regenerating (iter %d)",
+                len(review.issues),
                 len(by_file),
                 semantic_iters,
             )
-            for d in review.discrepancies[:5]:
+            for issue in review.issues[:5]:
                 logger.info(
-                    "  %s:%d — intent: %s | actual: %s",
-                    d.file,
-                    d.line,
-                    d.intent[:80],
-                    d.actual[:80],
+                    "  %s — intent: %s | actual: %s",
+                    issue.target,
+                    issue.intent[:80],
+                    issue.actual[:80],
                 )
 
-            for filename, discs in by_file.items():
+            for filename, issues in by_file.items():
                 offender_idx = next(
                     (
                         i
@@ -696,7 +705,7 @@ async def generate_artifact_set(
                     )
                     continue
                 old_result = results[offender_idx]
-                feedback = format_feedback(discs)
+                feedback = format_issues_feedback(issues)
                 regen_purpose = f"{old_result.purpose}\n\n{feedback}"
                 regen_decisions = (
                     decisions_for(filename)
@@ -723,10 +732,10 @@ async def generate_artifact_set(
                         regen_result.failure_reason,
                     )
 
-        if semantic_iters and not semantic_matched:
+        if semantic_iters and not semantic_passed:
             logger.warning(
-                "semantic_review: %d discrepancy(ies) remain after %d iter(s)",
-                len(last_discrepancies),
+                "semantic_review: %d issue(s) remain after %d iter(s)",
+                len(last_issues),
                 semantic_iters,
             )
 
@@ -737,6 +746,6 @@ async def generate_artifact_set(
         repair_iterations=closure_iters,
         expanded_files=expanded_files,
         semantic_review_iterations=semantic_iters,
-        semantic_review_matched=semantic_matched,
-        semantic_review_discrepancies=last_discrepancies,
+        semantic_review_passed=semantic_passed,
+        semantic_review_issues=last_issues,
     )

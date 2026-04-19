@@ -2,9 +2,10 @@
 """Integration tests for the semantic-review phase inside generate_artifact_set.
 
 These exercise the wiring between generate_artifact_set's repair loop and
-the LLM-backed semantic gate. Both generate_artifact and semantic_review
-are monkeypatched so tests do not spin a real model — we're asserting
-control flow (when the gate fires, when regen runs, when iters stop).
+the unified LLM-backed semantic gate. Both generate_artifact and
+semantic_review are monkeypatched so tests do not spin a real model —
+we're asserting control flow (when the gate fires, when regen runs,
+when iters stop).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from fitz_forge.planning.artifact.generator import (
     ArtifactSetResult,
     generate_artifact_set,
 )
-from fitz_forge.planning.reviews.semantic import Discrepancy, ReviewResult
+from fitz_forge.planning.reviews import ReviewIssue, ReviewResult
 
 
 class _StubLookup:
@@ -55,6 +56,25 @@ def _make_result(filename: str, content: str = "pass", *, success: bool = True) 
         purpose=f"purpose for {filename}",
         success=success,
         strategy="new_code",
+    )
+
+
+def _artifact_issue(file: str, line: int = 1) -> ReviewIssue:
+    target = f"{file}:{line}" if line else file
+    return ReviewIssue(
+        scope="artifact",
+        target=target,
+        intent="do X",
+        actual="does Y",
+        suggestion="do X",
+    )
+
+
+def _review(passed: bool, issues: list[ReviewIssue] | None = None) -> ReviewResult:
+    return ReviewResult(
+        scope="artifact",
+        passed=passed,
+        issues=issues or [],
     )
 
 
@@ -97,7 +117,7 @@ def patched_deps(monkeypatch):
             try:
                 return next(it)
             except StopIteration:  # pragma: no cover - guardrail
-                return ReviewResult(matches_intent=True)
+                return _review(True)
 
         return _stub
 
@@ -144,19 +164,19 @@ async def test_semantic_review_disabled_by_zero_iters(patched_deps):
 
     assert isinstance(result, ArtifactSetResult)
     assert result.semantic_review_iterations == 0
-    assert result.semantic_review_matched is True
+    assert result.semantic_review_passed is True
     assert calls["semantic_review"] == []
     # one call per initial spec, no regen
     assert len(calls["generate_artifact"]) == 2
 
 
 # ---------------------------------------------------------------------------
-# Gate matches on first pass → no regen
+# Gate passes on first pass → no regen
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_matches_on_first_pass_no_regeneration(patched_deps):
+async def test_passes_on_first_pass_no_regeneration(patched_deps):
     calls = patched_deps["calls"]
     mp = patched_deps["monkeypatch"]
 
@@ -170,9 +190,7 @@ async def test_matches_on_first_pass_no_regeneration(patched_deps):
     mp.setattr(
         gen,
         "semantic_review",
-        patched_deps["make_semantic_review"](
-            [ReviewResult(matches_intent=True, discrepancies=[])]
-        ),
+        patched_deps["make_semantic_review"]([_review(True)]),
     )
 
     result = await generate_artifact_set(
@@ -186,27 +204,24 @@ async def test_matches_on_first_pass_no_regeneration(patched_deps):
     )
 
     assert result.semantic_review_iterations == 1
-    assert result.semantic_review_matched is True
+    assert result.semantic_review_passed is True
     assert len(calls["semantic_review"]) == 1
-    # 1 initial generate_artifact, no regen
     assert len(calls["generate_artifact"]) == 1
 
 
 # ---------------------------------------------------------------------------
-# Discrepancy → regenerate → second review passes
+# Issue → regenerate → second review passes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_discrepancy_triggers_regeneration_then_matches(patched_deps):
+async def test_issue_triggers_regeneration_then_passes(patched_deps):
     calls = patched_deps["calls"]
     mp = patched_deps["monkeypatch"]
 
-    # The regen result overwrites the first artifact's content so we can
-    # verify it was swapped into the result list.
     def _per_file(fn: str, kwargs: dict) -> ArtifactResult:
         purpose = kwargs.get("purpose", "")
-        tag = "regen" if "Semantic review feedback" in purpose else "first"
+        tag = "regen" if "Review feedback" in purpose else "first"
         return _make_result(fn, content=f"# {fn} {tag}")
 
     mp.setattr(
@@ -216,19 +231,8 @@ async def test_discrepancy_triggers_regeneration_then_matches(patched_deps):
     )
 
     reviews = [
-        ReviewResult(
-            matches_intent=False,
-            discrepancies=[
-                Discrepancy(
-                    file="a.py",
-                    line=1,
-                    intent="do X",
-                    actual="does Y",
-                    fix="do X",
-                )
-            ],
-        ),
-        ReviewResult(matches_intent=True, discrepancies=[]),
+        _review(False, [_artifact_issue("a.py", 1)]),
+        _review(True),
     ]
     mp.setattr(
         gen,
@@ -247,10 +251,9 @@ async def test_discrepancy_triggers_regeneration_then_matches(patched_deps):
     )
 
     assert result.semantic_review_iterations == 2
-    assert result.semantic_review_matched is True
-    # one first generate + one regen after discrepancy
+    assert result.semantic_review_passed is True
     regen_calls = [
-        c for c in calls["generate_artifact"] if "Semantic review feedback" in c.get("purpose", "")
+        c for c in calls["generate_artifact"] if "Review feedback" in c.get("purpose", "")
     ]
     assert len(regen_calls) == 1
     a_result = next(r for r in result.results if r.filename == "a.py")
@@ -258,12 +261,12 @@ async def test_discrepancy_triggers_regeneration_then_matches(patched_deps):
 
 
 # ---------------------------------------------------------------------------
-# Budget exhausted — review_iterations caps, semantic_review_matched=False
+# Budget exhausted — review_iterations caps, semantic_review_passed=False
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_budget_exhausted_persistent_discrepancy(patched_deps):
+async def test_budget_exhausted_persistent_issue(patched_deps):
     mp = patched_deps["monkeypatch"]
 
     mp.setattr(
@@ -271,19 +274,7 @@ async def test_budget_exhausted_persistent_discrepancy(patched_deps):
         "generate_artifact",
         patched_deps["make_generate_artifact"](lambda fn, _k: _make_result(fn)),
     )
-    # Both iterations report discrepancies — gate never matches.
-    persistent = ReviewResult(
-        matches_intent=False,
-        discrepancies=[
-            Discrepancy(
-                file="a.py",
-                line=1,
-                intent="do X",
-                actual="does Y",
-                fix="do X",
-            )
-        ],
-    )
+    persistent = _review(False, [_artifact_issue("a.py", 1)])
     mp.setattr(
         gen,
         "semantic_review",
@@ -301,12 +292,12 @@ async def test_budget_exhausted_persistent_discrepancy(patched_deps):
     )
 
     assert result.semantic_review_iterations == 2
-    assert result.semantic_review_matched is False
-    assert len(result.semantic_review_discrepancies) == 1
+    assert result.semantic_review_passed is False
+    assert len(result.semantic_review_issues) == 1
 
 
 # ---------------------------------------------------------------------------
-# Gate routes discrepancies to the correct file only
+# Gate routes issues to the correct file only
 # ---------------------------------------------------------------------------
 
 
@@ -325,19 +316,8 @@ async def test_only_offending_files_regenerated(patched_deps):
         "semantic_review",
         patched_deps["make_semantic_review"](
             [
-                ReviewResult(
-                    matches_intent=False,
-                    discrepancies=[
-                        Discrepancy(
-                            file="a.py",
-                            line=1,
-                            intent="i",
-                            actual="a",
-                            fix="f",
-                        )
-                    ],
-                ),
-                ReviewResult(matches_intent=True),
+                _review(False, [_artifact_issue("a.py", 1)]),
+                _review(True),
             ]
         ),
     )
@@ -352,9 +332,8 @@ async def test_only_offending_files_regenerated(patched_deps):
     )
 
     regen_calls = [
-        c for c in calls["generate_artifact"] if "Semantic review feedback" in c.get("purpose", "")
+        c for c in calls["generate_artifact"] if "Review feedback" in c.get("purpose", "")
     ]
-    # Only a.py should have been regenerated.
     assert len(regen_calls) == 1
     assert regen_calls[0]["filename"] == "a.py"
 
@@ -379,7 +358,7 @@ async def test_gate_is_handed_reasoning_decisions_and_artifacts(patched_deps):
     mp.setattr(
         gen,
         "semantic_review",
-        patched_deps["make_semantic_review"]([ReviewResult(matches_intent=True)]),
+        patched_deps["make_semantic_review"]([_review(True)]),
     )
 
     await generate_artifact_set(

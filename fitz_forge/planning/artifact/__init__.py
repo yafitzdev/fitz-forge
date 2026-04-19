@@ -1,6 +1,9 @@
 # fitz_forge/planning/artifact/__init__.py
 """Artifact generation black box — validated code artifacts from LLM."""
 
+from fitz_forge.planning.reviews import ReviewIssue, ReviewResult
+from fitz_forge.planning.reviews import review_artifacts as semantic_review
+
 from .closure import (
     ClosureViolation,
     SymbolRef,
@@ -15,17 +18,15 @@ from .generator import (
     generate_artifact,
     generate_artifact_set,
 )
-from fitz_forge.planning.reviews.semantic import Discrepancy, ReviewResult
-from fitz_forge.planning.reviews.semantic import review_artifacts as semantic_review
 from .validate import ArtifactError, validate
 
 __all__ = [
     "ArtifactContext",
+    "ArtifactError",
     "ArtifactResult",
     "ArtifactSetResult",
-    "ArtifactError",
     "ClosureViolation",
-    "Discrepancy",
+    "ReviewIssue",
     "ReviewResult",
     "SymbolRef",
     "assemble_context",

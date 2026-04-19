@@ -23,13 +23,11 @@ from .assumptions import review_assumptions
 from .base import ReviewIssue, ReviewResult, format_issues_feedback
 from .decomposition import review_decomposition
 from .design import review_design
-from .semantic import Discrepancy, format_feedback, review_artifacts
+from .semantic import review_artifacts
 
 __all__ = [
-    "Discrepancy",
     "ReviewIssue",
     "ReviewResult",
-    "format_feedback",
     "format_issues_feedback",
     "review_architecture",
     "review_artifacts",
