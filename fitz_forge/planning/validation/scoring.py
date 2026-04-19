@@ -84,7 +84,43 @@ _YIELD_RE = re.compile(r"\byield\b")
 _NOT_IMPLEMENTED_RE = re.compile(r"\bNotImplementedError\b")
 _SYS_STDOUT_RE = re.compile(r"\bsys\.stdout\b")
 
+# Language-aware stub-detection: Python's NotImplementedError has exact
+# analogues in TS/JS ("Not implemented" exception message) and catch-all
+# TODO markers across any language. For non-Python files we can't rely
+# on the NotImplementedError symbol, so fall back to a broader pattern
+# that matches the intent rather than the specific Python API.
+_STUB_MARKER_RE = re.compile(
+    r"""
+    \bNotImplementedError\b                          # Python
+    | throw\s+new\s+Error\s*\(\s*['"].*?not\s+implemented['"]  # TS/JS
+    | \bTODO:\s*implement\b                          # language-agnostic stub comment
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
 _STREAMING_INDICATORS = ("engine.py", "synthesizer.py")
+
+# Files that the deterministic scorer can reasonably analyze with the
+# Python AST + Python-fabrication regexes. Everything else is checked
+# only with language-agnostic heuristics (non-empty, no stub markers)
+# — the scorer otherwise flags every TS/Prisma file as "unparseable"
+# and docks 10+ points per artifact for Python-specific concerns that
+# don't apply. Tier-2 taxonomy scoring (via Sonnet) handles semantic
+# quality for all languages; Tier-1 is for structural sanity only.
+_PYTHON_EXTENSIONS = frozenset({".py"})
+
+
+def _is_python_file(filename: str) -> bool:
+    """True when the filename's extension marks it as Python source.
+
+    Files with no extension (unusual but possible for scripts) are
+    assumed Python — conservative default that preserves behavior for
+    any edge case in the existing Python-heavy benchmarks.
+    """
+    lower = filename.lower()
+    if "." not in lower.split("/")[-1]:
+        return True
+    return any(lower.endswith(ext) for ext in _PYTHON_EXTENSIONS)
 
 _SELF_METHOD_RE = re.compile(r"self\.([a-zA-Z_]\w*)\s*\(")
 _CLASS_CTOR_RE = re.compile(r"\b([A-Z][a-zA-Z0-9_]*)\s*\(")
@@ -298,22 +334,43 @@ def check_single_artifact(
     lookup: StructuralIndexLookup,
     task_requires_streaming: bool = True,
 ) -> ArtifactCheck:
-    """Run all deterministic checks on a single artifact."""
+    """Run all deterministic checks on a single artifact.
+
+    For non-Python files (TypeScript, Prisma, etc.), skips Python-specific
+    checks (AST parse, fabrication regex, yield/return-type) and only
+    applies language-agnostic heuristics. Tier-2 taxonomy scoring (Sonnet)
+    handles semantic quality for all languages. Without this branch,
+    every TS file was docked for being "unparseable" by the Python AST
+    and for lacking Python-shape fabrications — artificially capping
+    TS-heavy benchmark scores around 70–80 regardless of plan quality.
+    """
     filename = artifact.get("filename", "unknown")
     content = artifact.get("content", "")
+    is_python = _is_python_file(filename)
 
-    tree, recovered_content = _try_parse(content)
-    parseable = tree is not None
+    if is_python:
+        tree, recovered_content = _try_parse(content)
+        parseable = tree is not None
 
-    if recovered_content is not None:
-        violations = check_artifact({"filename": filename, "content": recovered_content}, lookup)
+        if recovered_content is not None:
+            violations = check_artifact({"filename": filename, "content": recovered_content}, lookup)
+        else:
+            violations = check_artifact(artifact, lookup)
     else:
-        violations = check_artifact(artifact, lookup)
+        # Non-Python files: the Python AST + grounding check don't apply.
+        # Parseability is "not applicable" — report True so the scoring
+        # weight doesn't penalize presence. Violations are empty; the
+        # Python-fabrication regex is skipped below.
+        tree = None
+        parseable = True
+        violations = []
 
     has_yield = None
     has_correct_return_type = None
 
-    is_streaming_file = any(filename.endswith(ind) for ind in _STREAMING_INDICATORS)
+    is_streaming_file = is_python and any(
+        filename.endswith(ind) for ind in _STREAMING_INDICATORS
+    )
     if task_requires_streaming and is_streaming_file and tree is not None:
         has_yield = bool(_YIELD_RE.search(content))
 
@@ -330,25 +387,36 @@ def check_single_artifact(
                         elif any(r in ret_str for r in bad_returns):
                             has_correct_return_type = False
 
-    has_not_implemented = bool(_NOT_IMPLEMENTED_RE.search(content))
-    has_sys_stdout = bool(_SYS_STDOUT_RE.search(content))
+    # Language-aware stub detection: the Python-only regex is a subset
+    # of _STUB_MARKER_RE, so the broader pattern is a safe replacement
+    # for every language we score.
+    has_not_implemented = bool(_STUB_MARKER_RE.search(content))
+    # sys.stdout is Python-specific (MCP stdio concern); non-Python
+    # files don't have this class of bug.
+    has_sys_stdout = bool(_SYS_STDOUT_RE.search(content)) if is_python else False
 
-    fab_self = _count_violations_by_kind(violations, "missing_method")
-    fab_field = _count_violations_by_kind(violations, "wrong_field")
-    fab_class = _count_violations_by_kind(violations, "missing_class")
-    fab_chained = sum(
-        1
-        for v in violations
-        if v.kind == "missing_method" and "." in v.symbol and v.symbol.count(".") >= 2
-    )
-    fab_self -= fab_chained
+    if is_python:
+        fab_self = _count_violations_by_kind(violations, "missing_method")
+        fab_field = _count_violations_by_kind(violations, "wrong_field")
+        fab_class = _count_violations_by_kind(violations, "missing_class")
+        fab_chained = sum(
+            1
+            for v in violations
+            if v.kind == "missing_method" and "." in v.symbol and v.symbol.count(".") >= 2
+        )
+        fab_self -= fab_chained
 
-    if not parseable and len(violations) <= 1:
-        r_self, r_chain, r_field, r_class = _regex_fabrication_scan(content, lookup)
-        fab_self = max(fab_self, r_self)
-        fab_chained = max(fab_chained, r_chain)
-        fab_field = max(fab_field, r_field)
-        fab_class = max(fab_class, r_class)
+        if not parseable and len(violations) <= 1:
+            r_self, r_chain, r_field, r_class = _regex_fabrication_scan(content, lookup)
+            fab_self = max(fab_self, r_self)
+            fab_chained = max(fab_chained, r_chain)
+            fab_field = max(fab_field, r_field)
+            fab_class = max(fab_class, r_class)
+    else:
+        fab_self = 0
+        fab_field = 0
+        fab_class = 0
+        fab_chained = 0
 
     weighted_checks: list[tuple[str, float, float]] = []
 
