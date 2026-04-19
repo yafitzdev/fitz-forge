@@ -288,18 +288,28 @@ def run_deterministic_checks(
     effective_per_file_scores: list[float] = []
     if evaluated_filenames:
         check_by_filename = {ac.filename: ac for ac in artifact_checks}
-        for ef in evaluated_filenames:
-            matching = None
-            for path, ac in check_by_filename.items():
-                if _matches_evaluated(path, {ef}):
-                    matching = ac
-                    break
-            if matching is None:
+        for ef in sorted(evaluated_filenames):
+            # All artifacts that match this taxonomy key — a plan that
+            # ships both core/engine.py (protocol) and
+            # engines/fitz_krag/engine.py (impl) has two matches.
+            # Taking MIN is the honest signal: the worst implementation
+            # is what would bite the user in practice; treating only
+            # the first match hides real fabrications behind a clean
+            # sibling. Sorting the match set keeps the choice stable
+            # across runs (set iteration order depends on hash seed).
+            matches = sorted(
+                (ac for path, ac in check_by_filename.items()
+                 if _matches_evaluated(path, {ef})),
+                key=lambda a: a.filename,
+            )
+            if not matches:
                 effective_per_file_scores.append(0.0)
-            elif matching.has_not_implemented:
-                effective_per_file_scores.append(5.0)
             else:
-                effective_per_file_scores.append(float(matching.score))
+                per_match_scores = [
+                    5.0 if m.has_not_implemented else float(m.score)
+                    for m in matches
+                ]
+                effective_per_file_scores.append(min(per_match_scores))
     else:
         effective_per_file_scores = [float(ac.score) for ac in artifact_checks]
     effective_artifact_mean = (
@@ -437,26 +447,35 @@ def _compute_groundedness(
             if isinstance(a, dict) and "raise NotImplementedError" in (a.get("content") or "")
         }
 
-        # Build map: evaluated filename → shipped-real-non-stub-grounded?
-        shipped_paths = {
-            (a.get("filename") or "").replace("\\", "/").strip("/")
-            for a in artifact_dicts
-            if isinstance(a, dict)
-        }
-        shipped_paths.discard("")
+        # Build shipped-path list in artifact order (deterministic),
+        # de-duplicated while preserving first occurrence.
+        shipped_paths: list[str] = []
+        seen: set[str] = set()
+        for a in artifact_dicts:
+            if not isinstance(a, dict):
+                continue
+            fn = (a.get("filename") or "").replace("\\", "/").strip("/")
+            if fn and fn not in seen:
+                seen.add(fn)
+                shipped_paths.append(fn)
+
+        # For each evaluated filename, it's "grounded" iff at least one
+        # matching shipped path is shipped AND all matching paths are
+        # clean (no stub, no violations). "All matches must be clean" is
+        # the honest semantic: if the plan ships two engine.py variants
+        # and one has fabrications, the engine.py requirement isn't
+        # cleanly met. Without this rule, scoring depended on set
+        # iteration order (PYTHONHASHSEED), so the same plan received
+        # different scores on re-runs.
         clean = 0
-        for ef in evaluated_filenames:
-            matching_path = None
-            for sp in shipped_paths:
-                if _matches_evaluated(sp, {ef}):
-                    matching_path = sp
-                    break
-            if matching_path is None:
+        for ef in sorted(evaluated_filenames):
+            matches = [sp for sp in shipped_paths if _matches_evaluated(sp, {ef})]
+            if not matches:
                 continue  # missing → ungrounded
-            if matching_path in stub_files:
-                continue  # stub → ungrounded
-            if matching_path in dirty_files:
-                continue  # has violations → ungrounded
+            if any(m in stub_files for m in matches):
+                continue  # any stub → ungrounded
+            if any(m in dirty_files for m in matches):
+                continue  # any violations → ungrounded
             clean += 1
         score = round(clean / len(evaluated_filenames) * 100, 1)
         return score, len(violations)
