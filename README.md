@@ -88,9 +88,13 @@ That's it. Your plan runs overnight on local hardware.
 
 ### About
 
-I built `fitz-forge` because planning is the part of AI-assisted coding where you're most dependent on someone else's infrastructure. Reading a codebase, reasoning about architecture, producing a structured plan — that's hours of token burn on an API you don't control, at pricing you don't control, with data leaving your machine.
+Two premises behind `fitz-forge`:
 
-Local models can do this work. They're slower, and the smaller ones need more scaffolding to produce reliable structured output, but scaffolding is a solvable problem. `fitz-forge` is that scaffolding: a harness that lets a 26B model on a consumer GPU produce architectural plans you then hand to Claude Code (or an agent, or a human) for implementation. The expensive reasoning runs overnight on hardware you already own. When the local model improves, your plans improve for free — no re-up on anyone's roadmap.
+**1. Agentic coding tools are heavily subsidized today.** A $100/month Claude Code subscription gets you enough frontier-model inference that the raw API cost, if metered, would run multiples of the price. This works while AI providers are still buying mindshare. It doesn't work forever.
+
+**2. Planning is the most expensive phase of agentic coding.** More tokens than implementation. More than debugging. More than code review. A single "plan this refactor" request reads the whole codebase, reasons about architecture, and emits a structured plan — the phase with the highest context requirement and the fuzziest stopping condition.
+
+Put those two together: when subsidies normalize, the cost of agentic coding will rise, and the biggest single line item will be planning. `fitz-forge` moves that phase onto hardware you already own. A local 26B model produces the plan overnight; you hand it to Claude Code (or an agent, or a human) for implementation. The subsidized-but-metered tokens go to the cheaper-per-token phases. The planning tokens never leave your machine.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
