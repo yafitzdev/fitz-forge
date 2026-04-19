@@ -48,6 +48,36 @@ from fitz_forge.planning.schemas import (
 
 logger = logging.getLogger(__name__)
 
+
+def _format_rubric_hints(prior_outputs: dict[str, Any]) -> str:
+    """Render an optional ``## Quality Criteria`` block for the synthesis prompt.
+
+    The pipeline accepts an optional ``rubric_hints`` string at job-creation
+    time. When present, it is threaded into ``prior_outputs`` under the
+    ``_rubric_hints`` key and injected here so the reasoning model can
+    see domain-level expectations that are not derivable from the task
+    description or the codebase alone (e.g. "preserve pre-rerank score",
+    "never buffer the full response", "rotate tokens on password change").
+
+    Codebase/language agnostic: the content is free-form markdown authored
+    by the user (or loaded from a per-task ``rubric.md`` by the benchmark
+    runner). Returns an empty string when no rubric is supplied so the
+    prompt stays unchanged for callers that don't care.
+    """
+    hints = prior_outputs.get("_rubric_hints") or ""
+    hints = hints.strip()
+    if not hints:
+        return ""
+    return (
+        "## Quality Criteria\n\n"
+        "The plan will be evaluated against these domain-specific quality "
+        "criteria. Aim for them explicitly in your architecture and design "
+        "choices — they capture expert knowledge that is not derivable "
+        "from the task description or source code alone.\n\n"
+        f"{hints}\n"
+    )
+
+
 # Field groups for per-field extraction (same schemas as classic pipeline).
 
 _CONTEXT_FIELD_GROUPS = [
@@ -1909,6 +1939,7 @@ class SynthesisStage(PipelineStage):
             resolved_decisions=decision_text,
             call_graph=call_graph_text,
             gathered_context=gathered_context,
+            rubric_hints=_format_rubric_hints(prior_outputs),
         )
         return self._make_messages(prompt)
 

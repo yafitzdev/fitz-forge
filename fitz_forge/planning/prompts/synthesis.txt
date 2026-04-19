@@ -14,6 +14,7 @@ The following decisions were made by analyzing the actual source code. Each deci
 
 {gathered_context}
 
+{rubric_hints}
 ## Instructions
 
 Write the Context, Architecture, and Design sections below. Roadmap and Risk will be written in a separate pass — do NOT include them here.

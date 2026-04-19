@@ -150,6 +150,7 @@ class PlanningPipeline:
         progress_callback: Callable[[float, str], None] | Callable[[float, str], Any] | None = None,
         agent: "AgentContextGatherer | None" = None,
         pre_gathered_context: str | None = None,
+        rubric_hints: str | None = None,
         _bench_override_files: list[str] | None = None,
     ) -> PipelineResult:
         """
@@ -163,6 +164,12 @@ class PlanningPipeline:
             progress_callback: Optional callback(progress, phase) for updates
             agent: Optional AgentContextGatherer for codebase exploration
             pre_gathered_context: Pre-gathered codebase context (skips agent gathering)
+            rubric_hints: Optional free-form quality criteria (any language,
+                any codebase) surfaced to the synthesis reasoning prompt.
+                Captures domain knowledge not derivable from the task or
+                codebase — e.g. "preserve pre-rerank score", "never buffer
+                the full response". When None, no extra section is added
+                to the prompt and behavior is unchanged.
 
         Returns:
             PipelineResult with all stage outputs or error
@@ -178,6 +185,14 @@ class PlanningPipeline:
             prior_outputs = {}
             await self._checkpoint_mgr.clear_checkpoint(job_id)
             logger.info(f"Starting fresh pipeline for job {job_id}")
+
+        # Inject rubric hints so stages that consume them (currently only
+        # synthesis) can read without a new param on every stage signature.
+        if rubric_hints:
+            prior_outputs["_rubric_hints"] = rubric_hints
+            logger.info(
+                f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria"
+            )
 
         # Inject pre-gathered context if provided (skips agent gathering)
         if pre_gathered_context is not None and "_agent_context" not in prior_outputs:

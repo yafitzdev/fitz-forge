@@ -82,6 +82,29 @@ def _challenge_from_context_file(context_file: str | Path | None) -> str | None:
     return None
 
 
+def _load_rubric_hints(context_file: str | Path | None) -> str | None:
+    """Return the contents of ``rubric.md`` next to the context file, or None.
+
+    Per-task quality criteria are optional. When a challenge directory
+    contains ``rubric.md``, the benchmark runner passes its contents to
+    the pipeline as ``rubric_hints`` so the synthesis stage can align
+    architectural choices with domain expectations the taxonomy rewards
+    (e.g. "preserve pre-rerank score" for ranking_explanation). Fully
+    codebase/language agnostic — the file is free-form markdown.
+    """
+    if not context_file:
+        return None
+    path = Path(context_file).resolve()
+    rubric_path = path.parent / "rubric.md"
+    if not rubric_path.is_file():
+        return None
+    try:
+        text = rubric_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return text if text.strip() else None
+
+
 def _all_run_dirs() -> list[Path]:
     """Every existing run directory across all challenges + legacy results/."""
     root = Path(__file__).parent
@@ -524,6 +547,7 @@ async def _run_decomposed_once(
     context: dict,
     run_id: int,
     out_dir: Path,
+    rubric_hints: str | None = None,
 ) -> dict:
     """Run the decomposed planning pipeline with fixed retrieval files."""
     from fitz_forge.config import load_config
@@ -563,6 +587,7 @@ async def _run_decomposed_once(
         job_description=query,
         resume=False,
         agent=agent,
+        rubric_hints=rubric_hints,
         _bench_override_files=context.get("file_list"),
     )
     elapsed = time.monotonic() - t0
@@ -628,8 +653,13 @@ def decomposed(
 ):
     """Run decomposed pipeline benchmarks with fixed retrieval context."""
     context = json.loads(Path(context_file).read_text())
+    rubric_hints = _load_rubric_hints(context_file)
     out_dir = _results_dir("decomposed", context_file=context_file)
     logger.info(f"Running {runs} decomposed benchmarks -> {out_dir}")
+    if rubric_hints:
+        logger.info(
+            f"rubric_hints loaded from task dir ({len(rubric_hints)} chars)"
+        )
     if parallel_runs > 1:
         logger.info(
             f"Parallel runs: {parallel_runs} (ensure LM Studio loaded with --parallel {parallel_runs})"
@@ -645,6 +675,7 @@ def decomposed(
             context,
             i + 1,
             out_dir,
+            rubric_hints=rubric_hints,
         )
         run_file = out_dir / f"run_{i + 1:02d}.json"
         run_file.write_text(json.dumps(result, indent=2))
