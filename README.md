@@ -135,7 +135,49 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ### Benchmarks
 
-TBD
+**How much does the harness actually matter?** We're running an A/B where the *only* variable is the presence of `fitz-forge` — same model, same files, same scorer. A raw single-prompt baseline gets the user task + the same relevant source files the harness sees. Both outputs are scored by the same two-tier judge (deterministic Tier-1 + Sonnet taxonomy Tier-2 that classifies the plan's architectural pattern and per-file fidelity against a pre-defined ideal).
+
+<br>
+
+#### Streaming implementation on `fitz-sage` · model: `gemma-4-26b-a4b-it` · 1 run each
+
+| Metric | 🤖 Raw LLM (no harness) | 🔨 With fitz-forge | Δ |
+|---|---:|---:|---:|
+| **Tier-1** (deterministic code quality) | 85.5 | **100.0** | +14.5 |
+| **Tier-2** (architectural correctness) | 50.0 | **72.5** | +22.5 |
+| Architecture tier | **A5** (NotImplementedError-class) | **A2** (full pipeline + streaming) | 4 tiers ↑ |
+| Files covered | 3 / 5 | 8 / 5 | +5 |
+| Latency | 28s | 686s | 24× |
+
+<br>
+
+**What changed:** the raw LLM touched only the surface files it could see in one shot (the route handler, the SDK entry, the `Answer` type) and produced a plausible-looking but architecturally-broken plan — classified A5 because the full RAG pipeline was never replicated for the streaming path. The harness decomposed the task, traced the call chain, and produced coherent changes across `engine.py`, `synthesizer.py`, `providers/base.py`, `services/fitz_service.py`, and the dependency wiring — landing at A2 (one tier below the ideal, which would also stream *through* the synthesizer instead of directly at the provider).
+
+<br>
+
+> [!NOTE]
+> **Read this as a single data point, not a headline number.** One run each, one model, one task. The real study is the matrix — multiple runs × multiple tasks × multiple local models — that grows here as we extend it. The takeaway isn't "+22.5 points," it's the *shape* of the gap: raw LLMs produce convincing surface code but miss architectural coherence; the harness enforces end-to-end coverage of the call chain.
+
+<br>
+
+Reproduction:
+```bash
+# Baseline (no harness)
+python -m benchmarks.no_harness \
+  --source-dir ../fitz-sage \
+  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
+  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
+  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
+  --runs 1 --score-v2
+
+# With harness
+python -m benchmarks.plan_factory decomposed \
+  --runs 1 --source-dir ../fitz-sage \
+  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
+  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
+  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
+  --score-v2
+```
 
 ---
 
