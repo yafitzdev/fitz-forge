@@ -13,9 +13,13 @@ anything over ~2000 characters of JSON schema becomes unreliable.
 
 Per-field extraction decomposes the synthesis stage into three phases:
 
-1. **Best-of-3 reasoning + self-critique** -- the model writes three
-   unrestricted natural language attempts, scope consensus picks the best,
-   and a critique pass checks for scope inflation / hallucinated files.
+1. **Best-of-3 reasoning + context-focus refinement** -- the model writes
+   three unrestricted natural language attempts, scope consensus picks the
+   best, and a refinement pass re-runs reasoning with context trimmed to
+   the files the first pass actually referenced (orthogonal focus gain,
+   not a critique). Quality correction is the [senior-engineer review
+   layer](senior-engineer-reviews.md)'s job, which fires on the extracted
+   outputs below.
 2. **13 small JSON extractions** -- one extraction call per field group,
    each targeting a mini-schema under 2000 characters. The model only
    produces a few fields at a time from the reasoning it already wrote.

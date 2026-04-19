@@ -36,6 +36,31 @@ After reasoning, the same field group extraction runs as in the classic pipeline
 
 Each extraction is <2000 chars — the same per-field extraction that makes small models reliable.
 
+### Senior-Engineer Review Layer
+
+Synthesis is where most of the [senior-engineer review layer](../infrastructure/senior-engineer-reviews.md)
+fires. In execution order within the stage:
+
+- **Assumption review** after context extraction — flags assumptions the
+  codebase contradicts; surfaces as `review_findings` on the context output.
+- **Architecture review** after architecture extraction — when issues are
+  flagged, regenerates the synthesis reasoning itself with the critique in
+  the prompt (not just re-extraction, which can't flip a wrong pick), then
+  re-extracts.
+- **Design review** before artifact generation — regenerates affected
+  design field groups (components, data_model, adrs, integrations) and
+  cascades the original issues into the reasoning the per-file artifact
+  generator reads, so field-name precision reaches the code.
+- **Semantic review** inside artifact generation — flags intent-vs-code
+  contradictions per file.
+- **Coverage review** after artifact generation — deterministic set-
+  difference that ensures every file in `needed_artifacts` shipped as
+  an artifact; regenerates missing files.
+
+Each review is strictly additive: on any error it returns the original
+output unchanged. The blind single-prompt self-critique that used to run
+after best-of-3 was removed in favor of this scoped-review layer.
+
 ### Artifact Generation
 
 Once `needed_artifacts` is extracted, synthesis hands the full spec list off
@@ -92,6 +117,7 @@ No user-facing configuration. The synthesis stage runs automatically as the fina
 
 - [Decision Resolution](05_decision-resolution.md) — produces the committed decisions synthesized here
 - [Per-Field Extraction](../infrastructure/per-field-extraction.md) — the extraction mechanism used for all 13 field groups
+- [Senior Engineer Reviews](../infrastructure/senior-engineer-reviews.md) — five of the six reviews fire inside this stage
 - [Artifact Generation](07_artifact-generation.md) — generates the code in `needed_artifacts`
 - [Grounding Validation](08_grounding-validation.md) — AST grounding pass on generated artifacts
 - [Coherence Check](09_coherence-check.md) — cross-section consistency

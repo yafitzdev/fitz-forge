@@ -3,12 +3,14 @@
 ## Problem
 
 The planning pipeline runs 3 stages sequentially, each producing structured output
-grounded in the previous stage's results. Despite binding constraints and self-critique,
-cross-stage inconsistencies still emerge: a roadmap that implements a different approach
-than the architecture recommended, risks referencing phase numbers that do not exist,
-component names that appear in the design but never in any roadmap deliverable, or
-needed artifacts from the context stage missing from the roadmap entirely. Each stage
-is internally consistent but the plan as a whole may contradict itself.
+grounded in the previous stage's results. Despite binding constraints and the
+[senior-engineer review layer](../infrastructure/senior-engineer-reviews.md)'s
+per-stage critiques, cross-stage inconsistencies still emerge: a roadmap that
+implements a different approach than the architecture recommended, risks
+referencing phase numbers that do not exist, component names that appear in the
+design but never in any roadmap deliverable, or needed artifacts from the context
+stage missing from the roadmap entirely. Each stage is internally consistent but
+the plan as a whole may contradict itself.
 
 ## Solution
 

@@ -63,8 +63,8 @@ the actual codebase.</em>
   </tr>
 </table>
 
-→ Same model, same hardware. The difference is the harness: `fitz-forge` reads your codebase, reasons in stages, self-critiques, 
-and extracts structured output that a small model can actually produce reliably.
+→ Same model, same hardware. The difference is the harness: `fitz-forge` reads your codebase, reasons in stages, runs a 
+senior-engineer review at every stage output, and extracts structured output that a small model can actually produce reliably.
 
 </div>
 
@@ -153,7 +153,7 @@ regenerate the affected stage when a review flags issues.
      USER PROMPT
           │
           ▼
-┌─── 🧑‍💼 SENIOR ENGINEER REVIEW LAYER ─────────────────────────────┐
+┌─── 🧑‍💼 SENIOR ENGINEER REVIEW LAYER ──────────────────────────────┐
 │   detect → regenerate → re-review → keep whichever is better      │
 │                                                                   │
 │  ┌─────────────────────────────────────────────────────────┐      │
@@ -161,15 +161,15 @@ regenerate the affected stage when a review flags issues.
 │  │   1. Agent Context Gathering       [6-8 LLM]            │      │
 │  │   2. Implementation Check          [1 LLM]              │      │
 │  │   3. Call Graph Extraction         [0 · AST]            │      │
-│  │   4. Decision Decomposition        [2-4 LLM]   ◂────────┤── decomposition review
+│  │   4. Decision Decomposition        [2-4 LLM]   ◂───────────────── decomposition review
 │  │   5. Decision Resolution           [10-15]              │      │
 │  │   6. Synthesis                     [~18 LLM]            │      │
-│  │      ├─ context assumptions                    ◂────────┤── assumption review
-│  │      ├─ architecture pick                      ◂────────┤── architecture review
-│  │      └─ design spec                            ◂────────┤── design review
+│  │      ├─ context assumptions                    ◂───────────────── assumption review
+│  │      ├─ architecture pick                      ◂───────────────── architecture review
+│  │      └─ design spec                            ◂───────────────── design review
 │  │   7. Artifact Generation           [3-8 LLM]            │      │
-│  │      ├─ per-file code                          ◂────────┤── semantic review
-│  │      └─ set-level coverage                     ◂────────┤── coverage review
+│  │      ├─ per-file code                          ◂───────────────── semantic review
+│  │      └─ set-level coverage                     ◂───────────────── coverage review
 │  │   8. Grounding Validation          [0-5 LLM]            │      │
 │  │   9. Coherence Check               [1 LLM]              │      │
 │  │  10. Render + Write                [0]                  │      │

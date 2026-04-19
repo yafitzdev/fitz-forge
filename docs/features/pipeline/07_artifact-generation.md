@@ -204,6 +204,10 @@ No user-facing configuration.
 
 - [Synthesis](06_synthesis.md) — produces `needed_artifacts` specs and
   consumes the closed artifact set.
+- [Senior Engineer Reviews](../infrastructure/senior-engineer-reviews.md) —
+  the semantic review fires per-artifact inside this subsystem, and the
+  deterministic coverage review runs after generation to ensure every
+  `needed_artifact` shipped as an artifact.
 - [Grounding Validation](08_grounding-validation.md) — second line of
   defense; runs AST checks on the artifact set after generation, in case the
   closure checks missed something.
