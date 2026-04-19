@@ -88,15 +88,13 @@ That's it. Your plan runs overnight on local hardware.
 
 ### About
 
-I built `fitz-forge` because the best AI coding tools are dangerously dependent on subsidized API pricing. 
-Claude Code costs $100/month *today* — heavily subsidized. When those subsidies shrink, the planning phase alone 
-(understanding a codebase, reasoning about architecture, producing a structured plan) could cost more than the subscription. 
-`fitz-forge` moves that expensive planning phase onto hardware you already own. No API costs. No data leaving your network. 
-And as local models improve, your plans improve for free.
+I built `fitz-forge` because planning is the part of AI-assisted coding where you're most dependent on someone else's infrastructure. Reading a codebase, reasoning about architecture, producing a structured plan — that's hours of token burn on an API you don't control, at pricing you don't control, with data leaving your machine.
+
+Local models can do this work. They're slower, and the smaller ones need more scaffolding to produce reliable structured output, but scaffolding is a solvable problem. `fitz-forge` is that scaffolding: a harness that lets a 26B model on a consumer GPU produce architectural plans you then hand to Claude Code (or an agent, or a human) for implementation. The expensive reasoning runs overnight on hardware you already own. When the local model improves, your plans improve for free — no re-up on anyone's roadmap.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
-~20k lines of Python. 970+ tests. Built by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
+~20k lines of Python. 1200+ tests. Built by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev)).
 
 ![fitz-forge llm_with_harness](https://raw.githubusercontent.com/yafitzdev/fitz-forge/main/docs/assets/llm_with_harness.jpg)
 
