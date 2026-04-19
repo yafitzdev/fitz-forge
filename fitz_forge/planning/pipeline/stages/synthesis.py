@@ -38,6 +38,10 @@ from fitz_forge.planning.validation.grounding.inference import (
 )
 from fitz_forge.planning.validation.grounding.parser import parse_python
 from fitz_forge.planning.prompts import load_prompt
+from fitz_forge.planning.reviews import (
+    format_issues_feedback,
+    review_architecture,
+)
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
     ContextOutput,
@@ -4062,6 +4066,143 @@ class SynthesisStage(PipelineStage):
             lines.append("")
         return "\n".join(lines)
 
+    async def _senior_arch_review_pass(
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
+        architecture: dict[str, Any],
+        reasoning: str,
+        extract_context: str,
+    ) -> dict[str, Any]:
+        """Critique the chosen architecture; regenerate once on issues.
+
+        Runs ``review_architecture`` against the extracted architecture
+        output. If the senior engineer flags issues, appends the
+        feedback to the synthesis reasoning text and re-runs the
+        architecture per-field extractions so the model has another
+        pass to correct the pick. Keeps whichever pass the re-review
+        prefers — falls back to the original on any error to stay
+        fail-safe.
+        """
+        rubric_hints = prior_outputs.get("_rubric_hints") or None
+        gathered = self._get_gathered_context(prior_outputs) or ""
+
+        try:
+            review = await review_architecture(
+                task_description=job_description,
+                architecture=architecture,
+                client=client,
+                gathered_context=gathered,
+                rubric_hints=rubric_hints,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': architecture review errored ({e}); "
+                "keeping original"
+            )
+            return architecture
+
+        if review.passed:
+            logger.info(
+                f"Stage '{self.name}': architecture review passed "
+                f"(recommended={architecture.get('recommended', '')[:60]})"
+            )
+            return architecture
+
+        logger.info(
+            f"Stage '{self.name}': architecture review found "
+            f"{review.issue_count} issue(s); re-extracting"
+        )
+        for issue in review.issues[:3]:
+            logger.info(
+                "  %s — %s | %s",
+                issue.target,
+                issue.intent[:80],
+                issue.actual[:80],
+            )
+
+        feedback_block = format_issues_feedback(review.issues)
+        if not feedback_block:
+            return architecture
+        augmented_reasoning = (
+            f"{reasoning}\n\n"
+            "## Senior architecture review (address in the re-extraction)\n\n"
+            f"{feedback_block}\n"
+        )
+
+        try:
+            arch_merged: dict[str, Any] = {}
+            for group in _ARCH_FIELD_GROUPS:
+                partial = await self._extract_field_group(
+                    client,
+                    augmented_reasoning,
+                    group["fields"],
+                    group["schema"],
+                    f"{group['label']}_after_review",
+                    extra_context=extract_context,
+                )
+                arch_merged.update(partial)
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': architecture re-extraction failed ({e}); "
+                "keeping original"
+            )
+            return architecture
+
+        arch_merged.setdefault("recommended", "")
+        arch_merged.setdefault("reasoning", "")
+        arch_merged.setdefault("key_tradeoffs", {})
+        arch_merged.setdefault("technology_considerations", [])
+        arch_merged.setdefault("scope_statement", "")
+        try:
+            new_architecture = ArchitectureOutput(**arch_merged).model_dump()
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': architecture re-validation failed ({e}); "
+                "keeping original"
+            )
+            return architecture
+
+        if not new_architecture.get("recommended"):
+            logger.info(
+                f"Stage '{self.name}': architecture re-extraction produced empty "
+                "recommendation; keeping original"
+            )
+            return architecture
+
+        try:
+            retry_review = await review_architecture(
+                task_description=job_description,
+                architecture=new_architecture,
+                client=client,
+                gathered_context=gathered,
+                rubric_hints=rubric_hints,
+                label="architecture_review_retry",
+            )
+        except Exception:
+            retry_review = None
+
+        retry_issue_count = (
+            retry_review.issue_count
+            if retry_review is not None
+            else review.issue_count + 1
+        )
+
+        if retry_issue_count < review.issue_count:
+            logger.info(
+                f"Stage '{self.name}': architecture retry improved "
+                f"({review.issue_count} -> {retry_issue_count}); using retry "
+                f"(recommended={new_architecture.get('recommended', '')[:60]})"
+            )
+            return new_architecture
+
+        logger.info(
+            f"Stage '{self.name}': architecture retry did not improve "
+            f"({review.issue_count} -> {retry_issue_count}); keeping original"
+        )
+        return architecture
+
     async def execute(
         self,
         client: Any,
@@ -4379,6 +4520,22 @@ class SynthesisStage(PipelineStage):
             arch_merged.setdefault("technology_considerations", [])
             arch_merged.setdefault("scope_statement", "")
             architecture = ArchitectureOutput(**arch_merged).model_dump()
+
+            # Senior-engineer critique of the chosen architecture.
+            # Catches wrong-pick outliers (e.g. fake streaming, caching
+            # without invalidation) that downstream reviews can't see
+            # because the plan is internally consistent for the wrong
+            # recommendation. When issues are found, re-extract the
+            # architecture fields with the critique merged into the
+            # reasoning, then keep whichever pass has fewer issues.
+            architecture = await self._senior_arch_review_pass(
+                client=client,
+                job_description=job_description,
+                prior_outputs=prior_outputs,
+                architecture=architecture,
+                reasoning=reasoning,
+                extract_context=extract_context,
+            )
 
             design_merged.setdefault("adrs", [])
             design_merged.setdefault("components", [])

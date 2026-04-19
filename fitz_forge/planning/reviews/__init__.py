@@ -18,6 +18,7 @@ caller proceeds. When issues exist, the caller surfaces them as
 feedback and regenerates the relevant stage output.
 """
 
+from .architecture import review_architecture
 from .base import ReviewIssue, ReviewResult, format_issues_feedback
 from .decomposition import review_decomposition
 from .semantic import Discrepancy, format_feedback, review_artifacts
@@ -28,6 +29,7 @@ __all__ = [
     "ReviewResult",
     "format_feedback",
     "format_issues_feedback",
+    "review_architecture",
     "review_artifacts",
     "review_decomposition",
 ]
