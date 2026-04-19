@@ -1016,6 +1016,40 @@ def absorb_class(lookup, rel: str, class_node: "Node") -> None:
             lookup._all_method_names.add(mname)
 
 
+def augment_from_artifacts(lookup, artifacts: list[dict]) -> int:
+    """Enrich the lookup with classes + functions defined in sibling artifacts.
+
+    The production pipeline's closure check resolves cross-artifact
+    references (artifact A calling ``B.method()`` where ``B`` is
+    defined by artifact B) — the grounding scorer should too. Without
+    this, any plan that invents a typed record (e.g. ``StreamEvent``)
+    and uses it across files will have every usage flagged as a
+    fabrication, even though the class is defined by a sibling in the
+    same plan. Returns the number of classes added.
+    """
+    from .parser import _parse_or_none
+
+    parsed: list[tuple[str, "Node"]] = []
+    added = 0
+    for artifact in artifacts or []:
+        if not isinstance(artifact, dict):
+            continue
+        rel = (artifact.get("filename") or "").replace("\\", "/").strip("/")
+        content = artifact.get("content") or ""
+        if not rel or not content.strip():
+            continue
+        tree = _parse_or_none(content)
+        if tree is None:
+            continue
+        parsed.append((rel, tree.root_node))
+        added += absorb_file_pass1(lookup, rel, tree.root_node)
+
+    known_classes = set(lookup._all_class_names)
+    for rel, root_node in parsed:
+        absorb_file_pass2(lookup, rel, root_node, known_classes)
+    return added
+
+
 def augment_from_source_dir(lookup, source_dir: str) -> int:
     """Tree-sitter port of ``StructuralIndexLookup.augment_from_source_dir``."""
     from pathlib import Path

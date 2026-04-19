@@ -65,11 +65,19 @@ def check_single_artifact(artifact, lookup, task_requires_streaming=True):
 
 
 def check_all_artifacts_v2(
-    artifacts, structural_index, task_requires_streaming=True, source_dir=""
+    artifacts,
+    structural_index,
+    task_requires_streaming=True,
+    source_dir="",
+    augment_from=None,
 ):
     """Thin wrapper: library dataclasses -> benchmark Pydantic models."""
     results = _lib_check_all_artifacts_v2(
-        artifacts, structural_index, task_requires_streaming, source_dir
+        artifacts,
+        structural_index,
+        task_requires_streaming,
+        source_dir,
+        augment_from=augment_from,
     )
     return [_adapt_artifact_check(r) for r in results]
 
@@ -193,6 +201,7 @@ def run_deterministic_checks(
     task_requires_streaming: bool = True,
     taxonomy_files: dict[str, str] | None = None,
     source_dir: str = "",
+    evaluated_filenames: set[str] | None = None,
 ) -> DeterministicReport:
     """Run all Tier 1 checks and produce a scored report.
 
@@ -217,17 +226,41 @@ def run_deterministic_checks(
         {"filename": a.get("filename", ""), "content": a.get("content", "")} for a in artifacts
     ]
 
-    # 1. Completeness
+    # Filter to "evaluated" artifacts — files that the taxonomy
+    # explicitly scores (file_taxonomies keys). This keeps Craft and
+    # Groundedness comparable across arms that produce different
+    # scopes: one arm may proactively write tests, another may not; the
+    # scorer should evaluate each arm on the SAME files rather than
+    # penalise an arm for writing extras. Without an evaluated-filename
+    # set, falls back to all artifacts (original behaviour).
+    if evaluated_filenames:
+        artifact_dicts_evaluated = [
+            a for a in artifact_dicts
+            if _matches_evaluated(a["filename"], evaluated_filenames)
+        ]
+    else:
+        artifact_dicts_evaluated = artifact_dicts
+
+    # 1. Completeness — uses the full artifact set (file-presence across
+    #    everything the plan shipped, incl. extras).
     completeness = check_completeness(plan_data, decisions, taxonomy_files)
 
-    # 2. Per-artifact checks
+    # 2. Per-artifact checks — on the evaluated subset only, but the
+    #    fabrication-detector's lookup is enriched with defs from the
+    #    FULL artifact set so sibling-artifact cross-references (e.g. a
+    #    StreamEvent class defined by answer.py and used from engine.py)
+    #    aren't wrongly flagged as fabrications.
     artifact_checks = check_all_artifacts_v2(
-        artifact_dicts, structural_index, task_requires_streaming, source_dir
+        artifact_dicts_evaluated,
+        structural_index,
+        task_requires_streaming,
+        source_dir,
+        augment_from=artifact_dicts,
     )
 
-    # 3. Cross-artifact consistency
+    # 3. Cross-artifact consistency — on the evaluated subset.
     consistency_checks = check_cross_artifact_consistency(
-        artifact_dicts, artifact_checks, structural_index, source_dir
+        artifact_dicts_evaluated, artifact_checks, structural_index, source_dir
     )
 
     # Score calculation
@@ -265,11 +298,17 @@ def run_deterministic_checks(
         (artifact_mean + consistency_ratio * 100) / 2,
         1,
     )
-    # Groundedness — full-codebase grounding check on the artifact set.
-    # Catches chained fabrications that per-artifact quality checks miss
-    # (sibling artifacts reinforcing each other's invented APIs).
+    # Groundedness — full-codebase grounding check on the evaluated
+    # artifact set, but the lookup is enriched with defs from the FULL
+    # artifact set so sibling artifacts outside the filter still count
+    # (a plan can legitimately define ``StreamEvent`` in ``schemas.py``
+    # and reference it from ``engine.py``; filtering to "evaluated"
+    # files shouldn't make the reference look fabricated).
     groundedness, grounding_violations = _compute_groundedness(
-        artifact_dicts, structural_index, source_dir
+        artifact_dicts_evaluated,
+        structural_index,
+        source_dir,
+        augment_from=artifact_dicts,
     )
     # Actionability — can an agent execute this plan end-to-end?
     # Phases with a real verification_command can be closed-loop tested.
@@ -291,10 +330,44 @@ def run_deterministic_checks(
     )
 
 
+def _matches_evaluated(filename: str, evaluated: set[str]) -> bool:
+    """Match an artifact filename against the taxonomy's evaluated-file keys.
+
+    Taxonomies list files as short names like ``engine.py`` or
+    ``routes/query.py``; artifact filenames are full repo-relative
+    paths like ``fitz_sage/engines/fitz_krag/engine.py``. Match on:
+
+    * Exact string equality.
+    * Artifact's path ends with ``"/" + key`` (e.g.
+      ``fitz_sage/.../engine.py`` ends with ``/engine.py``).
+    * Key ends with ``"/" + artifact_basename`` (symmetric, in case
+      the taxonomy uses a longer suffix).
+
+    Everything else — tests, extras, files the taxonomy didn't
+    declare — is treated as "not evaluated" and filtered out.
+    """
+    if not filename:
+        return False
+    fn = filename.replace("\\", "/").strip("/")
+    basename = fn.split("/")[-1]
+    for key in evaluated:
+        k = key.replace("\\", "/").strip("/")
+        if fn == k:
+            return True
+        if fn.endswith("/" + k):
+            return True
+        if k == basename:
+            return True
+        if k.endswith("/" + basename):
+            return True
+    return False
+
+
 def _compute_groundedness(
     artifact_dicts: list[dict],
     structural_index: str,
     source_dir: str,
+    augment_from: list[dict] | None = None,
 ) -> tuple[float, int]:
     """Fraction of artifacts free of grounding violations against the real codebase.
 
@@ -302,13 +375,20 @@ def _compute_groundedness(
     artifact emission. Returns ``(score, total_violations)``. Score is
     100 when no artifact has any violation, 0 when every artifact has
     at least one. An empty artifact set scores 100 (nothing to ground).
+
+    ``augment_from`` forwards to ``check_all_artifacts``'s lookup-
+    augmentation hook: when scoring an evaluated subset, passing the
+    full artifact set here preserves sibling-artifact cross-references.
     """
     if not artifact_dicts:
         return 100.0, 0
     from fitz_forge.planning.validation.grounding.check import check_all_artifacts
 
     violations = check_all_artifacts(
-        artifact_dicts, structural_index, source_dir=source_dir
+        artifact_dicts,
+        structural_index,
+        source_dir=source_dir,
+        augment_from=augment_from,
     )
     dirty_files = {v.artifact for v in violations}
     clean = len(artifact_dicts) - len(dirty_files)

@@ -257,3 +257,15 @@ class StructuralIndexLookup:
         from .inference import augment_from_source_dir as _augment
 
         return _augment(self, source_dir)
+
+    def augment_from_artifacts(self, artifacts: list[dict]) -> int:
+        """Enrich the index with defs from sibling artifacts in a plan.
+
+        Plans often define a typed record in one artifact and reference
+        it from siblings. Augmenting the lookup with the plan's own
+        definitions prevents flagging every such reference as a
+        fabrication when it's satisfied by a sibling artifact.
+        """
+        from .inference import augment_from_artifacts as _augment
+
+        return _augment(self, artifacts)

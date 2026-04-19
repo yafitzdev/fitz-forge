@@ -203,8 +203,8 @@ Results below are the output of this process.
 | Metric | 🤖 Raw gemma (no harness) | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code (Sonnet) |
 |---|---:|---:|---:|
 | **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 |
-| **Craft** (code quality on what shipped) | 97.4 | **99.8** | 72.1 |
-| **Groundedness** (references resolve in the real codebase) | 81.7 | **100.0** | 64.7 |
+| **Craft** (code quality on what shipped) | 96.1 | **100.0** | 80.4 |
+| **Groundedness** (references resolve in the real codebase) | 70.0 | **100.0** | 60.0 |
 | **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 |
 | **Architectural correctness** | 38.8 | **89.5** | 83.0 |
 | Cost per plan (API tokens) | $0 | $0 | **$0.40** |
@@ -212,23 +212,25 @@ Results below are the output of this process.
 | Latency per plan | 28s | 12 min | 108s (wall clock parallel: 2.4 min) |
 | Tokens per plan | — | — | ~65K cache write + ~11K output |
 
+> Craft and Groundedness are scored only on the files the taxonomy evaluates (engine, routes, synthesizer, schemas, SDK). That keeps arms with different output scopes comparable — an arm that ships test fixtures or helper files doesn't get penalised or rewarded for them. The lookup that spots fabrications IS augmented with definitions from every artifact in the plan, so a class defined in a sibling file (e.g. `StreamEvent` in `schemas.py`) counts as real when it's referenced from elsewhere.
+
 <br>
 
 The story this table tells has four parts.
 
 **Raw gemma is the worst on every dimension.** One-shot local inference, no harness, no recovery loop. Half the required files missing or stubbed, zero roadmap, bottom-tier architecture.
 
-**Cold Claude Code is better than raw gemma across the board, and by a lot on Architectural correctness** (83.0 vs 38.8) — which is exactly what you'd expect from a frontier model. It writes code that parses, it mostly picks reasonable architectures, it covers most of the required files.
+**Cold Claude Code is better than raw gemma on almost every dimension, and by a lot on Architectural correctness** (83.0 vs 38.8) — which is exactly what you'd expect from a frontier model. It writes code that parses, picks reasonable architectures, and covers most of the required files.
 
-**But Cold Claude Code loses to fitz-forge on three of the four deterministic dimensions.** That sounds wrong at first — gemma is a fraction of Sonnet's size — but it's not about model capability, it's about what the harness enforces.
+**But Cold Claude Code still loses to fitz-forge on three of the four deterministic dimensions.** Not because Sonnet is a worse coder — because the harness enforces things a one-shot call can't.
 
-- **Craft** (72.1 vs 99.8): Sonnet writes ambitious code with test fixtures and intermediate types that don't exist in the target codebase. Per-file fabrication checks flag them. The harness's grounding + repair loop catches these before the plan finalizes; a one-shot frontier call can't.
-- **Groundedness** (64.7 vs 100.0): same shape, bigger gap. 5 baseline plans produced 35+ unresolved references. The harness hits 0 because its closure check expands missing symbols into sibling artifacts rather than shipping them as fabrications.
+- **Craft** (80.4 vs 100.0): one-shot Sonnet writes ambitious code that occasionally references methods it hasn't defined (`self._prepare_query`, `self._post_generate`). fitz-forge's grounding + repair loop catches these before the plan finalizes.
+- **Groundedness** (60.0 vs 100.0): same shape. 5 baseline plans produced 11 unresolved references (some real fabrications, some third-party library imports our scorer doesn't know about). fitz-forge's closure check expands missing symbols into sibling artifacts or repairs the reference, landing at 0.
 - **Actionability** (0.0 vs 100.0): neither one-shot arm emits a roadmap with verification commands. fitz-forge's synthesis stage produces structured phases every time because that's what its schema demands.
 
-**Architectural correctness is the dimension where Claude Code and fitz-forge are closest** (83.0 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5 (with 4/5 at A2, one tier below).
+**Architectural correctness is where Claude Code and fitz-forge are closest** (83.0 vs 89.5 — within variance). Both produce plans that implement the full streaming pipeline; fitz-forge lands on A1 (the ideal pattern) 4/5 times, Claude Code lands on it 1/5 (with 4/5 at A2, one tier below).
 
-**The headline:** frontier models produce *better code per file* but *less structure* and *more fabrications* than a harness'd local model. fitz-forge gives you end-to-end plans an agent can execute, for $0 API spend, at 20× less cost than Claude Code per plan.
+**The headline:** frontier models write great code per file. fitz-forge adds *structure + rigor + end-to-end coverage* — the things a closed-loop agent needs — at 20× less cost per plan than Claude Code. That's the value prop: **rigor on a budget, not competing-with-Sonnet on raw capability**.
 
 <br>
 

@@ -480,13 +480,24 @@ def check_all_artifacts_v2(
     structural_index: str,
     task_requires_streaming: bool = True,
     source_dir: str = "",
+    augment_from: list[dict] | None = None,
 ) -> list[ArtifactCheck]:
-    """Run per-artifact checks on all artifacts."""
+    """Run per-artifact checks on all artifacts.
+
+    ``augment_from`` lets the lookup see sibling-artifact class / function
+    definitions. Without it, a plan that defines ``StreamEvent`` in a
+    sibling file and references it from the checked artifact gets every
+    reference flagged as a fabricated class. Defaults to
+    ``artifacts`` (current behavior when the caller doesn't scope).
+    """
     lookup = StructuralIndexLookup(structural_index)
     if source_dir:
         added = lookup.augment_from_source_dir(source_dir)
         if added:
             logger.info(f"Augmented index with {added} classes from {source_dir}")
+    lookup.augment_from_artifacts(
+        augment_from if augment_from is not None else artifacts
+    )
     return [check_single_artifact(a, lookup, task_requires_streaming) for a in artifacts]
 
 

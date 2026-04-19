@@ -570,11 +570,23 @@ def check_all_artifacts(
     artifacts: list[dict[str, Any]],
     structural_index: str,
     source_dir: str = "",
+    augment_from: list[dict[str, Any]] | None = None,
 ) -> list[Violation]:
     """Run grounding check + parallel-method signature check on a set.
 
     `source_dir` augments the lookup with a full-codebase scan so real
-    classes outside the retrieval subset are recognised.
+    classes outside the retrieval subset are recognised. The lookup is
+    also enriched with classes + functions defined in the plan's own
+    sibling artifacts — a plan that invents ``StreamEvent`` in
+    ``schemas.py`` and uses it from ``engine.py`` should not have every
+    usage flagged as a fabrication.
+
+    ``augment_from`` lets the caller pass a *larger* set for lookup
+    enrichment than the set being checked. When scoring a filtered
+    subset (e.g. only taxonomy-evaluated files) we still want to know
+    that a class defined by a sibling artifact *outside* the filter
+    exists — otherwise references to it get flagged as fabrications.
+    Defaults to the same artifact list being checked.
     """
     if not artifacts:
         return []
@@ -582,6 +594,7 @@ def check_all_artifacts(
     lookup = StructuralIndexLookup(structural_index)
     if source_dir:
         lookup.augment_from_source_dir(source_dir)
+    lookup.augment_from_artifacts(augment_from if augment_from is not None else artifacts)
     all_violations: list[Violation] = []
     for artifact in artifacts:
         all_violations.extend(check_artifact(artifact, lookup))

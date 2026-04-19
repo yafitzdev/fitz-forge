@@ -788,12 +788,25 @@ def _prepare_scoring_v2(
 
     tax_files = None
     taxonomy_def = None
+    evaluated_filenames: set[str] | None = None
     if taxonomy_path.exists():
         taxonomy_def = load_taxonomy(taxonomy_path)
         tax_files = taxonomy_def.required_files or None
+        # Files the taxonomy scores per-file (file_taxonomies keys) are the
+        # "evaluated set" — Craft + Groundedness restrict to these so an arm
+        # that ships extras (e.g. tests) doesn't get penalised for them.
+        if taxonomy_def.file_taxonomies:
+            evaluated_filenames = set(taxonomy_def.file_taxonomies.keys())
 
     # Run deterministic scoring
-    batch = score_batch_deterministic(plan_dir, structural_index, query, tax_files, source_dir)
+    batch = score_batch_deterministic(
+        plan_dir,
+        structural_index,
+        query,
+        tax_files,
+        source_dir,
+        evaluated_filenames=evaluated_filenames,
+    )
 
     # Generate taxonomy prompts (input to Tier-2)
     if taxonomy_path.exists():
@@ -806,6 +819,7 @@ def _prepare_scoring_v2(
                 task_requires_streaming=True,
                 taxonomy_files=tax_files,
                 source_dir=source_dir,
+                evaluated_filenames=evaluated_filenames,
             )
             prompt = build_taxonomy_prompt(plan_json, det_report, taxonomy_def, structural_index)
             num = pf.stem.replace("plan_", "")

@@ -67,6 +67,7 @@ def score_plan_deterministic(
     query: str = "",
     taxonomy_files: dict[str, str] | None = None,
     source_dir: str = "",
+    evaluated_filenames: set[str] | None = None,
 ) -> PlanScoreV2:
     """Run Tier 1 deterministic checks on a single plan. Zero LLM cost."""
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -77,6 +78,7 @@ def score_plan_deterministic(
         task_requires_streaming=True,
         taxonomy_files=taxonomy_files,
         source_dir=source_dir,
+        evaluated_filenames=evaluated_filenames,
     )
 
     return PlanScoreV2(
@@ -137,6 +139,7 @@ def score_batch_deterministic(
     query: str = "",
     taxonomy_files: dict[str, str] | None = None,
     source_dir: str = "",
+    evaluated_filenames: set[str] | None = None,
 ) -> BatchScoreV2:
     """Run Tier 1 on all plans in a directory."""
     plan_files = _find_plan_files(plan_dir)
@@ -145,7 +148,14 @@ def score_batch_deterministic(
 
     scores = []
     for pf in plan_files:
-        score = score_plan_deterministic(pf, structural_index, query, taxonomy_files, source_dir)
+        score = score_plan_deterministic(
+            pf,
+            structural_index,
+            query,
+            taxonomy_files,
+            source_dir,
+            evaluated_filenames=evaluated_filenames,
+        )
         scores.append(score)
 
     det_scores = [s.deterministic_score for s in scores]
