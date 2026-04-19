@@ -22,7 +22,7 @@ from .closure import (
     route_missing_symbol,
 )
 from .context import assemble_context
-from .semantic_review import Discrepancy, format_feedback, semantic_review
+from fitz_forge.planning.reviews import Discrepancy, format_feedback, review_artifacts as semantic_review
 from .strategy import (
     ArtifactStrategy,
     NewCodeStrategy,

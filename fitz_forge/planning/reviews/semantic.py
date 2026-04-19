@@ -1,26 +1,20 @@
-# fitz_forge/planning/artifact/semantic_review.py
-"""Semantic-review gate.
+# fitz_forge/planning/reviews/semantic.py
+"""Semantic-review gate for generated artifacts.
 
-After per-artifact generation closes at the parse / shape level, ask the
+After per-artifact generation closes at the parse/shape level, ask the
 LLM whether the produced artifacts deliver the design intent that the
 synthesis reasoning called for. The LLM returns a list of discrepancies
-(``intent`` vs ``actual`` on a specific file + line, with a concrete
-``fix``) which the caller routes back into the per-artifact regeneration
-loop.
+(file/line + intent/actual/fix) which the caller routes back into the
+per-artifact regeneration loop.
 
-This replaces the family of shape-pattern closure invariants (B9/B11/B17)
-that tried to encode "streaming methods must delegate to streaming
-siblings", "bodies may not reference unbound names", etc. as tree-sitter
-predicates. Those patterns kept narrowing at different sites (B15, B16,
-B17) without addressing the underlying architectural gap: artifacts are
-generated per-file in isolation, so set-level design intent ("engine
-must call ``synthesizer.stream_query``, not the blocking variant") gets
-lost between synthesis and code generation. The semantic gate reads the
-whole set + intent and catches the contradiction directly.
+Migrated from ``fitz_forge/planning/artifact/semantic_review.py`` into
+the composable ``reviews/`` module. The public ``Discrepancy`` name is
+preserved as an alias of the unified ``ReviewIssue`` so existing
+callers keep working while new code can use the general type.
 
-Language-agnostic by construction: prompts operate on file contents and
-design text; there's no AST shape matching. The same gate runs over
-Python and TypeScript artifact sets.
+Language-agnostic by construction: the gate operates on file contents
+and design text, not AST shape. The same gate runs over Python and
+TypeScript artifact sets.
 """
 
 from __future__ import annotations
@@ -33,12 +27,21 @@ from typing import Any
 from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import extract_json
 
+from .base import ReviewIssue
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class Discrepancy:
-    """One place where the implementation contradicts the design intent."""
+    """Historical shape for one artifact-level contradiction.
+
+    Preserved for backward compatibility with
+    ``fitz_forge/planning/artifact/generator.py`` which consumes
+    ``list[Discrepancy]``. Fields map 1:1 to ``ReviewIssue`` on the
+    unified review surface — ``as_issue()`` converts when a caller
+    wants the general type.
+    """
 
     file: str
     line: int
@@ -46,10 +49,26 @@ class Discrepancy:
     actual: str
     fix: str
 
+    def as_issue(self) -> ReviewIssue:
+        target = f"{self.file}:{self.line}" if self.line else self.file
+        return ReviewIssue(
+            scope="artifact",
+            target=target,
+            intent=self.intent,
+            actual=self.actual,
+            suggestion=self.fix,
+        )
+
 
 @dataclass
 class ReviewResult:
-    """Outcome of one semantic-review pass over an artifact set."""
+    """Outcome of one semantic-review pass over an artifact set.
+
+    Retains its historical fields so callers that import
+    ``ReviewResult`` from the artifact surface keep compiling. The
+    unified review result shape lives in ``reviews.base``; it's used
+    by every new review (decomposition, etc.).
+    """
 
     matches_intent: bool
     discrepancies: list[Discrepancy] = field(default_factory=list)
@@ -148,7 +167,7 @@ def _parse_discrepancy(raw: dict[str, Any]) -> Discrepancy | None:
     return Discrepancy(file=file, line=line, intent=intent, actual=actual, fix=fix)
 
 
-async def semantic_review(
+async def review_artifacts(
     reasoning: str,
     decisions: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
@@ -218,6 +237,10 @@ async def semantic_review(
         discrepancies=discrepancies,
         raw_response=raw,
     )
+
+
+# Backward-compat alias used across pre-migration callers.
+semantic_review = review_artifacts
 
 
 def format_feedback(discrepancies: list[Discrepancy]) -> str:

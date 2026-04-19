@@ -17,7 +17,7 @@ from fitz_forge.planning.artifact.generator import (
     ArtifactSetResult,
     generate_artifact_set,
 )
-from fitz_forge.planning.artifact.semantic_review import Discrepancy, ReviewResult
+from fitz_forge.planning.reviews.semantic import Discrepancy, ReviewResult
 
 
 class _StubLookup:

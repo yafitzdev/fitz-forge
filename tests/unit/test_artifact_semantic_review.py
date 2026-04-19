@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from fitz_forge.planning.artifact.semantic_review import (
+from fitz_forge.planning.reviews.semantic import (
     Discrepancy,
     ReviewResult,
     format_feedback,

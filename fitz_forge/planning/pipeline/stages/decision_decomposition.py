@@ -21,6 +21,10 @@ from fitz_forge.planning.pipeline.stages.base import (
     extract_json,
 )
 from fitz_forge.planning.prompts import load_prompt
+from fitz_forge.planning.reviews import (
+    format_issues_feedback,
+    review_decomposition,
+)
 from fitz_forge.planning.schemas.decisions import (
     DecisionDecompositionOutput,
 )
@@ -233,6 +237,122 @@ class DecisionDecompositionStage(PipelineStage):
 
         return sum(breakdown.values()), breakdown
 
+    async def _senior_review_pass(
+        self,
+        client: Any,
+        job_description: str,
+        prior_outputs: dict[str, Any],
+        parsed: dict[str, Any],
+        decisions: list[dict[str, Any]],
+        raw: str,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+        """Run the decomposition review and, if issues are found, regenerate once.
+
+        Returns the (parsed, decisions, raw) triple that should be used
+        downstream — either the original if it passes review or was
+        already the better of the two, or the regenerated one when its
+        review comes back cleaner.
+        """
+        rubric_hints = prior_outputs.get("_rubric_hints") or None
+        call_graph_text = prior_outputs.get("_call_graph_text", "") or ""
+        manifest = prior_outputs.get("_raw_summaries", "") or ""
+
+        try:
+            review = await review_decomposition(
+                task_description=job_description,
+                decisions=decisions,
+                client=client,
+                call_graph_text=call_graph_text,
+                file_manifest=manifest,
+                rubric_hints=rubric_hints,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': senior review errored ({e}); "
+                "keeping original decomposition"
+            )
+            return parsed, decisions, raw
+
+        if review.passed:
+            logger.info(
+                f"Stage '{self.name}': senior review passed ({len(decisions)} decisions)"
+            )
+            return parsed, decisions, raw
+
+        logger.info(
+            f"Stage '{self.name}': senior review found {review.issue_count} issue(s); "
+            "regenerating with feedback"
+        )
+        for issue in review.issues[:5]:
+            logger.info(
+                "  %s — %s: %s",
+                issue.target,
+                issue.intent[:80],
+                issue.actual[:80],
+            )
+
+        feedback_block = format_issues_feedback(review.issues)
+        retry_messages = self.build_prompt(
+            job_description,
+            prior_outputs,
+            coverage_hint=feedback_block,
+        )
+        try:
+            t0 = time.monotonic()
+            retry_raw = await generate(
+                client,
+                messages=retry_messages,
+                temperature=0,
+                max_tokens=16384,
+                label="decomp_senior_retry",
+            )
+            t1 = time.monotonic()
+            logger.info(
+                f"Stage '{self.name}': senior-retry took {t1 - t0:.1f}s"
+            )
+            retry_parsed = self.parse_output(retry_raw)
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': senior-retry failed ({e}); "
+                "keeping original decomposition"
+            )
+            return parsed, decisions, raw
+
+        retry_decisions = retry_parsed.get("decisions", [])
+        if not retry_decisions:
+            return parsed, decisions, raw
+
+        # Re-run the review on the retry. Accept whichever has fewer issues.
+        try:
+            retry_review = await review_decomposition(
+                task_description=job_description,
+                decisions=retry_decisions,
+                client=client,
+                call_graph_text=call_graph_text,
+                file_manifest=manifest,
+                rubric_hints=rubric_hints,
+                label="decomposition_review_retry",
+            )
+        except Exception:
+            retry_review = None
+
+        retry_issue_count = (
+            retry_review.issue_count if retry_review is not None else review.issue_count + 1
+        )
+
+        if retry_issue_count < review.issue_count:
+            logger.info(
+                f"Stage '{self.name}': senior-retry improved issues "
+                f"({review.issue_count} -> {retry_issue_count}); using retry"
+            )
+            return retry_parsed, retry_decisions, retry_raw
+
+        logger.info(
+            f"Stage '{self.name}': senior-retry did not improve "
+            f"({review.issue_count} -> {retry_issue_count}); keeping original"
+        )
+        return parsed, decisions, raw
+
     async def execute(
         self,
         client: Any,
@@ -415,6 +535,22 @@ class DecisionDecompositionStage(PipelineStage):
                 if bad_deps:
                     logger.warning(f"Decision {d['id']}: removing invalid deps {bad_deps}")
                     d["depends_on"] = [dep for dep in d["depends_on"] if dep in ids]
+
+            # Senior-engineer review pass. Deterministic gates have
+            # already cleared; this is the LLM critique for issues no
+            # shape check can catch — disguised pattern decisions,
+            # downstream pre-commitment, missing critical questions,
+            # redundancy, call-chain gaps. When issues are found, the
+            # stage regenerates once with the feedback merged into the
+            # prompt, then accepts whichever pass has fewer issues.
+            parsed, decisions, raw = await self._senior_review_pass(
+                client=client,
+                job_description=job_description,
+                prior_outputs=prior_outputs,
+                parsed=parsed,
+                decisions=decisions,
+                raw=raw,
+            )
 
             return StageResult(
                 stage_name=self.name,
