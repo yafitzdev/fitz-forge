@@ -745,6 +745,10 @@ class TestSynthesisExecute:
                         "integration_points": ["SQLite database"],
                     }
                 ),
+                # Pre-artifact senior design review — passes with no issues
+                # (design review now runs before artifact generation so any
+                # field-name precision it finds cascades into the code).
+                json.dumps({"passed": True, "issues": []}),
                 # Design: artifacts are now generated per-file (one call per needed artifact)
                 # This replaces the old monolithic extraction
                 json.dumps(

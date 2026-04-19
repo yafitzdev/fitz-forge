@@ -41,9 +41,11 @@ from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.reviews import (
     format_issues_feedback,
     review_architecture,
+    review_artifact_coverage,
     review_assumptions,
     review_design,
 )
+from fitz_forge.planning.reviews.artifact_coverage import _parse_needed_entry
 from fitz_forge.planning.schemas import (
     ArchitectureOutput,
     ContextOutput,
@@ -310,6 +312,31 @@ _RISK_FIELD_GROUPS = [
         ),
     },
 ]
+
+
+def _attach_review_findings(
+    design: dict[str, Any], issues: list[Any]
+) -> dict[str, Any]:
+    """Attach ``ReviewIssue``s to ``design.review_findings`` as plain dicts.
+
+    Preserves any existing findings from prior reviews so multiple review
+    passes can accumulate into one list. Returns a shallow copy — the
+    caller's original dict is not mutated.
+    """
+    if not issues:
+        return design
+    findings = [
+        {
+            "scope": issue.scope,
+            "target": issue.target,
+            "intent": issue.intent,
+            "actual": issue.actual,
+            "suggestion": issue.suggestion,
+        }
+        for issue in issues
+    ]
+    existing = design.get("review_findings") or []
+    return {**design, "review_findings": existing + findings}
 
 
 def _truncate_at_line(text: str, max_chars: int) -> str:
@@ -2547,23 +2574,7 @@ class SynthesisStage(PipelineStage):
                 artifact_specs.append((entry.strip(), ""))
 
         # clean up corrupted artifact filenames
-        import re as _re
-
-        cleaned_specs: list[tuple[str, str]] = []
-        for fname, purpose in artifact_specs:
-            # Pattern A: strip method suffix (engine.py.answer_stream() -> engine.py)
-            # Also handles :: separator (engine.py::answer_stream())
-            fname = _re.sub(r"\.py[.#:].*", ".py", fname)
-            # Pattern B: skip generic filenames without path separators
-            # (new_chat_stream_endpoint.py -> not a real codebase path)
-            if "/" not in fname and fname not in ("__init__.py",):
-                logger.warning(
-                    f"Stage 'synthesis': skipping generic artifact "
-                    f"filename '{fname}' (no path separator)"
-                )
-                continue
-            cleaned_specs.append((fname, purpose))
-        artifact_specs = cleaned_specs
+        artifact_specs = self._clean_artifact_specs(artifact_specs)
 
         if not artifact_specs:
             return await self._artifacts_template_fallback(
@@ -2685,6 +2696,80 @@ class SynthesisStage(PipelineStage):
         artifacts = list(seen.values())
 
         return artifacts
+
+    @staticmethod
+    def _clean_artifact_specs(
+        specs: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        """Normalize + filter ``(filename, purpose)`` pairs before build.
+
+        Applies the same two rules that kept ``_build_artifacts_per_file``
+        honest for months:
+
+        * Strip method/line suffixes (``engine.py.answer_stream()``,
+          ``engine.py::foo``) down to the base ``.py`` filename.
+        * Skip generic filenames with no directory component
+          (``routes.py`` without a path — the model invented it).
+          ``__init__.py`` is the documented exception.
+
+        Centralized here so ``_build_missing_artifacts`` (coverage-
+        review regen path) can reuse it and the regen stays consistent
+        with the main builder.
+        """
+        cleaned: list[tuple[str, str]] = []
+        for fname, purpose in specs:
+            fname = re.sub(r"\.py[.#:].*", ".py", fname)
+            if "/" not in fname and fname not in ("__init__.py",):
+                logger.warning(
+                    f"Stage 'synthesis': skipping generic artifact "
+                    f"filename '{fname}' (no path separator)"
+                )
+                continue
+            cleaned.append((fname, purpose))
+        return cleaned
+
+    async def _build_missing_artifacts(
+        self,
+        client: Any,
+        missing_specs: list[tuple[str, str]],
+        reasoning: str,
+        prior_outputs: dict[str, Any],
+    ) -> list[dict]:
+        """Generate artifacts for a specific ``(filename, purpose)`` set.
+
+        Used by the coverage-review regen path when files listed in
+        ``context.needed_artifacts`` didn't come out of the main
+        per-file builder. Bypasses coverage injection and the per-file
+        cap — the caller has already decided exactly what to build.
+        """
+        missing_specs = self._clean_artifact_specs(missing_specs)
+        if not missing_specs:
+            return []
+
+        from fitz_forge.planning.artifact import generate_artifact_set
+
+        agent_ctx = prior_outputs.get("_agent_context", {})
+        source_dir = prior_outputs.get("_source_dir", "")
+        structural_index = agent_ctx.get(
+            "full_structural_index", ""
+        ) or prior_outputs.get("_gathered_context", "")
+        resolution_output = prior_outputs.get("decision_resolution", {})
+        resolutions = resolution_output.get("resolutions", [])
+
+        def decisions_for(filename: str) -> str:
+            return self._filter_decisions_for_file(filename, resolutions)
+
+        set_result = await generate_artifact_set(
+            client=client,
+            specs=missing_specs,
+            source_dir=source_dir,
+            structural_index=structural_index,
+            decisions_for=decisions_for,
+            reasoning=reasoning,
+            prior_outputs=prior_outputs,
+            resolved_decisions=resolutions,
+        )
+        return set_result.as_artifact_dicts()
 
     @staticmethod
     def _find_file_source(
@@ -4074,18 +4159,34 @@ class SynthesisStage(PipelineStage):
         job_description: str,
         prior_outputs: dict[str, Any],
         design: dict[str, Any],
-    ) -> dict[str, Any]:
+        *,
+        reasoning: str = "",
+        extract_context: str = "",
+    ) -> tuple[dict[str, Any], list[Any]]:
         """Senior-engineer critique of the design section.
 
-        MVP: detection + surface. When the review finds under-specified
-        interfaces, rubric-missing detail, or missing components, the
-        issues are attached to design.review_findings so the downstream
-        coder sees the gaps. Regeneration of design (re-extract with
-        feedback, or rewrite reasoning + re-extract) is a follow-up
-        once we have a clean regeneration mechanism.
+        Runs ``review_design`` against the assembled design. When the
+        senior engineer flags issues and the caller supplies the
+        ``reasoning`` the design was extracted from, regenerates only
+        the field groups the issues point to (``adrs``, ``components``
+        / ``data_model``, or ``integrations``) with the feedback merged
+        into the extraction prompt and keeps whichever pass has fewer
+        issues.
+
+        Returns ``(design, artifact_feedback_issues)``. The second
+        value is the list of ``ReviewIssue`` objects the caller should
+        cascade into the per-file artifact generator's reasoning text
+        so field-name precision from the review actually reaches the
+        generated code (the regen only improves the declared design,
+        not the reasoning that artifact gen consumes).
+
+        Artifacts are produced separately and are out of scope for
+        regeneration — artifact-filename issues still flow into the
+        feedback list, since the artifact generator is the right
+        consumer for them.
         """
         if not design:
-            return design
+            return design, []
         has_content = bool(
             design.get("components")
             or design.get("data_model")
@@ -4093,7 +4194,7 @@ class SynthesisStage(PipelineStage):
             or design.get("artifacts")
         )
         if not has_content:
-            return design
+            return design, []
 
         rubric_hints = prior_outputs.get("_rubric_hints") or None
         gathered = self._get_gathered_context(prior_outputs) or ""
@@ -4111,7 +4212,7 @@ class SynthesisStage(PipelineStage):
                 f"Stage '{self.name}': design review errored ({e}); "
                 "no findings recorded"
             )
-            return design
+            return design, []
 
         if review.passed:
             logger.info(
@@ -4119,11 +4220,11 @@ class SynthesisStage(PipelineStage):
                 f"({len(design.get('components') or [])} component(s), "
                 f"{len(design.get('artifacts') or [])} artifact(s))"
             )
-            return design
+            return design, []
 
         logger.info(
             f"Stage '{self.name}': design review found "
-            f"{review.issue_count} issue(s); attaching as review_findings"
+            f"{review.issue_count} issue(s)"
         )
         for issue in review.issues[:5]:
             logger.info(
@@ -4133,22 +4234,204 @@ class SynthesisStage(PipelineStage):
                 issue.actual[:80],
             )
 
-        findings = [
-            {
-                "scope": issue.scope,
-                "target": issue.target,
-                "intent": issue.intent,
-                "actual": issue.actual,
-                "suggestion": issue.suggestion,
-            }
-            for issue in review.issues
-        ]
-        existing_findings = design.get("review_findings") or []
-        design = {
-            **design,
-            "review_findings": existing_findings + findings,
+        if reasoning:
+            regenerated = await self._regenerate_design_fields(
+                client=client,
+                reasoning=reasoning,
+                extract_context=extract_context,
+                design=design,
+                issues=review.issues,
+            )
+            if regenerated is not None:
+                try:
+                    retry_review = await review_design(
+                        task_description=job_description,
+                        design=regenerated,
+                        client=client,
+                        rubric_hints=rubric_hints,
+                        gathered_context=gathered,
+                        label="design_review_retry",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Stage '{self.name}': design retry review errored "
+                        f"({e}); keeping original"
+                    )
+                    retry_review = None
+
+                retry_issue_count = (
+                    retry_review.issue_count
+                    if retry_review is not None
+                    else review.issue_count + 1
+                )
+
+                if retry_issue_count < review.issue_count:
+                    logger.info(
+                        f"Stage '{self.name}': design regen improved "
+                        f"({review.issue_count} -> {retry_issue_count}); "
+                        "using regen"
+                    )
+                    if (
+                        retry_review is not None
+                        and not retry_review.passed
+                        and retry_review.issues
+                    ):
+                        regenerated = _attach_review_findings(
+                            regenerated, retry_review.issues
+                        )
+                    # Always cascade the ORIGINAL issues to the artifact
+                    # generator — regen improved the plan's declared
+                    # design, but the artifact generator reads the
+                    # reasoning text (which still doesn't name the
+                    # fields). The feedback block is what makes the
+                    # code actually populate them.
+                    return regenerated, list(review.issues)
+
+                logger.info(
+                    f"Stage '{self.name}': design regen did not improve "
+                    f"({review.issue_count} -> {retry_issue_count}); "
+                    "keeping original"
+                )
+
+        return (
+            _attach_review_findings(design, review.issues),
+            list(review.issues),
+        )
+
+    async def _regenerate_design_fields(
+        self,
+        client: Any,
+        reasoning: str,
+        extract_context: str,
+        design: dict[str, Any],
+        issues: list[Any],
+    ) -> dict[str, Any] | None:
+        """Re-extract only the design field groups the review flagged.
+
+        Maps each ``ReviewIssue`` onto one of the three regenerable
+        groups in ``_DESIGN_FIELD_GROUPS`` (``adrs``, ``components`` —
+        which also owns ``data_model`` — and ``integrations``) based on
+        the issue's ``target``. Artifacts are built by a separate
+        per-file generator and are intentionally out of scope for this
+        regen path; artifact-filename issues fall through to the
+        ``review_findings`` surfacing in the caller.
+
+        Returns the regenerated design dict on success, or ``None`` if
+        no group could be targeted, extraction failed, or validation
+        failed — the caller then falls back to surfacing findings on
+        the original.
+        """
+        if not issues:
+            return None
+
+        component_names = {
+            (c.get("name") or "").strip()
+            for c in (design.get("components") or [])
+            if isinstance(c, dict)
         }
-        return design
+        component_names.discard("")
+        adr_titles = {
+            (a.get("title") or "").strip()
+            for a in (design.get("adrs") or [])
+            if isinstance(a, dict)
+        }
+        adr_titles.discard("")
+        artifact_files = {
+            (a.get("filename") or "").strip()
+            for a in (design.get("artifacts") or [])
+            if isinstance(a, dict)
+        }
+        artifact_files.discard("")
+        integration_targets = {
+            str(ip).strip() for ip in (design.get("integration_points") or [])
+        }
+        integration_targets.discard("")
+
+        groups_to_regen: set[str] = set()
+        for issue in issues:
+            target = (issue.target or "").strip()
+            lower = target.lower()
+            if target in artifact_files or target.endswith((".py", ".ts", ".js", ".yaml", ".yml", ".json", ".sql")):
+                # Artifacts are produced by the per-file generator; skip.
+                continue
+            if target == "data_model" or lower == "data model":
+                groups_to_regen.add("components")
+                continue
+            if target in component_names:
+                groups_to_regen.add("components")
+                continue
+            if target in adr_titles or lower.startswith("adr"):
+                groups_to_regen.add("adrs")
+                continue
+            if target in integration_targets or "integration" in lower:
+                groups_to_regen.add("integrations")
+                continue
+            # Unknown target — default to components (the most common
+            # class of under-specification issue).
+            groups_to_regen.add("components")
+
+        if not groups_to_regen:
+            return None
+
+        feedback_block = format_issues_feedback(issues)
+        if not feedback_block:
+            return None
+        augmented_reasoning = (
+            f"{reasoning}\n\n"
+            "## Senior design review (address in the re-extraction)\n\n"
+            f"{feedback_block}\n"
+        )
+
+        new_design: dict[str, Any] = dict(design)
+        try:
+            for group in _DESIGN_FIELD_GROUPS:
+                label = group["label"]
+                if label not in groups_to_regen:
+                    continue
+                if label == "artifacts":
+                    # Defensive — per-file artifacts live outside this loop.
+                    continue
+                partial = await self._extract_field_group(
+                    client,
+                    augmented_reasoning,
+                    group["fields"],
+                    group["schema"],
+                    f"{label}_after_review",
+                    extra_context=extract_context,
+                )
+                if partial:
+                    new_design.update(partial)
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': design re-extraction failed ({e}); "
+                "keeping original"
+            )
+            return None
+
+        # Preserve artifacts verbatim — they weren't regenerated.
+        new_design["artifacts"] = design.get("artifacts") or []
+        new_design.setdefault("adrs", design.get("adrs") or [])
+        new_design.setdefault("components", design.get("components") or [])
+        new_design.setdefault("data_model", design.get("data_model") or {})
+        new_design.setdefault(
+            "integration_points", design.get("integration_points") or []
+        )
+
+        preserved_findings = design.get("review_findings")
+
+        try:
+            validated = DesignOutput(**new_design).model_dump()
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': design re-validation failed ({e}); "
+                "keeping original"
+            )
+            return None
+
+        if preserved_findings:
+            validated["review_findings"] = preserved_findings
+
+        return validated
 
     async def _senior_assumption_review_pass(
         self,
@@ -4231,15 +4514,20 @@ class SynthesisStage(PipelineStage):
         reasoning: str,
         extract_context: str,
     ) -> dict[str, Any]:
-        """Critique the chosen architecture; regenerate once on issues.
+        """Critique the chosen architecture; regenerate reasoning on issues.
 
-        Runs ``review_architecture`` against the extracted architecture
-        output. If the senior engineer flags issues, appends the
-        feedback to the synthesis reasoning text and re-runs the
-        architecture per-field extractions so the model has another
-        pass to correct the pick. Keeps whichever pass the re-review
-        prefers — falls back to the original on any error to stay
-        fail-safe.
+        When the senior engineer flags the pick, regenerate the synthesis
+        REASONING text itself (not just the per-field extraction) with
+        the critique merged into the prompt, then re-extract architecture
+        fields from the fresh reasoning. Simple re-extraction from the
+        original reasoning can't flip the pick because the text still
+        argues for the wrong approach; reasoning-regeneration is the
+        only mechanism that actually reconsiders the choice.
+
+        Keeps whichever pass the re-review prefers. Falls back to the
+        original on any error, on scope/coherence regression (the new
+        reasoning scores below 70% of the original on ``_score_reasoning``),
+        or when the re-review cannot produce fewer issues.
         """
         rubric_hints = prior_outputs.get("_rubric_hints") or None
         gathered = self._get_gathered_context(prior_outputs) or ""
@@ -4268,7 +4556,7 @@ class SynthesisStage(PipelineStage):
 
         logger.info(
             f"Stage '{self.name}': architecture review found "
-            f"{review.issue_count} issue(s); re-extracting"
+            f"{review.issue_count} issue(s); regenerating reasoning"
         )
         for issue in review.issues[:3]:
             logger.info(
@@ -4281,18 +4569,68 @@ class SynthesisStage(PipelineStage):
         feedback_block = format_issues_feedback(review.issues)
         if not feedback_block:
             return architecture
-        augmented_reasoning = (
-            f"{reasoning}\n\n"
-            "## Senior architecture review (address in the re-extraction)\n\n"
-            f"{feedback_block}\n"
+
+        resolutions = (
+            prior_outputs.get("decision_resolution", {}).get("resolutions", [])
         )
+        try:
+            retry_messages = self.build_prompt(job_description, prior_outputs)
+            retry_messages[-1]["content"] += (
+                "\n\n## Senior architecture review "
+                "(rewrite your architecture section to address these)\n\n"
+                + feedback_block
+                + "\n\nReconsider the architecture recommendation itself. "
+                "A different approach may be the right answer if the "
+                "critique points to a fundamental flaw in the current "
+                "pick — do not defend the original recommendation."
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': arch regen prompt build failed "
+                f"({e}); keeping original"
+            )
+            return architecture
+
+        try:
+            t0 = time.monotonic()
+            new_reasoning = await generate(
+                client,
+                messages=retry_messages,
+                temperature=0.3,
+                max_tokens=16384,
+                label="synthesis_reasoning_after_arch_review",
+            )
+            t1 = time.monotonic()
+            logger.info(
+                f"Stage '{self.name}': arch reasoning-regen "
+                f"{t1 - t0:.1f}s ({len(new_reasoning)} chars)"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': arch reasoning-regen failed ({e}); "
+                "keeping original"
+            )
+            return architecture
+
+        # Scope/coherence sanity gate before paying for re-extraction.
+        # Rejects runaway truncation, empty rewrites, and reasonings
+        # that have shed most of the original file/decision coverage.
+        orig_score, _ = self._score_reasoning(reasoning, resolutions)
+        new_score, _ = self._score_reasoning(new_reasoning, resolutions)
+        if orig_score > 0 and new_score < orig_score * 0.7:
+            logger.info(
+                f"Stage '{self.name}': arch reasoning-regen scored "
+                f"{new_score:.1f} vs original {orig_score:.1f} "
+                f"(below 70% threshold); keeping original"
+            )
+            return architecture
 
         try:
             arch_merged: dict[str, Any] = {}
             for group in _ARCH_FIELD_GROUPS:
                 partial = await self._extract_field_group(
                     client,
-                    augmented_reasoning,
+                    new_reasoning,
                     group["fields"],
                     group["schema"],
                     f"{group['label']}_after_review",
@@ -4349,7 +4687,8 @@ class SynthesisStage(PipelineStage):
             logger.info(
                 f"Stage '{self.name}': architecture retry improved "
                 f"({review.issue_count} -> {retry_issue_count}); using retry "
-                f"(recommended={new_architecture.get('recommended', '')[:60]})"
+                f"(recommended={new_architecture.get('recommended', '')[:60]}, "
+                f"reasoning_score={new_score:.1f})"
             )
             return new_architecture
 
@@ -4358,6 +4697,110 @@ class SynthesisStage(PipelineStage):
             f"({review.issue_count} -> {retry_issue_count}); keeping original"
         )
         return architecture
+
+    async def _artifact_coverage_review_pass(
+        self,
+        client: Any,
+        prior_outputs: dict[str, Any],
+        context_merged: dict[str, Any],
+        artifacts: list[dict],
+        reasoning: str,
+    ) -> tuple[list[dict], list[Any]]:
+        """Ensure every ``needed_artifact`` ships as an artifact.
+
+        Deterministic set-level review that compares the filenames the
+        context stage committed to (``context.needed_artifacts``)
+        against the filenames the per-file generator actually produced.
+        When files are missing, routes their ``(filename, purpose)``
+        pairs back into ``generate_artifact_set`` for a targeted build
+        and merges the result. Files that still don't come out of the
+        second pass are returned as ``ReviewIssue``s so the caller
+        surfaces them on ``design.review_findings``.
+
+        Returns ``(artifacts, remaining_issues)``. ``remaining_issues``
+        is empty when coverage is complete.
+        """
+        needed = context_merged.get("needed_artifacts") or []
+        if not needed:
+            return artifacts, []
+
+        review = review_artifact_coverage(needed, artifacts)
+        if review.passed:
+            logger.info(
+                f"Stage '{self.name}': artifact coverage review passed "
+                f"({len(artifacts)} artifact(s) cover "
+                f"{len(needed)} needed file(s))"
+            )
+            return artifacts, []
+
+        logger.info(
+            f"Stage '{self.name}': artifact coverage review found "
+            f"{review.issue_count} missing file(s); regenerating"
+        )
+        for issue in review.issues[:5]:
+            logger.info("  %s — %s", issue.target, issue.actual[:80])
+
+        # Build (filename, purpose) specs for the regen path.
+        # Use the parsed purpose from the original needed_artifacts
+        # entry so the generator has the same intent the context
+        # stage recorded.
+        purpose_by_file: dict[str, str] = {}
+        for entry in needed:
+            fname, purpose = _parse_needed_entry(entry)
+            if fname:
+                purpose_by_file.setdefault(fname, purpose)
+
+        missing_specs: list[tuple[str, str]] = [
+            (issue.target, purpose_by_file.get(issue.target, ""))
+            for issue in review.issues
+        ]
+
+        try:
+            t0 = time.monotonic()
+            new_artifacts = await self._build_missing_artifacts(
+                client=client,
+                missing_specs=missing_specs,
+                reasoning=reasoning,
+                prior_outputs=prior_outputs,
+            )
+            t1 = time.monotonic()
+            logger.info(
+                f"Stage '{self.name}': artifact coverage regen produced "
+                f"{len(new_artifacts)} artifact(s) in {t1 - t0:.1f}s"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Stage '{self.name}': artifact coverage regen failed "
+                f"({e}); surfacing findings on original"
+            )
+            return artifacts, list(review.issues)
+
+        existing_fns: set[str] = {
+            (a.get("filename") or "").replace("\\", "/").strip("/")
+            for a in artifacts
+        }
+        merged = list(artifacts)
+        for art in new_artifacts:
+            fn = (art.get("filename") or "").replace("\\", "/").strip("/")
+            if fn and fn not in existing_fns:
+                merged.append(art)
+                existing_fns.add(fn)
+
+        final_review = review_artifact_coverage(needed, merged)
+        if final_review.passed:
+            logger.info(
+                f"Stage '{self.name}': artifact coverage regen filled all "
+                f"{review.issue_count} missing file(s)"
+            )
+            return merged, []
+
+        filled = review.issue_count - final_review.issue_count
+        logger.info(
+            f"Stage '{self.name}': artifact coverage regen filled "
+            f"{filled} of {review.issue_count}; "
+            f"{final_review.issue_count} still missing — surfacing as findings"
+        )
+        return merged, list(final_review.issues)
 
     async def execute(
         self,
@@ -4587,16 +5030,95 @@ class SynthesisStage(PipelineStage):
                 )
                 design_merged.update(partial)
 
+            # Senior-engineer design review runs BEFORE artifact building so
+            # specific field-name / interface precision from the review
+            # cascades into the per-file code generator. The review may
+            # regenerate non-artifact field groups (adrs, components,
+            # data_model, integration_points); the *issues* flagged (even
+            # when regen succeeded) are appended to the reasoning passed
+            # to the artifact generator — otherwise the code is locked
+            # using the pre-review reasoning and the plan markdown says
+            # "Address.metadata records base_score, ..." while ranker.py
+            # ships a stub that doesn't record anything.
+            design_pre_artifact = {
+                "adrs": design_merged.get("adrs") or [],
+                "components": design_merged.get("components") or [],
+                "data_model": design_merged.get("data_model") or {},
+                "integration_points": design_merged.get("integration_points") or [],
+                "artifacts": [],
+            }
+            design_pre_artifact = DesignOutput(**design_pre_artifact).model_dump()
+            (
+                design_pre_artifact,
+                artifact_feedback_issues,
+            ) = await self._senior_design_review_pass(
+                client=client,
+                job_description=job_description,
+                prior_outputs=prior_outputs,
+                design=design_pre_artifact,
+                reasoning=reasoning,
+                extract_context=extract_context,
+            )
+            # Sync regen'd (or original) non-artifact fields back so the
+            # final DesignOutput + roadmap_risk_context see them.
+            for _k in ("adrs", "components", "data_model", "integration_points"):
+                if _k in design_pre_artifact:
+                    design_merged[_k] = design_pre_artifact[_k]
+            if design_pre_artifact.get("review_findings"):
+                design_merged["review_findings"] = design_pre_artifact[
+                    "review_findings"
+                ]
+
+            artifact_reasoning = reasoning
+            if artifact_feedback_issues:
+                feedback_block = format_issues_feedback(artifact_feedback_issues)
+                if feedback_block:
+                    artifact_reasoning = (
+                        f"{reasoning}\n\n"
+                        "## Senior design review (reflect these in the code)\n\n"
+                        f"{feedback_block}\n"
+                    )
+
             # Artifact building: per-artifact focused generation.
             # Each artifact gets its own generate() call with the target
             # file's real source code, so the model sees actual method
             # names, attributes, and signatures — not just an index.
             design_merged["artifacts"] = await self._build_artifacts_per_file(
                 client,
-                reasoning,
+                artifact_reasoning,
                 prior_outputs,
                 context_merged,
             )
+
+            # Artifact-coverage review: set-level check that every file
+            # recorded in context.needed_artifacts actually shipped as
+            # an artifact. Regenerates any missing files with the
+            # original purpose string; remaining gaps become
+            # review_findings so the plan is honest about what didn't
+            # get delivered.
+            (
+                design_merged["artifacts"],
+                coverage_remaining_issues,
+            ) = await self._artifact_coverage_review_pass(
+                client=client,
+                prior_outputs=prior_outputs,
+                context_merged=context_merged,
+                artifacts=design_merged["artifacts"],
+                reasoning=artifact_reasoning,
+            )
+            if coverage_remaining_issues:
+                coverage_findings = [
+                    {
+                        "scope": issue.scope,
+                        "target": issue.target,
+                        "intent": issue.intent,
+                        "actual": issue.actual,
+                        "suggestion": issue.suggestion,
+                    }
+                    for issue in coverage_remaining_issues
+                ]
+                existing = design_merged.get("review_findings") or []
+                design_merged["review_findings"] = existing + coverage_findings
 
             # Roadmap + Risk: use Design output + constraints instead of
             # raw codebase context. Roadmap needs to know WHAT was designed
@@ -4714,21 +5236,11 @@ class SynthesisStage(PipelineStage):
             design_merged.setdefault("integration_points", [])
             design_merged.setdefault("artifacts", [])
             design = DesignOutput(**design_merged).model_dump()
-
-            # Senior-engineer design review (MVP: detect + surface).
-            # Fires before artifact generation so under-specified
-            # interfaces, rubric-missing detail, and missing components
-            # are caught when they can still influence downstream
-            # stages. Findings land on design.review_findings for the
-            # downstream coder; regeneration is a follow-up once the
-            # mechanism is battle-tested (see
-            # docs/senior-engineer-todo/).
-            design = await self._senior_design_review_pass(
-                client=client,
-                job_description=job_description,
-                prior_outputs=prior_outputs,
-                design=design,
-            )
+            # Preserve review_findings stored on design_merged (stripped
+            # by DesignOutput's ``extra="ignore"``) so they surface on
+            # the plan output.
+            if design_merged.get("review_findings"):
+                design["review_findings"] = design_merged["review_findings"]
 
             # Fix roadmap
             from fitz_forge.planning.pipeline.stages.roadmap_risk import (

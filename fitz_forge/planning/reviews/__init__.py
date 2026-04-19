@@ -19,6 +19,7 @@ feedback and regenerates the relevant stage output.
 """
 
 from .architecture import review_architecture
+from .artifact_coverage import review_artifact_coverage
 from .assumptions import review_assumptions
 from .base import ReviewIssue, ReviewResult, format_issues_feedback
 from .decomposition import review_decomposition
@@ -30,6 +31,7 @@ __all__ = [
     "ReviewResult",
     "format_issues_feedback",
     "review_architecture",
+    "review_artifact_coverage",
     "review_artifacts",
     "review_assumptions",
     "review_decomposition",

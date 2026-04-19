@@ -1,8 +1,15 @@
 # Architecture review — upgrade regeneration from re-extraction to reasoning-regeneration
 
-**Status:** open
+**Status:** landed 2026-04-19
 **Source:** 2026-04-19 replay validation on streaming run_042 plan_04 (A4 outlier)
-**Blocks:** Tier-2 lift on architecture-wrong-pick outliers
+**Landed in:** `fitz_forge/planning/pipeline/stages/synthesis.py`
+(`_senior_arch_review_pass` now regenerates the synthesis reasoning
+with the critique merged into the prompt, runs a 70%-score sanity
+gate on the new reasoning, re-extracts, re-reviews, and keeps
+whichever pass has fewer issues). Tests in
+`tests/unit/test_synthesis_senior_arch_review_wiring.py` (8).
+
+## Original spec (below) kept for reference
 
 ## What works today
 

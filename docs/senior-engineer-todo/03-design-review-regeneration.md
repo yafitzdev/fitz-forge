@@ -1,8 +1,24 @@
 # Design review — upgrade from surface-findings to design regeneration
 
-**Status:** open
+**Status:** landed 2026-04-19
 **Source:** 2026-04-19 MVP landing
-**Blocks:** K1/RR1 ceiling on tasks whose A1 requires specific field names
+**Landed in:** `fitz_forge/planning/pipeline/stages/synthesis.py`
+(`_senior_design_review_pass` + `_regenerate_design_fields`); tests
+in `tests/unit/test_synthesis_senior_design_review_wiring.py` (12).
+
+## Landing results (5-plan ranking benchmark, run_049)
+
+- **Tier-1: 97.6** (baseline final 93.7, +3.9)
+- **Tier-2: 82.6** (baseline final 74 / 67 — clear lift, short of 85 stretch)
+- Regen fired on 5/5 runs; improved design in 4/5 (6→5 issues each);
+  fell back cleanly on 1/5 (5→5).
+- **Architecture A1: 4/5** (historical max 1/5).
+- **reranker.py RR1: 4/5** (historical max 2/5) — the `pre_rerank_score`
+  preservation lift the TODO predicted.
+- Outliers: plan_02 (K3 + S2 + R3 → 72.0) and plan_03 (A2, no
+  synthesizer.py → 72.5) pulled the mean below 85.
+
+## Original spec (below) kept for reference
 
 ## What works today
 
