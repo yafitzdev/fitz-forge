@@ -88,11 +88,13 @@ That's it. Your plan runs overnight on local hardware.
 
 ### About
 
-Local LLMs aren't bad at coding tasks because they lack capacity. They're bad because they're asked to do the whole job in one shot — plan, decompose, code, self-review, all in one prompt. That's where the quality collapses. A 26B model that would happily produce a clean 40-line function fails at "architect this feature across 8 files" not because it can't reason, but because the context of the ask is too wide and the output schema is too loose.
+Two premises behind `fitz-forge`:
 
-`fitz-forge` is a reference harness that takes one such task — architectural planning — and scaffolds a local model through it in small structured steps, with AST-grounded retrieval, closure invariants across artifacts, per-field typed extraction, and a senior-engineer review layer wrapping every stage. A specialized harness on a specialized task. The question it exists to answer: *how much of the local-vs-frontier gap is raw capability, and how much is scaffolding?*
+**1. Agentic coding tools are heavily subsidized today.** A $100/month Claude Code subscription gets you enough frontier-model inference that the raw API cost, if metered, would run multiples of the price. This works while AI providers are still buying mindshare. It doesn't work forever.
 
-**Measured answer on this task:** on four of the five quality dimensions we score (Coverage, Craft, Groundedness, Actionability), a 26B local model with the fitz-forge harness matches or beats Sonnet 4.6 in every configuration we've tested. On the fifth (architectural correctness, graded by Sonnet itself), it lands within 5 points. The gap turned out to be mostly scaffolding.
+**2. Planning has the highest concentrated cost per LLM call.** A single "plan this refactor" request has to hold the whole codebase in context, reason about architecture, and emit a structured output — the phase with the highest context requirement and the fuzziest stopping condition. Frontier models do it well but charge accordingly; local models need scaffolding to do it reliably.
+
+Put those two together: when subsidies normalize, the biggest single line item will be the planning step that front-loads every coding session. `fitz-forge` moves that phase onto hardware you already own, and — crucially — produces plans so specific that Claude Code's implementation loop becomes transcription, not discovery. Every artifact in a fitz-forge plan contains real code bodies (not pseudocode), every roadmap phase carries verification commands, every cross-file reference resolves. You hand Claude Code the plan; it lands the diff. The planning tokens never leave your machine, and the implementation tokens flow through a tighter loop.
 
 No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
 
@@ -102,42 +104,48 @@ No LangChain. No LlamaIndex. Every layer written from scratch, with code retriev
 
 ---
 
-### What the measurements show
+### Measured cost
 
-The headline claim — *local model + harness matches frontier on this task* — is backed by the four-arm benchmark in the [Benchmarks](#benchmarks) section below. That's the primary evidence; read it first.
+Concrete numbers for the planning-cost premise. Same task (`streaming_implementation` on the `fitz-sage` repo), same user prompt.
 
-Supporting detail: because the local planning phase runs on hardware you already own, it's effectively free compared to a Claude Code planning pass. On the same task (`streaming_implementation` on the `fitz-sage` repo):
+#### Planning-only cost (one plan produced)
 
-| Mode | Tokens | Cost/plan | Time |
-|---|---|---:|---:|
-| 🤖 Claude Code (Sonnet 4.6, plan-mode) | ~12K output + ~194K cached context | **$0.96** | 6.5 min |
-| 🔨 fitz-forge (gemma-4-26b on RTX 5090) | 0 API tokens | **~$0.02** electricity | 12 min |
+| Mode | What it does | Tokens | Cost/plan | Time |
+|---|---|---|---:|---:|
+| 🤖 Pure Claude Code (Sonnet 4.6, plan-mode) | Reads the codebase, reasons, produces a plan | ~12K output + ~194K cached context | **$0.96** | 6.5 min |
+| 🔨 fitz-forge (gemma-4-26b on RTX 5090) | Same job, local pipeline | 0 API tokens | **~$0.02** electricity | 12 min |
 
-A $0.94-per-plan gap is minor on any single plan; at a team doing ~30 plans/month it's ~$336/year, which isn't a business case on its own — but it's "free planning" compared to the metered alternative, and that frees you to iterate on the plan (re-run with different assumptions, edit the output, regenerate sections) without thinking about cost. Treat the cost column as *"planning is free now"*, not as a savings headline.
+**Per-plan savings: ~$0.94.** Trivial on a single plan, compounds on real usage. At conservative workloads — one plan a workday, ~30 plans/month — that's **$28/month, or $336/year**, on planning alone. Power users hitting several plans a day see it scale linearly: 100 plans/month → ~$1,100/year.
+
+#### End-to-end cost (plan + implementation delivered)
+
+Planning is upstream of the real work. To see what the plan *does* for the downstream implementation, we ran a second experiment: same feature, two clean `fitz-sage` git worktrees, Claude Code with full tools in each. Arm A got only the user prompt; Arm B also got a fitz-forge plan.
+
+| Arm | Wall time | API cost | Files changed | Scope delivered |
+|---|---:|---:|---:|---|
+| 🟢 **Arm A** — Pure Claude Code | **18.4 min** | **$3.04** | 4 files | Core engine + synthesizer + tests. **Missed the API SSE endpoints.** |
+| 🟣 **Arm B** — fitz-forge plan + Claude Code | **15.0 min** | **$2.80** | 7 files | Core engine + synthesizer + service + SDK + `/query/stream` + `/chat/stream` SSE + tests. |
+
+**Arm B was 18% faster, 8% cheaper, and covered 3 more files** (including the HTTP SSE endpoints Arm A skipped). Both arms' tests pass. Same budget → wider implementation: the plan tells Claude Code *which files to touch*, so it doesn't stop early.
+
+The dollar savings headline is modest (~$0.24 per feature) — much smaller than the planning-only savings. The scope-completeness effect matters more than the cost delta: a plan that specifies the full surface area nudges the implementer past "it compiles" toward "it ships the feature end-to-end."
+
+<br>
 
 > [!NOTE]
-> End-to-end implementation cost (plan + have Claude Code ship the code) is roughly fixed per feature regardless of whether you started with a fitz-forge plan or not — cache reads during the agentic loop dominate the bill. The value of a fitz-forge plan is the artifact itself (reviewable, diffable, grounded), not downstream token savings during implementation. Sonnet 4.6 pricing as of 2026-04-19.
+> N=1 end-to-end run per arm. The vague user prompt ("add streaming") leaves a lot of scope-interpretation room — a more prescriptive prompt would likely collapse the scope-completeness gap. The point isn't the 8% cost delta; it's that a specific, grounded plan materially changes what the implementing agent ships. Sonnet 4.6 pricing as of 2026-04-19. Reproduce with `python -m benchmarks.end_to_end_cost` on your own codebase / task.
 
 ---
 
 ### Why `fitz-forge`?
 
-**Local model, frontier-quality plans 🎯**
-> A 26B local model running the fitz-forge harness matches or beats Sonnet 4.6 on 4 of 5 planning quality dimensions 
-> (Coverage, Craft, Groundedness, Actionability) and lands within 5 points on the fifth (architectural correctness). 
-> Not a capability ceiling — a scaffolding gap that fitz-forge closes. See [Benchmarks](#benchmarks) below.
+**Cut your Opus bill — plan locally, implement with Sonnet 💸**
+> Agentic planning is the most expensive part of the process, and it's where LLMs struggle the most. `fitz-forge` 
+> produces a markdown artifact you hand to Sonnet for implementation. The expensive tokens never hit your API budget.
 
 **Dumb local models produce smart plans 🧠**
 > The pipeline breaks the task into atomic decisions, resolves each against relevant files, then narrates the committed 
 > decisions into a plan. Suddenly a local model can produce plans that would overwhelm it in a single prompt.
-
-**Plans are first-class artifacts 📄**
-> Review them. Diff them. Check them into git. Share them in a PR. Hand them to Claude Code, Aider, a teammate, or 
-> future-you. The output isn't a transient chat log; it's a file you own, on a machine you own.
-
-**Fully air-gapped planning 🔒**
-> No cloud call. No tokens leave the building. Relevant if you work in defense, finance, healthcare, or anywhere 
-> code-in-context can't legally sit on an external API's inference server.
 
 **Runs on whatever hardware you've got 🖥️**
 > Consumer GPU? Models like `Qwen3.6-35-a3b` or `Gemma4-26B-A4b` do the whole pipeline. CPU-only box or tiny VRAM? Run a medium model at 10 tok/s 
@@ -154,6 +162,9 @@ A $0.94-per-plan gap is minor on any single plan; at a team doing ~30 plans/mont
 **Queue a job. Go to sleep. Relax. Let it run overnight. 🌙**
 > Every stage produces checkpoints. Power outage at minute 15 of a 20-minute run? `fitz retry <id>` picks up from the 
 > last completed stage.
+
+**Fully local execution possible 🏠**
+> Ollama, LM Studio, or llama.cpp. No API keys required to start.
 
 ---
 
@@ -192,12 +203,12 @@ Results below are the output of this process.
 
 ### Benchmarks
 
-The evidence for the thesis. **Four arms, same task, same five-dimension evaluation.** Each arm produces a plan for the same feature on the same codebase and gets scored the same way. The variables are *which model* and *whether a harness runs* — either fitz-forge's (for the local model), or Claude Code's own read-write-test loop (for Sonnet).
+**Four arms, same task, same five-dimension evaluation.** Each arm produces a plan for the same feature on the same codebase and gets scored the same way. The variables are *which model* and *whether a harness runs* — either fitz-forge's (for the local model), or Claude Code's own read-write-test loop (for Sonnet).
 
-- 🤖 **Raw gemma** — one shot, local model, no harness, files in prompt. *What the local model can do alone.*
-- 🔨 **fitz-forge** — same local model, wrapped in the harness. *What the local model can do with scaffolding.*
-- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no tools, files in prompt. *Parity with raw gemma, on Sonnet.*
-- 🔥 **Hot Claude Code** (Sonnet 4.6) — agentic planning, tools enabled, cwd set to the repo. *The mode a user actually invokes; what Sonnet + Claude Code's own harness delivers.*
+- 🤖 **Raw gemma** — one shot, local model, no harness, files in prompt.
+- 🔨 **fitz-forge** — same local model, wrapped in the harness.
+- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no tools, files in prompt. Parity with raw gemma.
+- 🔥 **Hot Claude Code** (Sonnet 4.6) — agentic planning, tools enabled, cwd set to the repo. This is the mode a user invokes day to day.
 
 <br>
 
@@ -220,20 +231,18 @@ The evidence for the thesis. **Four arms, same task, same five-dimension evaluat
 
 The story:
 
-**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow. That's the baseline — what the local model does when asked to one-shot a planning task.
+**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow — stubs can't carry Craft, missing files can't be grounded, no roadmap means no Actionability, bottom-tier architecture.
 
-**Same local model, wrapped in fitz-forge, jumps to top-tier on 4 of 5 dimensions.** Coverage 50 → 100. Craft 34 → 100. Groundedness 25 → 100. Actionability 0 → 100. Same hardware, same weights. The delta is entirely the harness.
+**Hot Claude Code is the strongest model on architectural correctness** (98.8, the top score). Sonnet with tools enabled writes architecturally crisp plans — it reads real file signatures and chooses patterns that fit.
 
-**Sonnet 4.6 with its own harness (Hot Claude Code) is strong on architectural correctness** (98.8 — the top score on any arm). Reading real file signatures, choosing patterns that fit. Real capability.
-
-**But Hot Claude Code still loses to fitz-forge on Coverage, Craft, Groundedness, and Actionability** — dimensions where the fitz-forge harness enforces invariants that a free-form agent trajectory doesn't:
+**But Hot Claude Code still loses to fitz-forge on Coverage, Craft, Groundedness, and Actionability.** Not because Sonnet is a worse coder — because the harness enforces invariants a free-form agent trajectory doesn't:
 
 - **Coverage** (90 vs 100): 1/5 Hot CC plans drops a required file. fitz-forge's coverage-review stage catches this and regenerates the missing artifact.
-- **Craft** (82.7 vs 100): Hot CC reads real signatures so it fabricates less than Cold CC (55 → 82.7), but still has residual fabrications. fitz-forge's grounding + repair loop closes these.
-- **Groundedness** (33.3 vs 100): even with full codebase access, Sonnet produces references that don't resolve (imports that won't exist, sibling classes it assumes are defined). The harness's closure check expands missing symbols into sibling artifacts or repairs the reference.
+- **Craft** (82.7 vs 100): Hot CC's per-file code quality on evaluated files is noticeably better than Cold CC (55 → 82.7) because the agent reads real signatures instead of hallucinating them — but it still has residual fabrications and fixtures the scorer flags. fitz-forge's grounding + repair loop closes these.
+- **Groundedness** (33.3 vs 100): even with full codebase access, Sonnet produces references that don't resolve in the evaluated-file set (imports that won't exist, sibling classes it assumes are defined). The harness's closure check expands missing symbols into sibling artifacts or repairs the reference.
 - **Actionability** (0 vs 100): neither Claude Code mode emits a structured roadmap with verification commands. That's a schema, not a capability — fitz-forge's synthesis stage produces phases every time because that's what its schema demands.
 
-**What the harness closes isn't raw reasoning; it's structural discipline.** Real capability lives in the model weights. Everything else — file coverage, grounded references, typed contracts, phased roadmaps — is scaffolding. On this task, the scaffolding was most of the gap.
+**Cost gap:** fitz-forge runs at zero API cost, ~$0.02 of electricity. Hot Claude Code costs $1.17/plan. The $0 number is the whole point — when subsidies normalize, this is the difference between free planning on hardware you own and paying every time.
 
 <br>
 
@@ -599,23 +608,6 @@ python -m benchmarks.plan_factory reasoning --runs 5 --source-dir ../your-projec
 ```
 
 </details>
-
----
-
-### What this pattern unlocks
-
-Architectural planning was the first task. The **harness-over-capability** pattern — AST-grounded retrieval, typed per-field extraction, closure invariants enforced across artifact sets, senior-engineer review wrapping each stage — probably isn't planning-specific. A handful of coding tasks look the same shape: specialized, repetitive structure, clear quality dimensions, heavy context requirements.
-
-Obvious candidates where a task-specific harness might close a similar gap on a local model:
-
-- **Code review** — grounded diff analysis with typed finding categories and a closure check (every flagged concern must cite a specific line + reason from a known category)
-- **Debugging** — hypothesis-generation → evidence-gathering → fix proposal, each stage typed and reviewable
-- **Migration planning** — enumerate call sites, classify by migration pattern, emit per-site patches with a grounding check against the new API
-- **Security audit** — taxonomy-driven (OWASP, CWE), per-category grounding against code and dependency versions, false-positive review
-
-The fitz-forge pieces that would carry across (`benchmarks/eval_v2_deterministic.py` scorer, per-field extraction pattern in `fitz_forge/llm/generate.py`, closure check in `fitz_forge/planning/validation/`, the Fixer Loop methodology in [`benchmarks/FIXER_LOOP.md`](benchmarks/FIXER_LOOP.md)) are the reusable parts. The stages and taxonomies are what you'd swap out per task.
-
-This is an observation, not a roadmap promise. fitz-forge is scoped to planning. But if you're thinking about harnessing a local model on a specialized coding task, the methodology in this repo is probably the clearest working example to clone.
 
 ---
 
