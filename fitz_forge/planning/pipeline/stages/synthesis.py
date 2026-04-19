@@ -4880,14 +4880,17 @@ class SynthesisStage(PipelineStage):
                     f"scope={candidates[0][3]}, margin={margin:.1f})"
                 )
 
-            # 2. Self-critique the winner
+            # Self-critique used to run here — a blind single-prompt
+            # refinement checking for scope inflation, hallucinated files,
+            # missed existing code, and generic hand-waving. The senior-
+            # engineer review layer now catches all of those concerns at
+            # their scoped stage outputs (assumption + design + semantic
+            # reviews cover hallucinations and missed code; decomposition
+            # review catches scope pre-commits; architecture review
+            # catches wrong-pick outliers). Running self-critique as well
+            # was redundant work.
             krag_context = self._get_gathered_context(prior_outputs)
-            design_reasoning = await self._self_critique(
-                client,
-                reasoning,
-                job_description,
-                krag_context=krag_context,
-            )
+            design_reasoning = reasoning
 
             # 2a. Refinement pass: re-run synthesis with only the files
             # the first pass actually referenced. This dramatically improves

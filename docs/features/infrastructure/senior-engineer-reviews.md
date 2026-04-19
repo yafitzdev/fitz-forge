@@ -180,6 +180,19 @@ check isn't needed, don't pay for one.
    calcify into a maze of pattern-matchers (Rule 12); a review is one
    LLM call that catches the whole class.
 
+6. **Reviews subsume self-critique.** The merged synthesis stage
+   used to run a blind single-prompt ``_self_critique`` pass after
+   the best-of-N reasoning winner was picked, asking the model to
+   flag scope inflation, hallucinated files, missed existing code,
+   and vague hand-waving. Every concern that self-critique targeted
+   now has a scoped senior review catching it at the right stage
+   output (design for hallucinations + missed code, decomposition
+   for scope pre-commits, architecture for wrong picks, assumption
+   for code contradictions). The self-critique call was removed
+   from synthesis; best-of-N sampling stays (diversity is
+   orthogonal to critique quality) and the context-trimming
+   refinement pass stays (focus is orthogonal to critique).
+
 ## Adding a New Review
 
 1. Create `fitz_forge/planning/reviews/<scope>.py`. Write a single

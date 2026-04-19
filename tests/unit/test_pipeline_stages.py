@@ -642,13 +642,16 @@ class TestSynthesisExecute:
         stage = SynthesisStage()
         mock_client = AsyncMock()
 
-        # Responses: 1 synthesis + 1 critique + 1 roadmap_risk + field groups
+        # Responses: 3 synthesis (best-of-3) + 1 roadmap_risk + field groups
         # Context: description, stakeholders, files, assumptions (4)
         # Architecture: approaches, tradeoffs (2)
-        # Design: adrs, components, integrations (3) + artifacts (1)
+        # Design: adrs, components, integrations (3) + pre-artifact design
+        # review (1) + artifacts (1)
         # Roadmap: phases, scheduling (2)
         # Risk: risks (1)
-        # Total: 3 synthesis (best-of-3) + 1 critique + 1 roadmap_risk + 4 + 2 + 3 + 1 + 2 + 1 = 18
+        # Total: 3 + 1 + 4 + 2 + 3 + 1 + 1 + 2 + 1 = 18
+        # (Self-critique was removed after the senior-review layer
+        # subsumed it.)
         mock_client.generate = AsyncMock(
             side_effect=[
                 # 1a. Synthesis reasoning candidate 1
@@ -657,9 +660,7 @@ class TestSynthesisExecute:
                 "Alternative synthesis reasoning for best-of-3 selection...",
                 # 1c. Synthesis reasoning candidate 3
                 "Third synthesis candidate for scope consensus...",
-                # 2. Self-critique
-                "Reviewed and refined synthesis...",
-                # 2b. Roadmap+risk reasoning (separate pass added in feat: split synthesis reasoning)
+                # 2. Roadmap+risk reasoning (separate pass added in feat: split synthesis reasoning)
                 "Roadmap and risk reasoning pass...",
                 # Context groups
                 json.dumps(
@@ -862,7 +863,7 @@ class TestSynthesisExecute:
 
     @pytest.mark.asyncio
     async def test_reports_substeps(self):
-        """Reports synthesizing + critiquing + extracting substeps."""
+        """Reports synthesizing + extracting substeps."""
         stage = SynthesisStage()
         reported = []
 
@@ -872,12 +873,9 @@ class TestSynthesisExecute:
         stage.set_substep_callback(track)
 
         mock_client = AsyncMock()
-        # synthesis + critique + 13 field groups
-        responses = [
-            "Synthesis...",
-            "Critique...",
-        ]
-        # 4 context + 2 arch + 3 design (excl artifacts) + artifact + 2 roadmap + 1 risk = 13
+        # synthesis + 13 field groups (self-critique removed — subsumed
+        # by the senior-engineer review layer)
+        responses = ["Synthesis..."]
         for _ in range(13):
             responses.append(json.dumps({}))
 
@@ -885,7 +883,6 @@ class TestSynthesisExecute:
 
         await stage.execute(mock_client, "Task", {})
         assert "synthesis:synthesizing" in reported
-        assert "synthesis:critiquing" in reported
 
 
 # ---------------------------------------------------------------------------
