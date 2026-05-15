@@ -1,10 +1,10 @@
 # fitz_forge/planning/agent/gatherer.py
 """
-AgentContextGatherer — powered by fitz-sage[code] retrieval.
+AgentContextGatherer — powered by KRAG's retrieve() API.
 
-Core retrieval (file indexing, LLM selection, import expansion, neighbor
-expansion, compression) is delegated to fitz-sage's CodeRetriever.  This module
-adds planning-specific post-processing:
+Core retrieval (codebase ingestion, LLM file selection, import/neighbor
+expansion, compression) is delegated to fitz-sage's KRAG engine via its public
+``retrieve()`` method.  This module adds planning-specific post-processing:
 
   - Interface / library signature extraction
   - Seed-and-fetch context delivery
@@ -16,20 +16,20 @@ One retrieval engine, centrally maintained in fitz-sage.
 """
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fitz_sage.code import CodeRetriever
-from fitz_sage.code.indexer import build_structural_index
+from fitz_sage.core import Query
+from fitz_sage.engines.fitz_krag.config.schema import FitzKragConfig
+from fitz_sage.runtime.runner import create_engine
 
 from fitz_forge.planning.agent.compressor import compress_file
 from fitz_forge.planning.agent.indexer import (
-    build_structural_index as build_validation_index,
-)
-from fitz_forge.planning.agent.indexer import (
+    build_structural_index,
     extract_interface_signatures,
     extract_library_signatures,
 )
@@ -42,41 +42,12 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_SEED_FILES = 50
 
 
-def _make_chat_factory(client: Any, loop: asyncio.AbstractEventLoop) -> Callable:
-    """Bridge fitz-forge's async LLM client to fitz-sage's sync ChatFactory.
-
-    Returns a factory ``(tier: str) -> ChatProvider`` where ChatProvider.chat()
-    schedules the async ``client.generate()`` on *loop* and blocks for the
-    result.  fitz-sage's tier parameter is ignored — fitz-forge serves a
-    single model.
-    """
-
-    class _SyncChat:
-        def __init__(self, model: str) -> None:
-            self._model = model
-
-        def chat(self, messages: list[dict]) -> str:
-            future = asyncio.run_coroutine_threadsafe(
-                client.generate(
-                    messages=messages,
-                    model=self._model,
-                    temperature=0,
-                ),
-                loop,
-            )
-            return future.result()
-
-    def factory(tier: str) -> _SyncChat:
-        return _SyncChat(client.model)
-
-    return factory
-
-
 class AgentContextGatherer:
-    """Retrieval pipeline powered by fitz-sage's CodeRetriever.
+    """Retrieval pipeline powered by fitz-sage's KRAG engine.
 
-    Bridges fitz-forge's async LLM client to fitz-sage's sync interface,
-    runs retrieval, then adds planning-specific post-processing.
+    Ingests the target codebase into a KRAG collection, runs KRAG's
+    retrieve() for the files relevant to the job, then adds planning-specific
+    post-processing.
     """
 
     def __init__(self, config: "AgentConfig", source_dir: str) -> None:
@@ -90,10 +61,14 @@ class AgentContextGatherer:
         progress_callback: Callable[[float, str], None] | None = None,
         override_files: list[str] | None = None,
     ) -> dict[str, str]:
-        """Run fitz-sage retrieval and return context dict.
+        """Run KRAG retrieval and return context dict.
+
+        Ingests the codebase into a KRAG collection (AST symbol indexing,
+        no LLM), then calls KRAG's retrieve() for the files relevant to the
+        job description.
 
         Args:
-            client: LLM client for retrieval calls.
+            client: fitz-forge LLM client — supplies the chat endpoint KRAG uses.
             job_description: Natural language task description.
             progress_callback: Optional progress reporter.
             override_files: If set, skip LLM retrieval and use these
@@ -114,69 +89,42 @@ class AgentContextGatherer:
         t_pipeline = time.monotonic()
 
         try:
+            # Step 1: Ingest the codebase into a KRAG collection (AST symbol
+            # indexing, no LLM) and build the engine pointed at fitz-forge's LLM.
+            await self._report(progress_callback, 0.06, "agent:mapping")
+            engine, manifest = await asyncio.to_thread(self._build_engine, client)
+            file_paths = sorted(manifest.entries())
+
             if override_files is not None:
                 # Benchmark mode: skip LLM retrieval, use fixed file list
-                from fitz_sage.code.indexer import build_file_list
-                from fitz_sage.engines.fitz_krag.context.compressor import compress_python
-                from fitz_sage.engines.fitz_krag.types import Address, AddressKind, ReadResult
-
-                await self._report(progress_callback, 0.06, "agent:mapping")
-                file_paths = build_file_list(
-                    Path(self._source_dir),
-                    max_files=2000,
-                )
-                src = Path(self._source_dir)
-                results = []
-                for rel in override_files:
-                    full = src / rel
-                    if not full.is_file():
-                        continue
-                    try:
-                        text = full.read_bytes()[: self._config.max_file_bytes]
-                        content = text.decode("utf-8", errors="replace")
-                        if rel.endswith(".py"):
-                            content = compress_python(content)
-                    except OSError:
-                        continue
-                    addr = Address(
-                        kind=AddressKind.FILE,
-                        source_id=rel,
-                        location=rel,
-                        summary=rel,
-                        score=1.0,
-                        metadata={"origin": "selected"},
-                    )
-                    results.append(ReadResult(address=addr, content=content, file_path=rel))
-
+                results = self._override_results(override_files)
                 logger.info(
                     f"AgentContextGatherer: using {len(results)} override files "
                     f"(skipped LLM retrieval)"
                 )
             else:
-                # Normal mode: LLM retrieval
-                # Step 1: Bridge async client → sync ChatFactory
-                await self._report(progress_callback, 0.06, "agent:mapping")
-                loop = asyncio.get_running_loop()
-                chat_factory = _make_chat_factory(client, loop)
-
-                # Step 2: Run fitz-sage CodeRetriever (in thread — it's sync)
+                # Normal mode: KRAG retrieval
                 await self._report(progress_callback, 0.065, "agent:scanning_index")
-                retriever = CodeRetriever(
-                    source_dir=self._source_dir,
-                    chat_factory=chat_factory,
-                    llm_tier="smart",
-                    max_file_bytes=self._config.max_file_bytes,
+                results = await asyncio.to_thread(
+                    engine.retrieve, Query(text=job_description)
                 )
 
-                results = await asyncio.to_thread(retriever.retrieve, job_description)
-                file_paths = await asyncio.to_thread(retriever.get_file_paths)
+            # KRAG can surface the same file from multiple strategies — keep
+            # one ReadResult per file, preserving retrieval order.
+            seen_paths: set[str] = set()
+            deduped = []
+            for r in results:
+                if r.file_path not in seen_paths:
+                    seen_paths.add(r.file_path)
+                    deduped.append(r)
+            results = deduped
 
             if not results:
                 logger.warning("AgentContextGatherer: retrieval returned no results")
                 return empty
 
             logger.info(
-                f"AgentContextGatherer: fitz-sage retrieved {len(results)} files "
+                f"AgentContextGatherer: KRAG retrieved {len(results)} files "
                 f"from {len(file_paths)} indexed"
             )
 
@@ -214,7 +162,7 @@ class AgentContextGatherer:
                 raw_chars += len(r.content)
                 # Apply planning-specific compression (test body collapse,
                 # non-Python comment stripping).  Python AST compression
-                # was already applied by CodeRetriever.
+                # was already applied by KRAG retrieval.
                 file_contents[r.file_path] = compress_file(r.content, r.file_path)
 
             comp_chars = sum(len(c) for c in file_contents.values())
@@ -228,7 +176,7 @@ class AgentContextGatherer:
             # Step 5: Build structural overview
             await self._report(progress_callback, 0.080, "agent:reading")
             selected_index = build_structural_index(
-                Path(self._source_dir),
+                str(Path(self._source_dir)),
                 included,
                 max_file_bytes=self._config.max_file_bytes,
             )
@@ -353,14 +301,14 @@ class AgentContextGatherer:
             # Build full structural index (all files, not just selected)
             # for artifact duplicate checking downstream
             full_index = build_structural_index(
-                Path(self._source_dir),
+                str(Path(self._source_dir)),
                 file_paths,
                 max_file_bytes=self._config.max_file_bytes,
             )
 
-            # Build untruncated validation index using fitz_forge's indexer
-            # (includes Pydantic fields for typed attribute validation).
-            validation_index = build_validation_index(
+            # Build untruncated validation index (includes Pydantic fields
+            # for typed attribute validation).
+            validation_index = build_structural_index(
                 str(Path(self._source_dir)),
                 file_paths,
                 max_file_bytes=self._config.max_file_bytes,
@@ -389,6 +337,72 @@ class AgentContextGatherer:
         except Exception:
             logger.exception("AgentContextGatherer: pipeline failed")
             return empty
+
+    # ------------------------------------------------------------------
+    # KRAG engine
+    # ------------------------------------------------------------------
+
+    def _build_engine(self, client: Any) -> tuple[Any, Any]:
+        """Create a KRAG engine pointed at fitz-forge's LLM and ingest the codebase.
+
+        Ingestion (``point``) is AST-only — fast, no LLM. The collection is
+        keyed by source directory, so re-planning the same codebase reuses the
+        index. Returns ``(engine, manifest)``. Synchronous — call via
+        ``asyncio.to_thread``.
+        """
+        source = Path(self._source_dir).resolve()
+        collection = "fitz_forge_" + hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:16]
+        # fitz-forge's LLM clients expose ``base_url`` as an OpenAI-compatible
+        # /v1 endpoint — KRAG's ``endpoint`` provider consumes it directly.
+        model_spec = f"endpoint/{client.model}"
+        config = FitzKragConfig(
+            collection=collection,
+            chat_fast=model_spec,
+            chat_balanced=model_spec,
+            chat_smart=model_spec,
+            chat_base_url=client.base_url,
+            # One local model serves one request at a time — concurrent
+            # retrieval strategies just thrash its KV cache.
+            retrieval_workers=1,
+            # Single retrieval pass — planning queries don't need KRAG's
+            # iterative multi-hop refinement, and each hop is another full
+            # round of (serialized) LLM calls.
+            enable_multi_hop=False,
+        )
+        engine = create_engine("fitz_krag", config=config)
+        manifest = engine.point(source, collection=collection, start_worker=False)
+        return engine, manifest
+
+    def _override_results(self, override_files: list[str]) -> list:
+        """Build ReadResults from a fixed file list — benchmark mode, no retrieval."""
+        from fitz_sage.engines.fitz_krag.types import Address, AddressKind, ReadResult
+
+        src = Path(self._source_dir)
+        results: list = []
+        for rel in override_files:
+            full = src / rel
+            if not full.is_file():
+                continue
+            try:
+                raw = full.read_bytes()[: self._config.max_file_bytes]
+                content = raw.decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            results.append(
+                ReadResult(
+                    address=Address(
+                        kind=AddressKind.FILE,
+                        source_id=rel,
+                        location=rel,
+                        summary=rel,
+                        score=1.0,
+                        metadata={"origin": "selected"},
+                    ),
+                    content=content,
+                    file_path=rel,
+                )
+            )
+        return results
 
     # ------------------------------------------------------------------
     # Helpers

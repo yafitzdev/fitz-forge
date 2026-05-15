@@ -62,11 +62,7 @@ async def _run_retrieval(source_dir: str, query: str) -> list[str]:
     """Run retrieval pipeline and return selected file paths."""
     from fitz_forge.config import load_config
     from fitz_forge.llm.factory import create_llm_client
-    from fitz_forge.planning.agent.gatherer import (
-        AgentContextGatherer,
-        _make_chat_factory,
-    )
-    from fitz_sage.code import CodeRetriever
+    from fitz_forge.planning.agent.gatherer import AgentContextGatherer
 
     config = load_config()
     client = create_llm_client(config)
@@ -74,18 +70,9 @@ async def _run_retrieval(source_dir: str, query: str) -> list[str]:
     if hasattr(client, "health_check"):
         await client.health_check()
 
-    loop = asyncio.get_running_loop()
-    chat_factory = _make_chat_factory(client, loop)
-
-    retriever = CodeRetriever(
-        source_dir=source_dir,
-        chat_factory=chat_factory,
-        llm_tier="smart",
-        max_file_bytes=config.agent.max_file_bytes,
-    )
-
-    results = await asyncio.to_thread(retriever.retrieve, query)
-    return [r.file_path for r in results]
+    gatherer = AgentContextGatherer(config.agent, source_dir)
+    result = await gatherer.gather(client, query)
+    return list(result.get("agent_files", {}).get("included", []))
 
 
 def _score(retrieved: list[str], critical: list[str], relevant: list[str]) -> dict:

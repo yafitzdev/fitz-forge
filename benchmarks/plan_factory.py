@@ -159,13 +159,9 @@ async def _run_retrieval_once(
     run_id: int,
 ) -> dict:
     """Run a single retrieval and return metadata."""
-    from fitz_sage.code import CodeRetriever
-
     from fitz_forge.config import load_config
     from fitz_forge.llm.factory import create_llm_client
-    from fitz_forge.planning.agent.gatherer import (
-        _make_chat_factory,
-    )
+    from fitz_forge.planning.agent.gatherer import AgentContextGatherer
 
     config = load_config()
     client = create_llm_client(config)
@@ -174,35 +170,23 @@ async def _run_retrieval_once(
     if hasattr(client, "health_check"):
         await client.health_check()
 
-    loop = asyncio.get_running_loop()
-    chat_factory = _make_chat_factory(client, loop)
-
-    retriever = CodeRetriever(
-        source_dir=source_dir,
-        chat_factory=chat_factory,
-        llm_tier="smart",
-        max_file_bytes=config.agent.max_file_bytes,
-    )
+    gatherer = AgentContextGatherer(config.agent, source_dir)
 
     t0 = time.monotonic()
-    results = await asyncio.to_thread(retriever.retrieve, query)
+    result = await gatherer.gather(client, query)
     elapsed = time.monotonic() - t0
 
-    # Extract provenance
-    scan_hits = []
-    import_added = []
-    neighbor_added = []
-    all_files = []
-
-    for r in results:
-        origin = r.address.metadata.get("origin", "neighbor")
-        all_files.append(r.file_path)
-        if origin == "selected":
-            scan_hits.append(r.file_path)
-        elif origin == "import":
-            import_added.append(r.file_path)
-        elif origin == "neighbor":
-            neighbor_added.append(r.file_path)
+    # Extract provenance from the gather result
+    agent_files = result.get("agent_files", {})
+    all_files = list(agent_files.get("included", []))
+    provenance = agent_files.get("file_provenance", {})
+    scan_hits = list(agent_files.get("scan_hits", []))
+    import_added = [
+        p for p in all_files if "import" in provenance.get(p, {}).get("signals", [])
+    ]
+    neighbor_added = [
+        p for p in all_files if "neighbor" in provenance.get(p, {}).get("signals", [])
+    ]
 
     return {
         "run": run_id,

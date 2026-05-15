@@ -134,19 +134,14 @@ class DecisionResolutionStage(PipelineStage):
         """Read a file from disk as fallback for files not in the agent pool."""
         from pathlib import Path
 
+        from fitz_forge.planning.agent.compressor import compress_file
+
         full = Path(source_dir) / rel_path
         if not full.is_file():
             return None
         try:
             text = full.read_bytes()[:50_000].decode("utf-8", errors="replace")
-            try:
-                from fitz_sage.engines.fitz_krag.context.compressor import compress_python
-
-                if rel_path.endswith(".py"):
-                    text = compress_python(text)
-            except ImportError:
-                pass
-            return text
+            return compress_file(text, rel_path)
         except OSError:
             return None
 

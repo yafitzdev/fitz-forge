@@ -35,7 +35,7 @@ dependencies = [
     "psutil>=6.1.0",
     "typer>=0.9",
     "rich>=13.0",
-    "fitz-sage[code]",
+    "fitz-sage",
     "tomli>=2.0; python_version < '3.11'",
     "tree-sitter>=0.23",
     "tree-sitter-python>=0.23",
