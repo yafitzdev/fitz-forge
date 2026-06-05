@@ -260,10 +260,10 @@ iteration):
 
 ## Related docs
 
-- [FIXER_LOOP.md](../benchmarks/FIXER_LOOP.md) — the benchmark-improvement
+- [FIXER_LOOP.md](../../../benchmarks/FIXER_LOOP.md) — the benchmark-improvement
   methodology that consumes scorer output.
-- [Features guide](features/) — each pipeline stage and infrastructure
+- [Features guide](../README.md) — each pipeline stage and infrastructure
   component that the scorer evaluates the output of.
-- [Senior-engineer reviews](features/infrastructure/senior-engineer-reviews.md)
+- [Senior-engineer reviews](../infrastructure/senior-engineer-reviews.md)
   — the production-time review layer the scorer was built to measure the
   impact of.

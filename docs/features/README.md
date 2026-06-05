@@ -33,6 +33,7 @@ Cross-cutting concerns used by the pipeline.
 
 | Doc | Description |
 |-----|-------------|
-| [Architecture](../ARCHITECTURE.md) | System overview, layer diagram, data flow |
-| [Configuration](../CONFIG.md) | Every config field explained |
-| [Troubleshooting](../TROUBLESHOOTING.md) | Common issues and solutions |
+| [Architecture](reference/ARCHITECTURE.md) | System overview, layer diagram, data flow |
+| [Configuration](reference/CONFIG.md) | Every config field explained |
+| [Scorer V2](reference/SCORER-V2-SPEC.md) | Golden-taxonomy and deterministic scoring design |
+| [Troubleshooting](reference/TROUBLESHOOTING.md) | Common issues and solutions |

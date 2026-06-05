@@ -1,40 +1,63 @@
-# Python
-__pycache__/
-*.pyc
+# Repository allow-list.
+# Ignore everything unless it is explicitly part of the public project surface.
+*
+
+# Root files
+!/.gitignore
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/LICENSE
+!/README.md
+!/pyproject.toml
+
+# Root directories
+!/.github/
+!/.github/**
+!/benchmarks/
+!/benchmarks/**
+!/docs/
+!/docs/assets/
+!/docs/assets/**
+!/docs/features/
+!/docs/features/**
+!/docs/roadmap/
+!/docs/roadmap/golden-plan-authoring-harness.md
+!/fitz_forge/
+!/fitz_forge/**
+!/tests/
+!/tests/**
+!/tools/
+!/tools/**
+
+# Generated files and local-only state inside otherwise allowed directories
+**/__pycache__/
+*.py[cod]
 *.pyo
 *.egg-info/
-dist/
-build/
+*.log
 
-# Virtual environment
 .venv/
-
-# IDE
 .idea/
-
-# Testing & coverage
-.coverage
-htmlcov/
 .pytest_cache/
-
-# Linting & type checking
-.mypy_cache/
 .ruff_cache/
-
-# Project internals
+.mypy_cache/
+.claude/
 .planning/
 .fitz-forge
 
-# Large assets (excluded from repo)
+dist/
+build/
+.coverage
+htmlcov/
+
 benchmarks/results/
+benchmarks/end_to_end_results/
 benchmarks/traces/
 benchmarks/challenges/*/results/
-benchmarks/**/*.log
-benchmarks/**/__pycache__/
 benchmarks/test_*.py
-.claude/
-docs/roadmap
-docs/archive
-docs/senior-engineer-todo
-CLAUDE.md
 
+docs/archive/
+docs/senior-engineer-todo/
+
+AGENTS.md
+CLAUDE.md

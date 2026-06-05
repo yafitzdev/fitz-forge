@@ -6,14 +6,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fitz-forge"
 version = "0.6.2"
-description = "MCP server for local-first AI architectural planning using local LLMs"
+description = "Experimental coding-plan harness for local LLMs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Yan Fitzer", email = "yan@example.com" }
 ]
-keywords = ["mcp", "planning", "ai", "model-context-protocol", "local-llm"]
+keywords = ["coding-agent", "planning", "ai", "model-context-protocol", "local-llm", "llm-harness"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

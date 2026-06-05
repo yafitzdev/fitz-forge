@@ -112,7 +112,7 @@ pip install -e ".[dev]"
 
 **Symptom:** fitz-forge uses default values even though you edited config.yaml.
 
-**Fix:** Run `fitz plan "test"` once to auto-create the config, then check the path:
+**Fix:** Run `fitz-forge plan "test"` once to auto-create the config, then check the path:
 
 ```bash
 python -c "from fitz_forge.config import get_config_path; print(get_config_path())"
@@ -160,7 +160,7 @@ If your pipeline takes significantly longer:
 
 ### Checkpoint Corruption
 
-**Symptom:** `fitz retry <id>` fails with a JSON decode error.
+**Symptom:** `fitz-forge retry <id>` fails with a JSON decode error.
 
 **Fix:** The checkpoint is stored in `jobs.pipeline_state` column in SQLite. If corrupted:
 
@@ -183,5 +183,5 @@ Replace `JOB_ID` with your job ID.
 ## Getting Help
 
 - [GitHub Issues](https://github.com/yafitzdev/fitz-forge/issues)
-- Check [docs/features/](docs/features/) for detailed pipeline documentation
-- Check [docs/ARCHITECTURE.md](ARCHITECTURE.md) for system overview
+- Check [docs/features/](../README.md) for detailed pipeline documentation
+- Check [Architecture](ARCHITECTURE.md) for system overview

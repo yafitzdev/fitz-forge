@@ -1,11 +1,8 @@
-
-
-
 <div align="center">
 
 # fitz-forge
 
-### Architectural coding planning harness for local LLMs
+### Experimental coding-plan harness for local LLMs
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
@@ -14,301 +11,80 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-[The Problem](#the-problem) • [The Insight](#the-insight-) • [Why fitz-forge?](#why-fitz-forge) • [Benchmarks](#benchmarks) • [How It Works](#how-it-works) • [Docs](docs/features/) • [GitHub](https://github.com/yafitzdev/fitz-forge)
+[Research Question](#research-question) | [Current Answer](#current-answer) | [Why fitz-forge?](#why-fitz-forge) | [How It Works](#how-it-works) | [Evaluation](#evaluation) | [Quick Start](#quick-start) | [Docs](docs/features/)
 
 </div>
 
-<br />
-
 ---
 
-<div align="center">
-<table>
-  <tr>
-    <td align="center" colspan="2">
-      <pre><strong>Task: "Add WebSocket support to the chat API"</strong>
-(Given a real codebase with FastAPI routes, Pydantic schemas, and an existing REST chat endpoint.)</pre>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <strong>❌ Raw local LLM (no harness)</strong>
-<pre>
-"Add a WebSocket endpoint.
- Use the websockets library.
- Create a new file for handlers.
- Add authentication middleware."
-</pre>
-<em>Generic advice. No file paths. No awareness
-of existing code. Hallucinated library choice.
-Would break the existing architecture.</em>
-    </td>
-    <td align="center" width="50%">
-      <strong>🔨 fitz-forge (same model, same hardware)</strong>
-<pre>
-Phase 1: Extend ChatRouter in api/routes/chat.py
-  - Add ws_chat() using existing ChatEngine
-  - Reuse AuthMiddleware.verify_token()
-  - Test: pytest tests/api/test_chat_ws.py
+## Status
 
-Phase 2: Adapt MessageSchema in schemas/chat.py
-  - Add ws_message field (matches existing
-    ChatMessage.content structure)
-  - Verify: pydantic model_validate()
-</pre>
-<em>Real files. Real methods. Phased roadmap
-with verification commands. Grounded in
-the actual codebase.</em>
-    </td>
-  </tr>
-</table>
+`fitz-forge` is an alpha-stage research/engineering project. The project asks a narrow question:
 
-→ Same model, same hardware. The difference is the harness: `fitz-forge` reads your codebase, reasons in stages, runs a 
-senior-engineer review at every stage output, and extracts structured output that a small model can actually produce reliably.
+> How much coding-planning ability can be moved out of the model and into the harness around it?
 
-</div>
+The current implementation generates coding-plan artifacts from a real codebase using local LLMs. The interesting part is the harness: retrieval, task decomposition, structured schemas, deterministic AST checks, artifact generation, and review/regeneration loops.
 
---- 
+## Research Question
 
-### Where to start 🚀
+Can a local LLM, when wrapped in the right planning harness, produce coding plans that are substantially more complete, grounded, and actionable than the same model prompted directly?
 
-> [!IMPORTANT]
-> Requires [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) 
-> with a loaded model. Also needs [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval.
+In other words:
 
-```bash
-pip install fitz-forge
+> Can scaffolding compensate for model weakness in agentic coding planning?
 
-fitz plan "Add OAuth2 authentication with Google and GitHub providers"
-```
+This project treats local models as a stress test. If a weak/local model improves significantly under a harness, that improvement is evidence that at least part of "agentic intelligence" lives in the system design, not only in model weights.
 
-That's it. Your plan runs overnight on local hardware.
+## Current Answer
 
----
+The current answer is:
 
-### About
+> Yes, substantially for planning. Not enough to replace frontier coding agents end-to-end.
 
-Two premises behind `fitz-forge`:
+What the project has shown so far on curated internal challenge tasks:
 
-**1. Agentic coding tools are heavily subsidized today.** A $100/month Claude Code subscription gets you enough frontier-model inference that the raw API cost, if metered, would run multiples of the price. This works while AI providers are still buying mindshare. It doesn't work forever.
+- Raw local models tend to produce vague, partial, or hallucinated coding plans.
+- The same class of model becomes much more useful when the task is decomposed into small decisions and each stage is checked.
+- Deterministic scaffolding matters: call graphs, structural indexes, grounding checks, closure checks, and set-level artifact validation catch failures a prompt alone misses.
+- Review/regeneration loops matter: scoped "senior engineer" critique passes can improve stage outputs without relying on one giant self-critique prompt.
+- Token savings are not the core result. Claude Code and similar tools already use caching and still read code during implementation. The stronger direction is plan quality and, next, plan executability.
 
-**2. Planning has the highest concentrated cost per LLM call.** A single "plan this refactor" request has to hold the whole codebase in context, reason about architecture, and emit a structured output — the phase with the highest context requirement and the fuzziest stopping condition. Frontier models do it well but charge accordingly; local models need scaffolding to do it reliably.
+The next research step is to measure whether harness-produced plans reduce downstream implementation adaptation: fewer missing files, fewer hallucinated APIs, fewer corrective turns, and eventually higher patch-resolution rates on external benchmarks.
 
-Put those two together: when subsidies normalize, the biggest single line item will be the planning step that front-loads every coding session. `fitz-forge` moves that phase onto hardware you already own, and — crucially — produces plans so specific that Claude Code's implementation loop becomes transcription, not discovery. Every artifact in a fitz-forge plan contains real code bodies (not pseudocode), every roadmap phase carries verification commands, every cross-file reference resolves. You hand Claude Code the plan; it lands the diff. The planning tokens never leave your machine, and the implementation tokens flow through a tighter loop.
+## Shape of the Difference
 
-No LangChain. No LlamaIndex. Every layer written from scratch, with code retrieval powered by [fitz-sage](https://github.com/yafitzdev/fitz-sage).
+Illustrative example, not a benchmark result:
 
-~20k lines of Python. 1200+ tests. Built by Yan Fitzner ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev), [HuggingFace](https://huggingface.co/yafitzdev)).
+| Direct local prompt | Same model inside the harness |
+|---|---|
+| "Add a WebSocket endpoint. Use the websockets library. Create handlers. Add auth middleware." | "Extend `api/routes/chat.py`; reuse the existing chat service; validate tokens through the existing auth layer; add tests under `tests/api/`; verify with `pytest ...`." |
+| Generic advice. No file paths. Easy to hallucinate libraries and miss repository conventions. | Real files, explicit dependencies, phased work, and verification commands grounded in the codebase. |
 
-![fitz-forge llm_with_harness](https://raw.githubusercontent.com/yafitzdev/fitz-forge/main/docs/assets/llm_with_harness.jpg)
+## What It Produces
 
----
+`fitz-forge` produces a markdown plan with structured sections such as:
 
-### Measured cost
+- relevant codebase context,
+- implementation status checks,
+- decomposed architectural decisions,
+- resolved decisions with evidence,
+- proposed code artifacts,
+- phased roadmap and verification commands,
+- risk notes and review findings.
 
-Concrete numbers for the planning-cost premise. Same task (`streaming_implementation` on the `fitz-sage` repo), same user prompt.
+The artifact code is intended to be concrete enough for a human or coding agent to inspect and adapt. It is not yet guaranteed to be directly applicable as a patch.
 
-#### Planning-only cost (one plan produced)
+## How It Works
 
-| Mode | What it does | Tokens | Cost/plan | Time |
-|---|---|---|---:|---:|
-| 🤖 Pure Claude Code (Sonnet 4.6, plan-mode) | Reads the codebase, reasons, produces a plan | ~12K output + ~194K cached context | **$0.96** | 6.5 min |
-| 🔨 fitz-forge (gemma-4-26b on RTX 5090) | Same job, local pipeline | 0 API tokens | **~$0.02** electricity | 12 min |
+A 10-stage pipeline decomposes architectural planning into small, focused LLM calls interleaved with deterministic AST work. Retrieval and implementation checks feed a decision-based reasoning core: decompose, resolve, synthesize. Artifacts are then generated, closure-checked, and grounded against the real codebase before the plan is written.
 
-**Per-plan savings: ~$0.94.** Trivial on a single plan, compounds on real usage. At conservative workloads — one plan a workday, ~30 plans/month — that's **$28/month, or $336/year**, on planning alone. Power users hitting several plans a day see it scale linearly: 100 plans/month → ~$1,100/year.
+The important design choice is that **a senior-engineer review layer wraps the pipeline**. It runs narrow critique passes scoped to one stage's output, then regenerates the affected stage when a review flags issues.
 
-#### End-to-end cost (plan + implementation delivered)
-
-Planning is upstream of the real work. To see what the plan *does* for the downstream implementation, we ran a second experiment: same feature, two clean `fitz-sage` git worktrees, Claude Code with full tools in each. Arm A got only the user prompt; Arm B also got a fitz-forge plan.
-
-| Arm | Wall time | API cost | Files changed | Scope delivered |
-|---|---:|---:|---:|---|
-| 🟢 **Arm A** — Pure Claude Code | **18.4 min** | **$3.04** | 4 files | Core engine + synthesizer + tests. **Missed the API SSE endpoints.** |
-| 🟣 **Arm B** — fitz-forge plan + Claude Code | **15.0 min** | **$2.80** | 7 files | Core engine + synthesizer + service + SDK + `/query/stream` + `/chat/stream` SSE + tests. |
-
-**Arm B was 18% faster, 8% cheaper, and covered 3 more files** (including the HTTP SSE endpoints Arm A skipped). Both arms' tests pass. Same budget → wider implementation: the plan tells Claude Code *which files to touch*, so it doesn't stop early.
-
-The dollar savings headline is modest (~$0.24 per feature) — much smaller than the planning-only savings. The scope-completeness effect matters more than the cost delta: a plan that specifies the full surface area nudges the implementer past "it compiles" toward "it ships the feature end-to-end."
-
-<br>
-
-> [!NOTE]
-> N=1 end-to-end run per arm. The vague user prompt ("add streaming") leaves a lot of scope-interpretation room — a more prescriptive prompt would likely collapse the scope-completeness gap. The point isn't the 8% cost delta; it's that a specific, grounded plan materially changes what the implementing agent ships. Sonnet 4.6 pricing as of 2026-04-19. Reproduce with `python -m benchmarks.end_to_end_cost` on your own codebase / task.
-
----
-
-### Why `fitz-forge`?
-
-**Cut your Opus bill — plan locally, implement with Sonnet 💸**
-> Agentic planning is the most expensive part of the process, and it's where LLMs struggle the most. `fitz-forge` 
-> produces a markdown artifact you hand to Sonnet for implementation. The expensive tokens never hit your API budget.
-
-**Dumb local models produce smart plans 🧠**
-> The pipeline breaks the task into atomic decisions, resolves each against relevant files, then narrates the committed 
-> decisions into a plan. Suddenly a local model can produce plans that would overwhelm it in a single prompt.
-
-**Runs on whatever hardware you've got 🖥️**
-> Consumer GPU? Models like `Qwen3.6-35-a3b` or `Gemma4-26B-A4b` do the whole pipeline. CPU-only box or tiny VRAM? Run a medium model at 10 tok/s 
-> overnight. Tokens-per-second stops mattering when you're sleeping.
-
-**Drops into Claude Code or Codex via CLI and MCP 🔌**
-> Expose `fitz-forge` as an MCP server (`fitz serve`) and it becomes a tool inside Claude Code, or any MCP-capable client.
-> Same principle as with CLI. Tell Claude to create a plan using `fitz-forge`, and it does the heavy lifting locally while you wait.
-
-**Any codebase, any language 🌐**
-> Python, Go, Rust — the retrieval layer indexes by file structure and imports, and the grounding layer validates generated 
-> artifacts against whatever the codebase actually contains.
-
-**Queue a job. Go to sleep. Relax. Let it run overnight. 🌙**
-> Every stage produces checkpoints. Power outage at minute 15 of a 20-minute run? `fitz retry <id>` picks up from the 
-> last completed stage.
-
-**Fully local execution possible 🏠**
-> Ollama, LM Studio, or llama.cpp. No API keys required to start.
-
----
-
-<details>
-
-<summary><strong>📦 How we verify the pipeline works</strong></summary>
-
-<br>
-
-> [!IMPORTANT]
-> **Plans you generate with `fitz-forge` do not come with a score.** The evaluation framework below is how we (the developers) measure the pipeline's quality — for regression testing, for comparing changes, and for driving improvements. It never runs in production. Your plan is just a plan.
-
-Ideally we'd want every local-model output to come with an "is this plan any good?" number. Running a Sonnet-grader on every plan would defeat the purpose of local-first — you're back to paying API tokens on the critical path. So instead we judge the *pipeline* rigorously offline, and ship a pipeline we've measured.
-
-Three evaluation mechanisms, each operating at a different timescale:
-
-**Benchmarks** (~60 min per run). The full A/B: run the pipeline N times on a challenge task, score each plan. Lives in `benchmarks/challenges/<task>/`. Each challenge has a fixed user prompt, a curated file list (so retrieval isn't a variable), and a hand-authored taxonomy that defines what "good" means for that task in 4-6 quality tiers. The `plan_factory.py` runner produces plans; the V2 scorer (see [SCORER-V2-SPEC.md](docs/SCORER-V2-SPEC.md)) evaluates them on five dimensions:
-
-- **Coverage** — did the required files ship with real implementations (not `raise NotImplementedError` stubs)?
-- **Craft** — is the code quality good on what was produced?
-- **Groundedness** — do the plan's references resolve in the real codebase?
-- **Actionability** — can an agent execute the plan end-to-end (are there concrete verification commands)?
-- **Architectural correctness** — is the plan's overall approach right? Graded by Sonnet against the task's taxonomy, which means this is the one dimension that depends on a frontier model — but it runs *only at evaluation time*, not during the pipeline.
-
-The first four are deterministic. Same plan in, same score out, forever. The fifth adds Sonnet's judgment for the architectural-level question, which a deterministic checker can't assess.
-
-**Replay** (~5-10 min). When we change something in a single stage — a review's prompt, a regeneration mechanism, the artifact coverage check — we don't want to re-run decomposition and resolution (which are expensive and irrelevant to the change). `benchmarks/plan_factory.py replay` loads a checkpoint snapshot from a previous run and continues from there. Changed the design review? Replay from `snapshot_after_decision_resolution.json` to validate the fix in 5 minutes instead of 12. Most of our iteration happens at this speed.
-
-**The Fixer Loop** ([benchmarks/FIXER_LOOP.md](benchmarks/FIXER_LOOP.md)). The methodology that ties it all together. When a task is scoring below where we want it: enumerate the failure patterns from Tier-2's qualitative classifications, log each into a task-specific bug register with an impact score, fix the highest-impact one first, re-benchmark, confirm the fix lands on both tiers. Every fix has to be codebase- and language-agnostic — task-specific hacks don't ship. The track record section of FIXER_LOOP.md lists every benchmark improvement cycle and what changed.
-
-Results below are the output of this process.
-
-</details>
-
----
-
-### Benchmarks
-
-**Four arms, same task, same five-dimension evaluation.** Each arm produces a plan for the same feature on the same codebase and gets scored the same way. The variables are *which model* and *whether a harness runs* — either fitz-forge's (for the local model), or Claude Code's own read-write-test loop (for Sonnet).
-
-- 🤖 **Raw gemma** — one shot, local model, no harness, files in prompt.
-- 🔨 **fitz-forge** — same local model, wrapped in the harness.
-- 🧠 **Cold Claude Code** (Sonnet 4.6) — one shot, frontier model, no tools, files in prompt. Parity with raw gemma.
-- 🔥 **Hot Claude Code** (Sonnet 4.6) — agentic planning, tools enabled, cwd set to the repo. This is the mode a user invokes day to day.
-
-<br>
-
-#### Streaming implementation on `fitz-sage` · n=5 per arm
-
-| Metric | 🤖 Raw gemma | 🔨 gemma + fitz-forge | 🧠 Cold Claude Code | 🔥 Hot Claude Code |
-|---|---:|---:|---:|---:|
-| **Coverage** (required files delivered, not stubbed) | 50.0 | **100.0** | 90.0 | 90.0 |
-| **Craft** (code quality on evaluated files, 0 if missing/stubbed) | 34.2 | **100.0** | 55.0 | 82.7 |
-| **Groundedness** (refs resolve in real codebase; missing/stubbed = ungrounded) | 25.0 | **100.0** | 33.3 | 33.3 |
-| **Actionability** (phases with real verification commands) | 0.0 | **100.0** | 0.0 | 0.0 |
-| **Architectural correctness** (Tier-2, Sonnet grader) | 35.9 | 93.8 | 83.0 | **98.8** |
-| Cost per plan (API tokens) | $0 | $0 | $0.40 | **$1.17** |
-| Cost per plan (electricity) | ~$0.00 | ~$0.02 | — | — |
-| Latency per plan | 28s | 12 min | 108s | 6–10 min |
-
-> Craft and Groundedness are scored over the taxonomy's *evaluated* file set (engine, routes, synthesizer, schemas, SDK). A file that's missing from the plan, or shipped as a `raise NotImplementedError` stub, scores 0 for that file — an empty promise isn't "well-crafted code." When a plan ships multiple variants of the same evaluated file (e.g. a `core/engine.py` protocol + an `engines/fitz_krag/engine.py` implementation, both matching the taxonomy's `engine.py` key), the scorer takes MIN across the matches — the worst implementation dominates so a clean sibling can't mask a fabricated one.
-
-<br>
-
-The story:
-
-**Raw gemma is the worst on every dimension.** Half the required files missing or stubbed; the rest of the scores follow — stubs can't carry Craft, missing files can't be grounded, no roadmap means no Actionability, bottom-tier architecture.
-
-**Hot Claude Code is the strongest model on architectural correctness** (98.8, the top score). Sonnet with tools enabled writes architecturally crisp plans — it reads real file signatures and chooses patterns that fit.
-
-**But Hot Claude Code still loses to fitz-forge on Coverage, Craft, Groundedness, and Actionability.** Not because Sonnet is a worse coder — because the harness enforces invariants a free-form agent trajectory doesn't:
-
-- **Coverage** (90 vs 100): 1/5 Hot CC plans drops a required file. fitz-forge's coverage-review stage catches this and regenerates the missing artifact.
-- **Craft** (82.7 vs 100): Hot CC's per-file code quality on evaluated files is noticeably better than Cold CC (55 → 82.7) because the agent reads real signatures instead of hallucinating them — but it still has residual fabrications and fixtures the scorer flags. fitz-forge's grounding + repair loop closes these.
-- **Groundedness** (33.3 vs 100): even with full codebase access, Sonnet produces references that don't resolve in the evaluated-file set (imports that won't exist, sibling classes it assumes are defined). The harness's closure check expands missing symbols into sibling artifacts or repairs the reference.
-- **Actionability** (0 vs 100): neither Claude Code mode emits a structured roadmap with verification commands. That's a schema, not a capability — fitz-forge's synthesis stage produces phases every time because that's what its schema demands.
-
-**Cost gap:** fitz-forge runs at zero API cost, ~$0.02 of electricity. Hot Claude Code costs $1.17/plan. The $0 number is the whole point — when subsidies normalize, this is the difference between free planning on hardware you own and paying every time.
-
-<br>
-
-> [!NOTE]
-> Variance on a single Hot CC run is significant (Grounded 0–66.7 across 5 plans, Coverage 50–100). We report 5-plan means. One run is a data point, not a headline. Sonnet pricing as of 2026-04-19 ($3/MTok input, $15/MTok output, $3.75/MTok cache write, $0.30/MTok cache reads). Local electricity cost assumes 575W draw for 12 min at US residential rates.
-
-<br>
-
-Reproduction:
-```bash
-# Arm 1: raw gemma (no harness)
-python -m benchmarks.no_harness \
-  --source-dir ../fitz-sage \
-  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
-  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
-  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --runs 5 --score-v2
-
-# Arm 2: gemma + fitz-forge harness
-python -m benchmarks.plan_factory decomposed \
-  --runs 5 --source-dir ../fitz-sage \
-  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
-  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
-  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --score-v2
-
-# Arm 3: cold Claude Code (Sonnet, parallel one-shots, tools disabled)
-python -m benchmarks.claude_code_benchmark \
-  --source-dir ../fitz-sage \
-  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
-  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
-  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --runs 5 --mode cold --score-v2
-
-# Arm 4: hot Claude Code (Sonnet, tools enabled, cwd=source repo)
-python -m benchmarks.claude_code_benchmark \
-  --source-dir ../fitz-sage \
-  --context-file benchmarks/challenges/streaming_implementation/ideal_context.json \
-  --query "$(cat benchmarks/challenges/streaming_implementation/user_prompt.txt)" \
-  --taxonomy benchmarks/challenges/streaming_implementation/taxonomy.json \
-  --runs 5 --mode agentic --score-v2
-
-# End-to-end feature cost (Arm A vs Arm B, Claude Code implementing)
-python -m benchmarks.end_to_end_cost \
-  --source-git-root ../fitz-sage --base-ref main \
-  --task-file benchmarks/challenges/streaming_implementation/user_prompt.txt \
-  --plan-json benchmarks/challenges/streaming_implementation/results/<run>/plan_01.json
-```
-
----
-
-### How It Works
-
-A 10-stage pipeline that decomposes architectural planning into small, focused LLM calls interleaved with deterministic 
-AST work. Retrieval + implementation check feed a decision-based reasoning core (decompose → resolve → synthesize), then 
-artifacts are generated, closure-checked, and grounded against the real codebase before the plan is written. **A senior-
-engineer review layer wraps the whole pipeline** — six narrow critique passes, each scoped to one stage's output, that 
-regenerate the affected stage when a review flags issues.
-
-<br>
-
-```
+```text
      USER PROMPT
           │
           ▼
-┌─── 🧑‍💼 SENIOR ENGINEER REVIEW LAYER ──────────────────────────────┐
+┌─── 🧑‍💼 SENIOR ENGINEER REVIEW LAYER ───────────────────────────────┐
 │   detect → regenerate → re-review → keep whichever is better      │
 │                                                                   │
 │  ┌─────────────────────────────────────────────────────────┐      │
@@ -317,7 +93,7 @@ regenerate the affected stage when a review flags issues.
 │  │   2. Implementation Check          [1 LLM]              │      │
 │  │   3. Call Graph Extraction         [0 · AST]            │      │
 │  │   4. Decision Decomposition        [2-4 LLM]   ◂───────────────── decomposition review
-│  │   5. Decision Resolution           [10-15]              │      │
+│  │   5. Decision Resolution           [10-15 LLM]          │      │
 │  │   6. Synthesis                     [~18 LLM]            │      │
 │  │      ├─ context assumptions                    ◂───────────────── assumption review
 │  │      ├─ architecture pick                      ◂───────────────── architecture review
@@ -337,11 +113,11 @@ regenerate the affected stage when a review flags issues.
           ▼
     ~/.fitz-forge/plans/plan_<id>.md
 
-Total: ~45-70 LLM calls · ~8-12 min on RTX 5090
+Total: ~45-70 LLM calls · ~8-12 min on RTX 5090 for the current Python-heavy benchmark path.
 ```
 
 | # | Stage | Docs |
-|---|-------|------|
+|---|---|---|
 | 1 | Agent Context Gathering | [01_agent-context-gathering.md](docs/features/pipeline/01_agent-context-gathering.md) |
 | 2 | Implementation Check | [02_implementation-check.md](docs/features/pipeline/02_implementation-check.md) |
 | 3 | Call Graph Extraction | [03_call-graph-extraction.md](docs/features/pipeline/03_call-graph-extraction.md) |
@@ -351,280 +127,217 @@ Total: ~45-70 LLM calls · ~8-12 min on RTX 5090
 | 7 | Artifact Generation | [07_artifact-generation.md](docs/features/pipeline/07_artifact-generation.md) |
 | 8 | Grounding Validation | [08_grounding-validation.md](docs/features/pipeline/08_grounding-validation.md) |
 | 9 | Coherence Check | [09_coherence-check.md](docs/features/pipeline/09_coherence-check.md) |
-| 10 | Render + Write | — |
-| ★ | **Senior Engineer Reviews** (wraps every stage) | **[senior-engineer-reviews.md](docs/features/infrastructure/senior-engineer-reviews.md)** |
+| 10 | Render + Write | - |
+| * | Senior Engineer Reviews | [senior-engineer-reviews.md](docs/features/infrastructure/senior-engineer-reviews.md) |
 
-<br>
+The pipeline decomposes a problem that would overwhelm a small model into calls small enough to review, validate, and retry. Deterministic AST work carries the structural load so LLM calls can focus on interpretation and design.
 
-> [!NOTE]
-> The pipeline decomposes a problem that would overwhelm a small model into many small LLM calls it can handle reliably. 
-> Each per-field JSON extraction is under 2000 chars — small enough for a 3B quantized model to produce valid output. 
-> Deterministic AST work (call graph, grounding check) carries the structural load so LLMs only do what LLMs are good at.
+The senior-engineer review layer is the quality multiplier. A local model writing a plan unsupervised tends to pick plausible wrong patterns, under-specify interfaces, and build on assumptions the codebase contradicts. Each review is one narrow critique that hands feedback back to the stage for regeneration. Reviews are fail-safe: they can improve the plan or leave it unchanged.
 
-> [!TIP]
-> **The senior-engineer review layer is the quality multiplier.** A local model writing a plan is a junior engineer left 
-> unsupervised — it picks plausible-sounding wrong patterns, under-specifies interfaces, and builds on assumptions the 
-> codebase contradicts. Each review is one narrow LLM critique ("what would a senior say about this stage's output?") 
-> that hands its feedback back to the stage for regeneration. Reviews are strictly additive: they can only improve the 
-> plan or leave it unchanged. See **[Senior Engineer Reviews](docs/features/infrastructure/senior-engineer-reviews.md)** 
-> for the full design.
+Full pipeline documentation lives in [docs/features/](docs/features/).
 
-Full pipeline docs: **[docs/features/](docs/features/)** — detailed docs covering every stage and infrastructure component.
+## Architecture
 
----
-
-<details>
-
-<summary><strong>📦 Quick Start</strong></summary>
-
-<br>
-
-```bash
-# Install
-pip install fitz-forge
-
-# Queue a job
-fitz plan "Build a plugin system for data transformations"
-
-# Start the background worker
-fitz run
-
-# Check on it
-fitz status 1
-
-# Read the plan
-fitz get 1
+```text
+CLI (typer)   -> tools/ -> SQLiteJobStore <- BackgroundWorker -> DecomposedPipeline
+MCP (fastmcp) -> tools/ -> SQLiteJobStore                              |
+                                                                       v
+                                                                 LLM Client
+                                                        Ollama / LM Studio / llama.cpp
 ```
 
-**Optional extras:**
-```bash
-pip install "fitz-forge[api-review]"    # Anthropic API review pass
-pip install "fitz-forge[lm-studio]"    # LM Studio provider (openai SDK)
-pip install "fitz-forge[dev]"          # pytest, build tools
-```
+Main modules:
 
-**Prerequisites:**
+| Module | Role |
+|---|---|
+| `fitz_forge/cli.py` | Typer CLI |
+| `fitz_forge/server.py` | FastMCP server |
+| `fitz_forge/tools/` | Shared service layer for CLI and MCP |
+| `fitz_forge/models/` | SQLite job store and job state models |
+| `fitz_forge/background/` | Worker lifecycle and crash recovery |
+| `fitz_forge/llm/` | Ollama, LM Studio, llama.cpp clients |
+| `fitz_forge/planning/` | Planning pipeline, reviews, artifacts, validation |
+| `benchmarks/` | Internal evaluation harnesses and challenge tasks |
+
+See [docs/features/reference/ARCHITECTURE.md](docs/features/reference/ARCHITECTURE.md) for the full architecture guide.
+
+## Evaluation
+
+The core evaluation question is: **how do you score a planning artifact when there is no single correct patch yet?**
+
+`fitz-forge` answers this with a task-specific golden-plan taxonomy. For each benchmark challenge, a frontier model such as Claude Sonnet is used to inspect the target repository and draft the ideal planning artifact: the right architecture, the files that matter, the expected implementation shape, and the common wrong approaches. That draft is then reviewed into a taxonomy before any local-model output is scored.
+
+The taxonomy defines what a good plan must understand:
+
+- which files are required, recommended, or optional,
+- what the ideal architecture looks like,
+- which degraded architecture patterns are acceptable, partial, poor, or failing,
+- what a correct implementation artifact should contain for each critical file,
+- which failure modes should be penalized, such as stubs, fabricated APIs, missing streaming behavior, wrong request fields, or ungrounded imports.
+
+That taxonomy becomes the benchmark's answer key. A generated plan is not graded by vibes; it is classified against explicit tiers.
+
+Example shape for a streaming feature:
+
+| Tier | Meaning | Score |
+|---|---|---:|
+| `A1` | Full existing pipeline preserved; final generation streams tokens correctly | 100 |
+| `A2` | Streaming works but bypasses part of the synthesis abstraction | 75 |
+| `A3` | Calls a provider stream directly and skips retrieval/context logic | 30 |
+| `A4` | Calls the blocking answer path and splits the finished text | 10 |
+| `A5` | Gives up, stubs, or misses the feature | 0 |
+
+The same idea applies per file. For example, `engine.py` might have tiers for "full pipeline with `yield` and correct return type," "partial pipeline," "direct provider shortcut," "blocking implementation," and "absent/stubbed." Routes, schemas, SDK files, and services each get their own task-specific tiers when they matter.
+
+The scorer then combines two layers:
+
+- **Deterministic checks** verify things a program can know exactly: required-file coverage, parseability, `NotImplementedError`, `sys.stdout`, missing `yield`, fabricated methods/classes/fields, unresolved imports, cross-artifact method mismatches, and roadmap verification commands.
+- **Taxonomy classification** maps the plan's architecture and critical artifacts onto the golden taxonomy entries. A model can help classify, but the scores come from the prewritten taxonomy, not from an open-ended opinion.
+
+This makes the benchmark useful for research: a raw local model and the same model inside the harness can be compared against the same golden taxonomy. The question becomes measurable: did the harness move the plan toward the ideal architecture, required file coverage, grounded artifacts, and executable roadmap?
+
+Plans generated during normal use do not carry a score. The scorer is an offline evaluation harness for measuring the planning pipeline. See [docs/features/reference/SCORER-V2-SPEC.md](docs/features/reference/SCORER-V2-SPEC.md) for the detailed scoring design, [benchmarks/challenges/streaming_implementation/taxonomy.json](benchmarks/challenges/streaming_implementation/taxonomy.json) for a concrete taxonomy, and [docs/roadmap/golden-plan-authoring-harness.md](docs/roadmap/golden-plan-authoring-harness.md) for the planned Sonnet-assisted authoring tool.
+
+## Quick Start
+
+Prerequisites:
+
 - Python 3.10+
-- [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp) with a loaded model
+- one local LLM backend: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp)
 - [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval
 
-</details>
-
----
-
-<details>
-
-<summary><strong>📦 CLI Reference</strong></summary>
-
-<br>
+Install:
 
 ```bash
-fitz plan "description"   # Queue a planning job
-fitz run                  # Start background worker (Ctrl+C to stop)
-fitz list                 # Show all jobs
-fitz status <id>          # Check progress
-fitz get <id>             # Print completed plan as markdown
-fitz retry <id>           # Re-queue failed/interrupted job
-fitz confirm <id>         # Approve optional API review
-fitz cancel <id>          # Skip API review, finalize plan
-fitz serve                # Start MCP server
+pip install fitz-forge
 ```
 
-**Job lifecycle:**
+Optional extras:
+
+```bash
+pip install "fitz-forge[api-review]"  # Anthropic API review pass
+pip install "fitz-forge[dev]"         # pytest, ruff, build tools
 ```
+
+First-run configuration:
+
+```bash
+fitz-forge prep
+```
+
+Create and run a plan:
+
+```bash
+fitz-forge plan "Build a plugin system for data transformations"
+```
+
+Queue without running:
+
+```bash
+fitz-forge plan --detach "Build a plugin system for data transformations"
+fitz-forge run
+fitz-forge list
+fitz-forge get <id>
+```
+
+Development install:
+
+```bash
+git clone https://github.com/yafitzdev/fitz-forge.git
+cd fitz-forge
+pip install -e ".[dev]"
+```
+
+## Common CLI Commands
+
+```bash
+fitz-forge prep                 # Configure local model provider
+fitz-forge plan "description"   # Create and run a planning job inline
+fitz-forge plan --detach "..."  # Queue only
+fitz-forge run                  # Process detached queued jobs
+fitz-forge list                 # Show jobs
+fitz-forge status <id>          # Check progress
+fitz-forge get <id>             # Print completed plan
+fitz-forge resume <id>          # Resume failed/interrupted job with live UI
+fitz-forge retry <id>           # Re-queue failed/interrupted job
+fitz-forge confirm <id>         # Approve optional API review
+fitz-forge cancel <id>          # Skip optional API review
+fitz-forge serve                # Start MCP server
+```
+
+Job lifecycle:
+
+```text
 QUEUED -> RUNNING -> COMPLETE
                   -> AWAITING_REVIEW -> QUEUED (confirm) / COMPLETE (cancel)
                   -> FAILED / INTERRUPTED (both retryable)
 ```
 
-</details>
+## MCP Usage
 
----
-
-<details>
-
-<summary><strong>📦 MCP Server</strong></summary>
-
-<br>
-
-Plug into Claude Code or Claude Desktop:
+For Claude Desktop, Claude Code, or another MCP-capable client:
 
 ```json
 {
   "mcpServers": {
     "fitz-forge": {
-      "command": "fitz",
+      "command": "fitz-forge",
       "args": ["serve"]
     }
   }
 }
 ```
 
-**MCP Tools:**
+Exposed MCP tools:
 
 | Tool | Description |
-|------|-------------|
-| `create_plan` | Queue a new planning job |
+|---|---|
+| `create_plan` | Queue a planning job |
 | `check_status` | Check job progress |
-| `get_plan` | Retrieve completed plan |
-| `list_plans` | List all planning jobs |
-| `retry_job` | Retry a failed job |
-| `confirm_review` | Approve API review after seeing cost |
-| `cancel_review` | Skip API review, finalize plan |
+| `get_plan` | Retrieve a completed plan |
+| `list_plans` | List planning jobs |
+| `retry_job` | Retry a failed/interrupted job |
+| `confirm_review` | Approve optional API review |
+| `cancel_review` | Skip optional API review |
 
-</details>
+## Configuration
 
----
+`fitz-forge prep` creates a local config file and job database. The config selects the LLM backend, model, context length, source directory behavior, output directory, and optional Anthropic review settings.
 
-<details>
-
-<summary><strong>📦 Configuration</strong></summary>
-
-<br>
-
-Auto-created on first run:
-
-| Platform | Path |
-|----------|------|
+| Platform | Config path |
+|---|---|
 | Windows | `%LOCALAPPDATA%\fitz-forge\fitz-forge\config.yaml` |
 | macOS | `~/Library/Application Support/fitz-forge/config.yaml` |
 | Linux | `~/.config/fitz-forge/config.yaml` |
 
-Database (`jobs.db`) lives in the same directory.
+Supported local providers are Ollama, LM Studio, and llama.cpp. See [docs/features/reference/CONFIG.md](docs/features/reference/CONFIG.md) for every field.
 
-```yaml
-# LLM provider: "ollama", "lm_studio", or "llama_cpp"
-provider: lm_studio
+## Limitations
 
-lm_studio:
-  base_url: http://localhost:1234/v1
-  model: qwen3-coder-30b-a3b-instruct    # single model for retrieval + reasoning
-  timeout: 600
-  context_length: 65536                    # split reasoning auto-enables below 32768
+- Not a general autonomous coding agent.
+- Not a guaranteed patch generator.
+- Not a replacement for Claude Code, Codex, or human review.
+- Most mature on Python codebases; TypeScript-aware infrastructure exists but should be treated as experimental.
+- Benchmark scores are offline research signals, not correctness guarantees for normal user plans.
 
-ollama:
-  base_url: http://localhost:11434
-  model: qwen2.5-coder-next:80b-instruct
-  fallback_model: qwen2.5-coder-next:32b-instruct  # OOM fallback (null to disable)
-  timeout: 300
-  memory_threshold: 80.0  # RAM % threshold to abort
-
-llama_cpp:
-  server_path: /path/to/llama-server
-  models_dir: /path/to/models
-  port: 8012
-  model:
-    path: model.gguf
-    context_size: 65536
-    gpu_layers: -1
-    flash_attention: true
-    cache_type_k: q8_0
-    cache_type_v: q8_0
-
-agent:
-  enabled: true
-  max_file_bytes: 50000
-  max_seed_files: 50    # files available via inspect_files/read_file tools
-  source_dir: null      # null = cwd at runtime
-
-confidence:
-  default_threshold: 0.7
-  security_threshold: 0.9
-
-anthropic:
-  api_key: null  # null = API review disabled
-  model: claude-sonnet-4-5-20250929
-
-output:
-  plans_dir: .fitz-forge/plans
-  verbosity: normal
-```
-
-</details>
-
----
-
-<details>
-
-<summary><strong>📦 Architecture</strong> → <a href="docs/ARCHITECTURE.md">Full Architecture Guide</a></summary>
-
-<br>
-
-```
-CLI (typer)   --> tools/ --> SQLiteJobStore <-- BackgroundWorker --> PlanningPipeline
-MCP (fastmcp) --> tools/ --> SQLiteJobStore
-```
-
-```
-fitz_forge/
-├── cli.py                     # Typer CLI (9 commands)
-├── server.py                  # FastMCP server + lifecycle
-├── __main__.py                # python -m fitz_forge (MCP stdio)
-├── tools/                     # Service layer
-├── models/                    # JobStore ABC, SQLiteJobStore, JobRecord
-├── background/                # BackgroundWorker, signal handling
-├── llm/                       # LLM clients (Ollama, LM Studio, llama.cpp), retry
-├── planning/
-│   ├── pipeline/stages/       # 3 stages (split or combined) + orchestrator + checkpoints
-│   ├── agent/                 # Code retrieval bridge to fitz-sage
-│   ├── prompts/               # Externalized .txt prompt templates
-│   └── confidence/            # Per-section confidence scoring
-├── api_review/                # Anthropic review client + cost calculator
-├── config/                    # Pydantic schema + YAML loader
-└── validation/                # Input sanitization
-```
-
-</details>
-
----
-
-<details>
-
-<summary><strong>📦 Development</strong></summary>
-
-<br>
+## Development
 
 ```bash
-git clone https://github.com/yafitzdev/fitz-forge.git
-cd fitz-forge
-pip install -e ".[dev]"  # editable install for development
-pytest  # 970+ tests
-
-# Lint
+pytest
 ruff check fitz_forge/
 ruff format --check fitz_forge/ tests/
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide and [examples/](examples/) for usage examples.
+This is alpha research code. Treat CI failures as blockers before publishing a release or using benchmark numbers as project claims.
 
-**Benchmark factory** for A/B testing pipeline changes:
-```bash
-# Retrieval benchmarks (~12s/run)
-python -m benchmarks.plan_factory retrieval --runs 10 --source-dir ../your-project
+## Links
 
-# Reasoning benchmarks with fixed retrieval
-python -m benchmarks.plan_factory reasoning --runs 5 --source-dir ../your-project \
-  --context-file benchmarks/ideal_context.json --split --max-seeds 5
-```
+- [Architecture](docs/features/reference/ARCHITECTURE.md)
+- [Feature Docs](docs/features/)
+- [Configuration Reference](docs/features/reference/CONFIG.md)
+- [Troubleshooting](docs/features/reference/TROUBLESHOOTING.md)
+- [Contributing](CONTRIBUTING.md)
 
-</details>
-
----
-
-### License
+## License
 
 MIT
-
----
-
-### Links
-
-- [GitHub](https://github.com/yafitzdev/fitz-forge)
-- [PyPI](https://pypi.org/project/fitz-forge/)
-- [Changelog](CHANGELOG.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Feature Docs](docs/features/) — 17 detailed docs covering every pipeline stage and infrastructure component
-- [Configuration Reference](docs/CONFIG.md) — every config field explained
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — GPU issues, Windows quirks, pipeline debugging
-- [Contributing](CONTRIBUTING.md)
-- [Examples](examples/)

@@ -1,6 +1,6 @@
 # Architecture
 
-fitz-forge is a local-first AI architectural planning system. Two interfaces (CLI + MCP) submit jobs to a shared service layer backed by a SQLite queue. A background worker picks jobs and runs them through the planning pipeline powered by a local LLM.
+fitz-forge is an experimental local-first coding-plan harness. It studies how much planning quality can be moved from model scale into retrieval, decomposition, structured schemas, deterministic validation, and review/regeneration loops. Two interfaces (CLI + MCP) submit jobs to a shared service layer backed by a SQLite queue. A background worker picks jobs and runs them through the planning pipeline powered by a local LLM.
 
 ## System Diagram
 
@@ -12,7 +12,7 @@ MCP (fastmcp) ──→ tools/ ──→ SQLiteJobStore                         
                                                               (Ollama / LM Studio / llama.cpp)
 ```
 
-For the end-to-end pipeline flow see the [README diagram](../README.md#how-it-works) and the per-stage docs under [docs/features/pipeline/](features/pipeline/).
+For the end-to-end pipeline flow see the [README diagram](../../../README.md#how-it-works) and the per-stage docs under [docs/features/pipeline/](../pipeline/).
 
 ## Layer Dependencies
 
@@ -69,7 +69,7 @@ All providers expose `generate()`, `generate_with_tools()`, and `health_check()`
 
 ### `planning/` — Pipeline Engine
 
-The core of fitz-forge. See [docs/features/](features/) for per-stage breakdowns.
+The core of fitz-forge. See [docs/features/](../README.md) for per-stage breakdowns.
 
 - `pipeline/orchestrator.py` — `DecomposedPipeline` (production) and `PlanningPipeline` (helper methods for implementation/coherence checks)
 - `pipeline/stages/` — `DecisionDecompositionStage`, `DecisionResolutionStage`, `SynthesisStage`
