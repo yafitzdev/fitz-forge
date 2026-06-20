@@ -366,11 +366,19 @@ async def test_wizard_base_url_only_prompts_for_model(tmp_path):
 class TestCliIntegration:
     def test_prep_help_shows_command(self):
         runner = CliRunner()
-        result = runner.invoke(app, ["prep", "--help"])
+        result = runner.invoke(
+            app,
+            ["prep", "--help"],
+            color=False,
+            env={"NO_COLOR": "1", "COLUMNS": "160"},
+        )
         assert result.exit_code == 0
-        assert "first-run setup wizard" in result.stdout.lower()
-        assert "--base-url" in result.stdout
-        assert "--model" in result.stdout
+        help_text = result.stdout
+        assert "first-run setup wizard" in help_text.lower()
+        assert "--base-url" in help_text
+        assert "--model" in help_text
+        assert "API base URL" in help_text
+        assert "Model identifier" in help_text
 
 
 # ---------------------------------------------------------------------------
