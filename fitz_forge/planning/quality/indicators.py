@@ -169,9 +169,7 @@ def _compute_craft(plan_data: dict, structural_index: str, source_dir: str) -> t
         if isinstance(a, dict)
     ]
     try:
-        ac_checks = check_all_artifacts_v2(
-            artifact_dicts, structural_index, True, source_dir
-        )
+        ac_checks = check_all_artifacts_v2(artifact_dicts, structural_index, True, source_dir)
         cc_checks = check_cross_artifact_consistency(
             artifact_dicts, ac_checks, structural_index, source_dir
         )
@@ -183,7 +181,7 @@ def _compute_craft(plan_data: dict, structural_index: str, source_dir: str) -> t
         weights = [max(10, a.content_lines) for a in ac_checks]
         total_weight = sum(weights)
         artifact_mean = (
-            sum(a.score * w for a, w in zip(ac_checks, weights)) / total_weight
+            sum(a.score * w for a, w in zip(ac_checks, weights, strict=True)) / total_weight
         )
     else:
         artifact_mean = 0.0
@@ -228,9 +226,7 @@ def _compute_groundedness(
     try:
         from fitz_forge.planning.validation.grounding.check import check_all_artifacts
 
-        violations = check_all_artifacts(
-            artifact_dicts, structural_index, source_dir=source_dir
-        )
+        violations = check_all_artifacts(artifact_dicts, structural_index, source_dir=source_dir)
     except Exception as e:
         logger.warning(f"Groundedness computation failed ({e}); defaulting to 100")
         return 100.0, {"note": f"Error: {e}"}
@@ -238,10 +234,7 @@ def _compute_groundedness(
     dirty = {v.artifact for v in violations}
     clean = len(artifact_dicts) - len(dirty)
     score = round(clean / len(artifact_dicts) * 100, 1)
-    sample = [
-        {"artifact": v.artifact, "symbol": v.symbol, "kind": v.kind}
-        for v in violations[:5]
-    ]
+    sample = [{"artifact": v.artifact, "symbol": v.symbol, "kind": v.kind} for v in violations[:5]]
     return score, {
         "artifacts": len(artifact_dicts),
         "violations": len(violations),
@@ -288,7 +281,9 @@ def compute_quality_indicators(
     pass; if both are empty, groundedness falls back to "no anchor to
     check against" and reports 100 with a note.
     """
-    coverage, cov_d = _compute_coverage(plan_data, plan_data.get("design", {}).get("artifacts") or [])
+    coverage, cov_d = _compute_coverage(
+        plan_data, plan_data.get("design", {}).get("artifacts") or []
+    )
     craft, craft_d = _compute_craft(plan_data, structural_index, source_dir)
     groundedness, ground_d = _compute_groundedness(plan_data, structural_index, source_dir)
     actionability, act_d = _compute_actionability(plan_data)

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _find_class(src: str, class_name: str) -> "Node | None":
+def _find_class(src: str, class_name: str) -> Node | None:
     """Return the class_definition node with ``.name == class_name``, or None."""
     tree = parse_python(src)
     if tree is None:
@@ -45,7 +45,7 @@ def _find_class(src: str, class_name: str) -> "Node | None":
     return None
 
 
-def _format_method_sig(method: "Node") -> str:
+def _format_method_sig(method: Node) -> str:
     """Signature line for a function_definition."""
     params: list[str] = []
     params_node = next((c for c in method.children if c.type == "parameters"), None)
@@ -196,9 +196,7 @@ def _lookup_class(src: str, class_name: str) -> str | None:
                             idents2 = [c for c in callee.children if c.type == "identifier"]
                             if idents2:
                                 rhs = idents2[-1].text.decode("utf-8")
-                attrs.append(
-                    f"  self.{attr_name} = {rhs}(...)" if rhs else f"  self.{attr_name}"
-                )
+                attrs.append(f"  self.{attr_name} = {rhs}(...)" if rhs else f"  self.{attr_name}")
             stack.extend(n.children)
     if attrs:
         parts.append("Attributes:")

@@ -219,9 +219,7 @@ async def test_prompt_carries_all_context():
         architecture={
             "recommended": "REC-TOKEN",
             "reasoning": "REASONING-TOKEN",
-            "approaches": [
-                {"name": "APPROACH-TOKEN", "description": "..."}
-            ],
+            "approaches": [{"name": "APPROACH-TOKEN", "description": "..."}],
             "key_tradeoffs": "TRADEOFFS-TOKEN",
         },
         client=client,

@@ -270,9 +270,7 @@ async def test_prompt_carries_all_design_sections():
                     "context": "c",
                 }
             ],
-            artifacts=[
-                {"filename": "ARTIFACT-TOKEN", "content": "c", "purpose": "ART-PURPOSE"}
-            ],
+            artifacts=[{"filename": "ARTIFACT-TOKEN", "content": "c", "purpose": "ART-PURPOSE"}],
             integration_points=["INTEGRATION-TOKEN"],
         ),
         client=client,

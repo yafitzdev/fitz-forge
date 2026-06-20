@@ -190,9 +190,7 @@ class PlanningPipeline:
         # synthesis) can read without a new param on every stage signature.
         if rubric_hints:
             prior_outputs["_rubric_hints"] = rubric_hints
-            logger.info(
-                f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria"
-            )
+            logger.info(f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria")
 
         # Inject pre-gathered context if provided (skips agent gathering)
         if pre_gathered_context is not None and "_agent_context" not in prior_outputs:
@@ -744,9 +742,7 @@ class DecomposedPipeline:
         # change. See PlanningPipeline.execute for the parallel path.
         if rubric_hints:
             prior_outputs["_rubric_hints"] = rubric_hints
-            logger.info(
-                f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria"
-            )
+            logger.info(f"rubric_hints: injecting {len(rubric_hints)} chars of quality criteria")
 
         # Pre-gathered context injection
         if pre_gathered_context is not None and "_agent_context" not in prior_outputs:
@@ -903,6 +899,7 @@ class DecomposedPipeline:
             # current job_id into the event if it's a dataclass with a
             # `job_id` attribute.
             if event_emitter is not None:
+
                 async def _stage_event_cb(
                     event: Any,
                     _job_id=job_id,

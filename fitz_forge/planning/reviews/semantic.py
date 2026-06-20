@@ -83,7 +83,7 @@ def _build_user_prompt(
         "## Your Task\n\n"
         "For every place where the implementation contradicts the design "
         "intent, emit one issue. Examples of what to look for:\n\n"
-        "- The design says \"stream end-to-end\" but a method calls a blocking "
+        '- The design says "stream end-to-end" but a method calls a blocking '
         "sibling and yields the full result once.\n"
         "- Method named in one artifact does not exist (or has a different "
         "name) on the class it's called on in another artifact.\n"
@@ -93,19 +93,19 @@ def _build_user_prompt(
         "caller uses the blocking variant.\n\n"
         "Return JSON only. No prose. No code fences.\n\n"
         "{\n"
-        "  \"passed\": true | false,\n"
-        "  \"issues\": [\n"
+        '  "passed": true | false,\n'
+        '  "issues": [\n'
         "    {\n"
-        "      \"file\": \"<artifact filename>\",\n"
-        "      \"line\": <approximate line number, integer>,\n"
-        "      \"intent\": \"<what the design called for, in your own words>\",\n"
-        "      \"actual\": \"<what the code does>\",\n"
-        "      \"suggestion\": \"<concrete change needed to make code match intent>\"\n"
+        '      "file": "<artifact filename>",\n'
+        '      "line": <approximate line number, integer>,\n'
+        '      "intent": "<what the design called for, in your own words>",\n'
+        '      "actual": "<what the code does>",\n'
+        '      "suggestion": "<concrete change needed to make code match intent>"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
-        "If the code matches the design, return {\"passed\": true, "
-        "\"issues\": []}. Do not manufacture issues for code that is "
+        'If the code matches the design, return {"passed": true, '
+        '"issues": []}. Do not manufacture issues for code that is '
         "already correct — that just burns regeneration budget."
     )
 
@@ -191,9 +191,7 @@ async def review_artifacts(
     try:
         parsed = extract_json(raw)
     except (ValueError, json.JSONDecodeError) as e:
-        logger.warning(
-            "semantic_review: could not parse response (%s); treating as passed", e
-        )
+        logger.warning("semantic_review: could not parse response (%s); treating as passed", e)
         return ReviewResult(scope="artifact", passed=True, raw_response=raw)
 
     if not isinstance(parsed, dict):

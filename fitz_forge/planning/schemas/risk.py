@@ -4,7 +4,6 @@
 from pydantic import ConfigDict, Field, model_validator
 
 from fitz_forge.planning.schemas._base import LLMOutputModel
-
 from fitz_forge.planning.schemas.roadmap import PhaseRef
 
 

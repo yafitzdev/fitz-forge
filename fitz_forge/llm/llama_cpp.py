@@ -122,17 +122,16 @@ class LlamaCppClient(OpenAIApiClient):
         self,
         server_path: str,
         models_dir: str,
-        model: "LlamaCppModelConfig",
+        model: LlamaCppModelConfig,
         port: int = 8012,
         timeout: int = 300,
         startup_timeout: int = 120,
-        gpu_guard: "GPUTemperatureGuard | None" = None,
+        gpu_guard: GPUTemperatureGuard | None = None,
         disable_thinking: bool = True,
     ):
         if AsyncOpenAI is None:
             raise ImportError(
-                "openai package required for llama.cpp support. "
-                "Install with: pip install openai"
+                "openai package required for llama.cpp support. Install with: pip install openai"
             )
 
         super().__init__(
@@ -537,7 +536,9 @@ class LlamaCppClient(OpenAIApiClient):
         if self._process is None:
             await self.start()
         await self._ensure_alive()
-        return await super().generate_with_tools(messages, tools, model=model, tool_choice=tool_choice)
+        return await super().generate_with_tools(
+            messages, tools, model=model, tool_choice=tool_choice
+        )
 
     @property
     def last_tok_s(self) -> float:

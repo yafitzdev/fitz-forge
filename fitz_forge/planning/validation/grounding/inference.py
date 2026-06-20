@@ -30,7 +30,8 @@ Tree-sitter node shapes used here (Python grammar):
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Iterator
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -72,14 +73,14 @@ _RETURNS_SECTION_RE = re.compile(
 )
 
 
-def _first_identifier_text(node: "Node") -> str | None:
+def _first_identifier_text(node: Node) -> str | None:
     for c in node.children:
         if c.type == "identifier":
             return c.text.decode("utf-8")
     return None
 
 
-def _rightmost_attribute_name(node: "Node") -> str | None:
+def _rightmost_attribute_name(node: Node) -> str | None:
     """For an ``attribute`` node ``a.b.c``, return ``c``."""
     last: str | None = None
     for c in node.children:
@@ -88,7 +89,7 @@ def _rightmost_attribute_name(node: "Node") -> str | None:
     return last
 
 
-def extract_type_name(node: "Node | None") -> str | None:
+def extract_type_name(node: Node | None) -> str | None:
     """Tree-sitter port of ``inference.extract_type_name``.
 
     Matches the ast-backed function's semantics exactly:
@@ -118,7 +119,7 @@ def extract_type_name(node: "Node | None") -> str | None:
 
     if node.type == "generic_type":
         outer: str | None = None
-        params: "Node | None" = None
+        params: Node | None = None
         for c in node.children:
             if c.type == "identifier":
                 outer = c.text.decode("utf-8")
@@ -163,7 +164,7 @@ def _normalise_string_quotes(text: str) -> str:
     return _DOUBLE_QUOTED_RE.sub(r"'\1'", text)
 
 
-def unparse_annotation(node: "Node | None") -> str | None:
+def unparse_annotation(node: Node | None) -> str | None:
     """Tree-sitter port of ``inference.unparse_annotation``.
 
     Returns the textual source of the annotation node, or None. Equivalent
@@ -187,7 +188,7 @@ def unparse_annotation(node: "Node | None") -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _callable_of(call: "Node") -> "Node | None":
+def _callable_of(call: Node) -> Node | None:
     """Return the callee sub-node of a ``call`` node (the thing before ``(``)."""
     for c in call.children:
         if c.is_named and c.type != "argument_list":
@@ -195,7 +196,7 @@ def _callable_of(call: "Node") -> "Node | None":
     return None
 
 
-def class_name_of_expr(node: "Node | None") -> str | None:
+def class_name_of_expr(node: Node | None) -> str | None:
     """Tree-sitter port of ``inference.class_name_of_expr``.
 
     Only recognises ``call`` expressions whose callee looks like a class
@@ -238,16 +239,16 @@ def class_name_of_expr(node: "Node | None") -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _is_function_def(node: "Node") -> bool:
+def _is_function_def(node: Node) -> bool:
     return node.type == "function_definition"
 
 
-def _function_is_async(node: "Node") -> bool:
+def _function_is_async(node: Node) -> bool:
     """True if the ``function_definition`` has an ``async`` keyword child."""
     return any(c.type == "async" for c in node.children)
 
 
-def _function_body(node: "Node") -> "Node | None":
+def _function_body(node: Node) -> Node | None:
     """Return the ``block`` child of a ``function_definition`` (its body)."""
     for c in node.children:
         if c.type == "block":
@@ -255,7 +256,7 @@ def _function_body(node: "Node") -> "Node | None":
     return None
 
 
-def _iter_body_skipping_nested(func_def: "Node") -> Iterator["Node"]:
+def _iter_body_skipping_nested(func_def: Node) -> Iterator[Node]:
     """Yield every descendant of ``func_def``'s body.
 
     Matches the ast version's observable behaviour: the ``continue``
@@ -280,7 +281,7 @@ def _iter_body_skipping_nested(func_def: "Node") -> Iterator["Node"]:
 # ---------------------------------------------------------------------------
 
 
-def _infer_return_from_body(func_def: "Node") -> str | None:
+def _infer_return_from_body(func_def: Node) -> str | None:
     """Tree-sitter port of ``inference._infer_return_from_body``.
 
     Scan return statements in the function body (ignoring nested functions).
@@ -310,7 +311,7 @@ def _infer_return_from_body(func_def: "Node") -> str | None:
     return None
 
 
-def _infer_return_from_yields(func_def: "Node") -> str | None:
+def _infer_return_from_yields(func_def: Node) -> str | None:
     """Tree-sitter port of ``inference._infer_return_from_yields``.
 
     A function containing ``yield``/``yield from`` is an iterator;
@@ -322,7 +323,7 @@ def _infer_return_from_yields(func_def: "Node") -> str | None:
     return None
 
 
-def _extract_docstring(func_def: "Node") -> str | None:
+def _extract_docstring(func_def: Node) -> str | None:
     """Return the textual content of the function's docstring, or None.
 
     Mirrors ``ast.get_docstring``: the first statement in the body is an
@@ -354,9 +355,7 @@ def _extract_docstring(func_def: "Node") -> str | None:
     return "".join(parts)
 
 
-def _infer_return_from_docstring(
-    func_def: "Node", known_classes: set[str]
-) -> str | None:
+def _infer_return_from_docstring(func_def: Node, known_classes: set[str]) -> str | None:
     """Tree-sitter port of ``inference._infer_return_from_docstring``."""
     doc = _extract_docstring(func_def)
     if not doc:
@@ -370,7 +369,7 @@ def _infer_return_from_docstring(
     return None
 
 
-def _returns_annotation(func_def: "Node") -> "Node | None":
+def _returns_annotation(func_def: Node) -> Node | None:
     """Return the return-type annotation node of a function_definition, or None.
 
     In tree-sitter, the return type (``-> X``) appears as a ``type`` node
@@ -387,7 +386,7 @@ def _returns_annotation(func_def: "Node") -> "Node | None":
 
 
 def infer_return_type(
-    func_def: "Node",
+    func_def: Node,
     known_classes: set[str] | None = None,
 ) -> str | None:
     """Tree-sitter port of ``inference.infer_return_type``.
@@ -425,7 +424,7 @@ def infer_return_type(
 # ---------------------------------------------------------------------------
 
 
-def _class_body(class_def: "Node") -> "Node | None":
+def _class_body(class_def: Node) -> Node | None:
     for c in class_def.children:
         if c.type == "block":
             return c
@@ -433,8 +432,8 @@ def _class_body(class_def: "Node") -> "Node | None":
 
 
 def _annotated_assignment_parts(
-    assign: "Node",
-) -> tuple["Node | None", "Node | None", "Node | None"]:
+    assign: Node,
+) -> tuple[Node | None, Node | None, Node | None]:
     """Given an ``assignment`` node, return (target, type_annotation, value).
 
     Tree-sitter represents ``x: T = v`` as a single ``assignment`` with
@@ -465,7 +464,7 @@ def _annotated_assignment_parts(
     return target, type_ann, value
 
 
-def extract_class_fields(class_def: "Node") -> dict[str, str]:
+def extract_class_fields(class_def: Node) -> dict[str, str]:
     """Tree-sitter port of ``inference.extract_class_fields``.
 
     Returns ``{field_name: type_name}`` for top-level annotated attributes
@@ -503,7 +502,7 @@ def extract_class_fields(class_def: "Node") -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _attribute_self_target(node: "Node") -> str | None:
+def _attribute_self_target(node: Node) -> str | None:
     """If ``node`` is ``self.attr``, return ``attr``. Otherwise None."""
     if node.type != "attribute":
         return None
@@ -515,7 +514,7 @@ def _attribute_self_target(node: "Node") -> str | None:
     return idents[1].text.decode("utf-8")
 
 
-def _find_method(class_def: "Node", method_name: str) -> "Node | None":
+def _find_method(class_def: Node, method_name: str) -> Node | None:
     body = _class_body(class_def)
     if body is None:
         return None
@@ -529,7 +528,7 @@ def _find_method(class_def: "Node", method_name: str) -> "Node | None":
     return None
 
 
-def _init_param_types(init_def: "Node") -> dict[str, str]:
+def _init_param_types(init_def: Node) -> dict[str, str]:
     """Return {param_name: type_name} from an __init__'s typed_parameters."""
     out: dict[str, str] = {}
     for c in init_def.children:
@@ -550,7 +549,7 @@ def _init_param_types(init_def: "Node") -> dict[str, str]:
 
 
 def extract_init_self_attrs(
-    class_def: "Node",
+    class_def: Node,
     known_classes: set[str] | None = None,
 ) -> dict[str, str]:
     """Tree-sitter port of ``inference.extract_init_self_attrs``.
@@ -637,7 +636,7 @@ def extract_init_self_attrs(
 # ---------------------------------------------------------------------------
 
 
-def _function_name(func_def: "Node") -> str | None:
+def _function_name(func_def: Node) -> str | None:
     """Return the function name identifier text, or None."""
     for c in func_def.children:
         if c.type == "identifier":
@@ -645,14 +644,14 @@ def _function_name(func_def: "Node") -> str | None:
     return None
 
 
-def _class_name(class_def: "Node") -> str | None:
+def _class_name(class_def: Node) -> str | None:
     for c in class_def.children:
         if c.type == "identifier":
             return c.text.decode("utf-8")
     return None
 
 
-def _class_bases(class_def: "Node") -> list[str]:
+def _class_bases(class_def: Node) -> list[str]:
     """Return base class names from a ``class_definition``'s argument_list."""
     args = next((c for c in class_def.children if c.type == "argument_list"), None)
     if args is None:
@@ -680,7 +679,7 @@ def _class_bases(class_def: "Node") -> list[str]:
     return bases
 
 
-def _extract_param_names(func_def: "Node") -> list[str]:
+def _extract_param_names(func_def: Node) -> list[str]:
     """Replicate ast version's param collection: positional + kwonly flat,
     ``*vararg``/``**kwarg`` prefixed with ``*``/``**``.
     """
@@ -706,7 +705,7 @@ def _extract_param_names(func_def: "Node") -> list[str]:
     return out
 
 
-def _unwrap_decorated(node: "Node") -> "Node":
+def _unwrap_decorated(node: Node) -> Node:
     """Tree-sitter wraps ``@dec\ndef foo`` in a ``decorated_definition``.
 
     ast treats decorators as attributes of the FunctionDef/ClassDef, so
@@ -719,7 +718,7 @@ def _unwrap_decorated(node: "Node") -> "Node":
     return node
 
 
-def iter_all_classes(root: "Node") -> Iterator["Node"]:
+def iter_all_classes(root: Node) -> Iterator[Node]:
     """Yield every ``class_definition`` in the tree (nested included).
 
     Mirrors ``ast.walk(tree)`` filtered to ``ast.ClassDef`` — which also
@@ -743,7 +742,7 @@ def iter_all_classes(root: "Node") -> Iterator["Node"]:
         stack.extend(n.children)
 
 
-def iter_top_level_functions(root: "Node") -> Iterator["Node"]:
+def iter_top_level_functions(root: Node) -> Iterator[Node]:
     """Yield sync function_definition nodes at module top level (col_offset == 0).
 
     Unwraps ``decorated_definition`` wrappers. Skips ``async def`` — the
@@ -753,7 +752,7 @@ def iter_top_level_functions(root: "Node") -> Iterator["Node"]:
     change.
     """
     for c in root.children:
-        candidate: "Node | None" = None
+        candidate: Node | None = None
         if c.type == "function_definition" and c.start_point[1] == 0:
             candidate = c
         elif c.type == "decorated_definition" and c.start_point[1] == 0:
@@ -767,7 +766,7 @@ def iter_top_level_functions(root: "Node") -> Iterator["Node"]:
         yield candidate
 
 
-def iter_class_methods(class_def: "Node") -> Iterator["Node"]:
+def iter_class_methods(class_def: Node) -> Iterator[Node]:
     """Yield direct function_definition children of a class's body block.
 
     Unwraps ``decorated_definition`` so decorated methods aren't missed.
@@ -792,14 +791,14 @@ def iter_class_methods(class_def: "Node") -> Iterator["Node"]:
 _INIT_METHOD_NAMES: tuple[str, ...] = ("__init__", "_init_components", "setup", "_setup")
 
 
-def find_class_by_name(root: "Node", class_name: str) -> "Node | None":
+def find_class_by_name(root: Node, class_name: str) -> Node | None:
     """Return the first top-level class_definition matching ``class_name``.
 
     Iterates module-level children only (matches ``ast.iter_child_nodes(tree)``
     filtered to ClassDef). Unwraps ``decorated_definition`` wrappers.
     """
     for c in root.children:
-        cand: "Node | None" = None
+        cand: Node | None = None
         if c.type == "class_definition":
             cand = c
         elif c.type == "decorated_definition":
@@ -813,7 +812,7 @@ def find_class_by_name(root: "Node", class_name: str) -> "Node | None":
     return None
 
 
-def find_class_anywhere(root: "Node", class_name: str) -> "Node | None":
+def find_class_anywhere(root: Node, class_name: str) -> Node | None:
     """Return the first class_definition anywhere in ``root`` matching ``class_name``.
 
     Mirrors ``ast.walk(tree)`` filtered to ``ClassDef`` with a name check. Used
@@ -825,7 +824,7 @@ def find_class_anywhere(root: "Node", class_name: str) -> "Node | None":
     return None
 
 
-def extract_call_class_name(call_node: "Node") -> str | None:
+def extract_call_class_name(call_node: Node) -> str | None:
     """Return the rightmost identifier in a ``call`` node's callee.
 
     No casing filter — unlike ``class_name_of_expr`` which only accepts
@@ -852,9 +851,9 @@ def extract_call_class_name(call_node: "Node") -> str | None:
 
 
 def iter_init_self_assignments(
-    class_def: "Node",
+    class_def: Node,
     init_names: tuple[str, ...] = _INIT_METHOD_NAMES,
-) -> Iterator[tuple[str, "Node"]]:
+) -> Iterator[tuple[str, Node]]:
     """Yield ``(attr_name, rhs_value_node)`` for ``self._xxx = <expr>`` lines.
 
     Only inspects methods whose name is in ``init_names`` (default:
@@ -888,7 +887,7 @@ def iter_init_self_assignments(
 
 
 def format_method_signature(
-    method: "Node",
+    method: Node,
     *,
     skip_self: bool = True,
 ) -> str:
@@ -933,7 +932,7 @@ def format_method_signature(
     return sig
 
 
-def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
+def absorb_file_pass1(lookup, rel: str, root: Node) -> int:
     """Tree-sitter port of ``StructuralIndexLookup._absorb_file_pass1``.
 
     Takes the lookup instance so we don't have to duplicate the index
@@ -958,7 +957,7 @@ def absorb_file_pass1(lookup, rel: str, root: "Node") -> int:
     return added
 
 
-def absorb_file_pass2(lookup, rel: str, root: "Node", known_classes: set[str]) -> None:
+def absorb_file_pass2(lookup, rel: str, root: Node, known_classes: set[str]) -> None:
     """Tree-sitter port of ``StructuralIndexLookup._absorb_file_pass2``."""
     for func_node in iter_top_level_functions(root):
         name = _function_name(func_node)
@@ -973,7 +972,7 @@ def absorb_file_pass2(lookup, rel: str, root: "Node", known_classes: set[str]) -
                 break
 
 
-def absorb_class(lookup, rel: str, class_node: "Node") -> None:
+def absorb_class(lookup, rel: str, class_node: Node) -> None:
     """Tree-sitter port of ``StructuralIndexLookup._absorb_class``."""
     from .index import IndexedClass, IndexedMethod
 
@@ -1029,7 +1028,7 @@ def augment_from_artifacts(lookup, artifacts: list[dict]) -> int:
     """
     from .parser import _parse_or_none
 
-    parsed: list[tuple[str, "Node"]] = []
+    parsed: list[tuple[str, Node]] = []
     added = 0
     for artifact in artifacts or []:
         if not isinstance(artifact, dict):
@@ -1060,7 +1059,7 @@ def augment_from_source_dir(lookup, source_dir: str) -> int:
     if not root.is_dir():
         return 0
 
-    parsed: list[tuple[str, "Node"]] = []
+    parsed: list[tuple[str, Node]] = []
     added = 0
     for py_file in root.rglob("*.py"):
         rel = str(py_file.relative_to(root)).replace("\\", "/")

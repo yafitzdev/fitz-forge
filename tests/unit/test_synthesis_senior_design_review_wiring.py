@@ -516,9 +516,7 @@ async def test_regen_no_improvement_surfaces_findings(monkeypatch, stage):
 
 
 @pytest.mark.asyncio
-async def test_regen_partial_improvement_attaches_remaining_findings(
-    monkeypatch, stage
-):
+async def test_regen_partial_improvement_attaches_remaining_findings(monkeypatch, stage):
     original = {
         "components": [{"name": "C", "purpose": "p", "interfaces": []}],
         "data_model": {"E": ["id"]},
@@ -568,9 +566,7 @@ async def test_regen_partial_improvement_attaches_remaining_findings(
 
     async def fake_extract(client, reasoning, fields, schema, label, **kwargs):
         return {
-            "components": [
-                {"name": "C", "purpose": "p'", "interfaces": ["f(x)"]}
-            ],
+            "components": [{"name": "C", "purpose": "p'", "interfaces": ["f(x)"]}],
             "data_model": {"E": ["id", "name"]},
         }
 

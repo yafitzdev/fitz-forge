@@ -26,17 +26,6 @@ from fitz_forge.planning.pipeline.stages.base import (
     StageResult,
     extract_json,
 )
-from fitz_forge.planning.validation.grounding.inference import (
-    _unwrap_decorated,
-    extract_call_class_name,
-    find_class_anywhere,
-    format_method_signature,
-    iter_all_classes,
-    iter_class_methods,
-    iter_init_self_assignments,
-    unparse_annotation,
-)
-from fitz_forge.planning.validation.grounding.parser import parse_python
 from fitz_forge.planning.prompts import load_prompt
 from fitz_forge.planning.reviews import (
     format_issues_feedback,
@@ -53,6 +42,17 @@ from fitz_forge.planning.schemas import (
     RiskOutput,
     RoadmapOutput,
 )
+from fitz_forge.planning.validation.grounding.inference import (
+    _unwrap_decorated,
+    extract_call_class_name,
+    find_class_anywhere,
+    format_method_signature,
+    iter_all_classes,
+    iter_class_methods,
+    iter_init_self_assignments,
+    unparse_annotation,
+)
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 logger = logging.getLogger(__name__)
 
@@ -314,9 +314,7 @@ _RISK_FIELD_GROUPS = [
 ]
 
 
-def _attach_review_findings(
-    design: dict[str, Any], issues: list[Any]
-) -> dict[str, Any]:
+def _attach_review_findings(design: dict[str, Any], issues: list[Any]) -> dict[str, Any]:
     """Attach ``ReviewIssue``s to ``design.review_findings`` as plain dicts.
 
     Preserves any existing findings from prior reviews so multiple review
@@ -464,9 +462,7 @@ def _resolve_imported_type_apis(
                 for p in params.children:
                     if p.type not in ("typed_parameter", "typed_default_parameter"):
                         continue
-                    type_node = next(
-                        (c for c in p.children if c.type == "type"), None
-                    )
+                    type_node = next((c for c in p.children if c.type == "type"), None)
                     pname = _annotation_name(type_node)
                     if pname and pname[0].isupper():
                         imported_types.add(pname)
@@ -913,11 +909,7 @@ def _extract_pipeline_constraint(reference_body: str) -> str:
             if not call_str and len(idents) == 2:
                 head = idents[0].text.decode("utf-8")
                 tail = idents[1].text.decode("utf-8")
-                if (
-                    head == "self"
-                    and tail.startswith("_")
-                    and not tail.startswith("__")
-                ):
+                if head == "self" and tail.startswith("_") and not tail.startswith("__"):
                     call_str = f"self.{tail}()"
 
         if call_str:
@@ -1123,15 +1115,11 @@ def _extract_method_signatures(content: str, filename: str) -> list[str]:
                     "default_parameter",
                     "typed_default_parameter",
                 ):
-                    ident = next(
-                        (c for c in p.children if c.type == "identifier"), None
-                    )
+                    ident = next((c for c in p.children if c.type == "identifier"), None)
                     if ident is None:
                         continue
                     pname = ident.text.decode("utf-8")
-                    type_node = next(
-                        (c for c in p.children if c.type == "type"), None
-                    )
+                    type_node = next((c for c in p.children if c.type == "type"), None)
                     if type_node is not None:
                         ann = unparse_annotation(type_node)
                         if ann:
@@ -2750,9 +2738,9 @@ class SynthesisStage(PipelineStage):
 
         agent_ctx = prior_outputs.get("_agent_context", {})
         source_dir = prior_outputs.get("_source_dir", "")
-        structural_index = agent_ctx.get(
-            "full_structural_index", ""
-        ) or prior_outputs.get("_gathered_context", "")
+        structural_index = agent_ctx.get("full_structural_index", "") or prior_outputs.get(
+            "_gathered_context", ""
+        )
         resolution_output = prior_outputs.get("decision_resolution", {})
         resolutions = resolution_output.get("resolutions", [])
 
@@ -3141,9 +3129,7 @@ class SynthesisStage(PipelineStage):
                     continue
                 # Tree-sitter return_statement has a value child if non-bare.
                 # The first non-keyword named child is the value.
-                has_value = any(
-                    c.is_named for c in node.children if c.type != "return"
-                )
+                has_value = any(c.is_named for c in node.children if c.type != "return")
                 if has_value:
                     return_lines.append(node.start_point[0] + 1)  # 1-based lineno
             if return_lines:
@@ -4209,8 +4195,7 @@ class SynthesisStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': design review errored ({e}); "
-                "no findings recorded"
+                f"Stage '{self.name}': design review errored ({e}); no findings recorded"
             )
             return design, []
 
@@ -4222,10 +4207,7 @@ class SynthesisStage(PipelineStage):
             )
             return design, []
 
-        logger.info(
-            f"Stage '{self.name}': design review found "
-            f"{review.issue_count} issue(s)"
-        )
+        logger.info(f"Stage '{self.name}': design review found {review.issue_count} issue(s)")
         for issue in review.issues[:5]:
             logger.info(
                 "  %s — %s | %s",
@@ -4254,15 +4236,12 @@ class SynthesisStage(PipelineStage):
                     )
                 except Exception as e:
                     logger.warning(
-                        f"Stage '{self.name}': design retry review errored "
-                        f"({e}); keeping original"
+                        f"Stage '{self.name}': design retry review errored ({e}); keeping original"
                     )
                     retry_review = None
 
                 retry_issue_count = (
-                    retry_review.issue_count
-                    if retry_review is not None
-                    else review.issue_count + 1
+                    retry_review.issue_count if retry_review is not None else review.issue_count + 1
                 )
 
                 if retry_issue_count < review.issue_count:
@@ -4271,14 +4250,8 @@ class SynthesisStage(PipelineStage):
                         f"({review.issue_count} -> {retry_issue_count}); "
                         "using regen"
                     )
-                    if (
-                        retry_review is not None
-                        and not retry_review.passed
-                        and retry_review.issues
-                    ):
-                        regenerated = _attach_review_findings(
-                            regenerated, retry_review.issues
-                        )
+                    if retry_review is not None and not retry_review.passed and retry_review.issues:
+                        regenerated = _attach_review_findings(regenerated, retry_review.issues)
                     # Always cascade the ORIGINAL issues to the artifact
                     # generator — regen improved the plan's declared
                     # design, but the artifact generator reads the
@@ -4342,16 +4315,16 @@ class SynthesisStage(PipelineStage):
             if isinstance(a, dict)
         }
         artifact_files.discard("")
-        integration_targets = {
-            str(ip).strip() for ip in (design.get("integration_points") or [])
-        }
+        integration_targets = {str(ip).strip() for ip in (design.get("integration_points") or [])}
         integration_targets.discard("")
 
         groups_to_regen: set[str] = set()
         for issue in issues:
             target = (issue.target or "").strip()
             lower = target.lower()
-            if target in artifact_files or target.endswith((".py", ".ts", ".js", ".yaml", ".yml", ".json", ".sql")):
+            if target in artifact_files or target.endswith(
+                (".py", ".ts", ".js", ".yaml", ".yml", ".json", ".sql")
+            ):
                 # Artifacts are produced by the per-file generator; skip.
                 continue
             if target == "data_model" or lower == "data model":
@@ -4403,8 +4376,7 @@ class SynthesisStage(PipelineStage):
                     new_design.update(partial)
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': design re-extraction failed ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': design re-extraction failed ({e}); keeping original"
             )
             return None
 
@@ -4413,9 +4385,7 @@ class SynthesisStage(PipelineStage):
         new_design.setdefault("adrs", design.get("adrs") or [])
         new_design.setdefault("components", design.get("components") or [])
         new_design.setdefault("data_model", design.get("data_model") or {})
-        new_design.setdefault(
-            "integration_points", design.get("integration_points") or []
-        )
+        new_design.setdefault("integration_points", design.get("integration_points") or [])
 
         preserved_findings = design.get("review_findings")
 
@@ -4423,8 +4393,7 @@ class SynthesisStage(PipelineStage):
             validated = DesignOutput(**new_design).model_dump()
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': design re-validation failed ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': design re-validation failed ({e}); keeping original"
             )
             return None
 
@@ -4464,15 +4433,13 @@ class SynthesisStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': assumption review errored ({e}); "
-                "no findings recorded"
+                f"Stage '{self.name}': assumption review errored ({e}); no findings recorded"
             )
             return context
 
         if review.passed:
             logger.info(
-                f"Stage '{self.name}': assumption review passed "
-                f"({len(assumptions)} assumption(s))"
+                f"Stage '{self.name}': assumption review passed ({len(assumptions)} assumption(s))"
             )
             return context
 
@@ -4542,8 +4509,7 @@ class SynthesisStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': architecture review errored ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': architecture review errored ({e}); keeping original"
             )
             return architecture
 
@@ -4570,9 +4536,7 @@ class SynthesisStage(PipelineStage):
         if not feedback_block:
             return architecture
 
-        resolutions = (
-            prior_outputs.get("decision_resolution", {}).get("resolutions", [])
-        )
+        resolutions = prior_outputs.get("decision_resolution", {}).get("resolutions", [])
         try:
             retry_messages = self.build_prompt(job_description, prior_outputs)
             retry_messages[-1]["content"] += (
@@ -4586,8 +4550,7 @@ class SynthesisStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': arch regen prompt build failed "
-                f"({e}); keeping original"
+                f"Stage '{self.name}': arch regen prompt build failed ({e}); keeping original"
             )
             return architecture
 
@@ -4607,8 +4570,7 @@ class SynthesisStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': arch reasoning-regen failed ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': arch reasoning-regen failed ({e}); keeping original"
             )
             return architecture
 
@@ -4639,8 +4601,7 @@ class SynthesisStage(PipelineStage):
                 arch_merged.update(partial)
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': architecture re-extraction failed ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': architecture re-extraction failed ({e}); keeping original"
             )
             return architecture
 
@@ -4653,8 +4614,7 @@ class SynthesisStage(PipelineStage):
             new_architecture = ArchitectureOutput(**arch_merged).model_dump()
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': architecture re-validation failed ({e}); "
-                "keeping original"
+                f"Stage '{self.name}': architecture re-validation failed ({e}); keeping original"
             )
             return architecture
 
@@ -4678,9 +4638,7 @@ class SynthesisStage(PipelineStage):
             retry_review = None
 
         retry_issue_count = (
-            retry_review.issue_count
-            if retry_review is not None
-            else review.issue_count + 1
+            retry_review.issue_count if retry_review is not None else review.issue_count + 1
         )
 
         if retry_issue_count < review.issue_count:
@@ -4751,8 +4709,7 @@ class SynthesisStage(PipelineStage):
                 purpose_by_file.setdefault(fname, purpose)
 
         missing_specs: list[tuple[str, str]] = [
-            (issue.target, purpose_by_file.get(issue.target, ""))
-            for issue in review.issues
+            (issue.target, purpose_by_file.get(issue.target, "")) for issue in review.issues
         ]
 
         try:
@@ -4776,8 +4733,7 @@ class SynthesisStage(PipelineStage):
             return artifacts, list(review.issues)
 
         existing_fns: set[str] = {
-            (a.get("filename") or "").replace("\\", "/").strip("/")
-            for a in artifacts
+            (a.get("filename") or "").replace("\\", "/").strip("/") for a in artifacts
         }
         merged = list(artifacts)
         for art in new_artifacts:
@@ -5068,9 +5024,7 @@ class SynthesisStage(PipelineStage):
                 if _k in design_pre_artifact:
                     design_merged[_k] = design_pre_artifact[_k]
             if design_pre_artifact.get("review_findings"):
-                design_merged["review_findings"] = design_pre_artifact[
-                    "review_findings"
-                ]
+                design_merged["review_findings"] = design_pre_artifact["review_findings"]
 
             artifact_reasoning = reasoning
             if artifact_feedback_issues:

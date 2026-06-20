@@ -278,7 +278,7 @@ def _method_exists_anywhere(method_name: str, lookup: StructuralIndexLookup) -> 
 # ---------------------------------------------------------------------------
 
 
-def _iter_annotation_class_names(type_node: "Node | None") -> "Iterator[tuple[str, int]]":
+def _iter_annotation_class_names(type_node: Node | None) -> Iterator[tuple[str, int]]:
     """Yield (class_name, line) for class-shaped identifiers in an annotation.
 
     Walks nested generics (List[Foo], Dict[str, Bar], Foo | None, Optional[X])
@@ -301,7 +301,7 @@ def _iter_annotation_class_names(type_node: "Node | None") -> "Iterator[tuple[st
         stack.extend(n.children)
 
 
-def _find_module_typevars(root: "Node") -> set[str]:
+def _find_module_typevars(root: Node) -> set[str]:
     """Collect names assigned to TypeVar/ParamSpec/TypeVarTuple calls.
 
     Catches `T = TypeVar("T")`, `P = ParamSpec("P")`, `Ts = TypeVarTuple("Ts")`
@@ -501,7 +501,7 @@ class _ReferenceCollector:
     def _emit(self, ref: Reference) -> None:
         self.refs.append(ref)
 
-    def _kwargs_of(self, call: "Node") -> frozenset[str]:
+    def _kwargs_of(self, call: Node) -> frozenset[str]:
         args_list = next((c for c in call.children if c.type == "argument_list"), None)
         if args_list is None:
             return frozenset()
@@ -513,7 +513,7 @@ class _ReferenceCollector:
                     names.add(ident.text.decode("utf-8"))
         return frozenset(names)
 
-    def _emit_annotation_types(self, type_node: "Node | None", context_desc: str) -> None:
+    def _emit_annotation_types(self, type_node: Node | None, context_desc: str) -> None:
         if type_node is None:
             return
         for name, line in _iter_annotation_class_names(type_node):
@@ -528,7 +528,7 @@ class _ReferenceCollector:
                 )
             )
 
-    def _emit_call(self, call: "Node", usage: str) -> None:
+    def _emit_call(self, call: Node, usage: str) -> None:
         """Emit Reference for a call node."""
         line = call.start_point[0] + 1
         kwargs = self._kwargs_of(call)
@@ -595,7 +595,7 @@ class _ReferenceCollector:
 
     # ---- main visitor -----------------------------------------------------
 
-    def visit(self, node: "Node") -> None:
+    def visit(self, node: Node) -> None:
         t = node.type
         if t == "function_definition":
             self._visit_func(node)
@@ -643,19 +643,14 @@ class _ReferenceCollector:
 
     # ---- specific visitors -----------------------------------------------
 
-    def _visit_func(self, node: "Node") -> None:
+    def _visit_func(self, node: Node) -> None:
         self._push_scope()
         params_node = next((c for c in node.children if c.type == "parameters"), None)
         if params_node is not None:
             for p in params_node.children:
                 ann_node: Node | None = None
                 arg_name: str | None = None
-                if p.type == "typed_parameter":
-                    ident = next((x for x in p.children if x.type == "identifier"), None)
-                    ann_node = next((x for x in p.children if x.type == "type"), None)
-                    if ident is not None:
-                        arg_name = ident.text.decode("utf-8")
-                elif p.type == "typed_default_parameter":
+                if p.type == "typed_parameter" or p.type == "typed_default_parameter":
                     ident = next((x for x in p.children if x.type == "identifier"), None)
                     ann_node = next((x for x in p.children if x.type == "type"), None)
                     if ident is not None:
@@ -679,15 +674,13 @@ class _ReferenceCollector:
                 self.visit(stmt)
         self._pop_scope()
 
-    def _visit_assign(self, node: "Node") -> None:
+    def _visit_assign(self, node: Node) -> None:
         target = next((c for c in node.children if c.is_named), None)
         has_type = any(c.type == "type" for c in node.children)
         if has_type:
             ann = next((c for c in node.children if c.type == "type"), None)
             desc = (
-                target.text.decode("utf-8")
-                if (target and target.type == "identifier")
-                else "var"
+                target.text.decode("utf-8") if (target and target.type == "identifier") else "var"
             )
             self._emit_annotation_types(ann, f"annotation on {desc}")
             if target is not None and target.type == "identifier":
@@ -730,7 +723,7 @@ class _ReferenceCollector:
         if value is not None:
             self.visit(value)
 
-    def _visit_call(self, node: "Node") -> None:
+    def _visit_call(self, node: Node) -> None:
         callee = _callable_of(node)
         # isinstance/issubclass/cast special case
         if callee is not None and callee.type == "identifier":
@@ -738,8 +731,7 @@ class _ReferenceCollector:
             args_list = next((c for c in node.children if c.type == "argument_list"), None)
             if args_list is not None:
                 named_args = [
-                    c for c in args_list.children
-                    if c.is_named and c.type != "keyword_argument"
+                    c for c in args_list.children if c.is_named and c.type != "keyword_argument"
                 ]
                 if fname in ("isinstance", "issubclass") and len(named_args) >= 2:
                     self._emit_annotation_types(named_args[1], f"{fname} type")
@@ -753,7 +745,7 @@ class _ReferenceCollector:
                 if c.is_named:
                     self.visit(c)
 
-    def _visit_raise(self, node: "Node") -> None:
+    def _visit_raise(self, node: Node) -> None:
         body = next((c for c in node.children if c.is_named), None)
         if body is not None and body.type == "identifier":
             name = body.text.decode("utf-8")
@@ -770,7 +762,7 @@ class _ReferenceCollector:
             if c.is_named:
                 self.visit(c)
 
-    def _visit_except(self, node: "Node") -> None:
+    def _visit_except(self, node: Node) -> None:
         for c in node.children:
             if c.is_named:
                 if c.type in ("identifier", "attribute", "tuple"):
@@ -778,7 +770,7 @@ class _ReferenceCollector:
                     continue
                 self.visit(c)
 
-    def _visit_for(self, node: "Node", is_async: bool) -> None:
+    def _visit_for(self, node: Node, is_async: bool) -> None:
         async_kw = any(c.type == "async" for c in node.children)
         is_async = is_async or async_kw
         saw_in = False
@@ -821,7 +813,7 @@ class _ReferenceCollector:
             for stmt in body_node.children:
                 self.visit(stmt)
 
-    def _visit_await(self, node: "Node") -> None:
+    def _visit_await(self, node: Node) -> None:
         body = next((c for c in node.children if c.is_named), None)
         if body is None:
             return
@@ -855,7 +847,7 @@ class _ReferenceCollector:
             )
         )
 
-    def _visit_attribute(self, node: "Node") -> None:
+    def _visit_attribute(self, node: Node) -> None:
         idents = [c for c in node.children if c.type == "identifier"]
         if len(idents) == 2:
             obj = idents[0].text.decode("utf-8")
@@ -875,7 +867,7 @@ class _ReferenceCollector:
             if c.is_named and c.type == "attribute":
                 self.visit(c)
 
-    def _visit_import_from(self, node: "Node") -> None:
+    def _visit_import_from(self, node: Node) -> None:
         module_node = next(
             (c for c in node.children if c.type in ("dotted_name", "relative_import")),
             None,
@@ -918,7 +910,7 @@ class _ReferenceCollector:
 
     # ---- RHS type inference ----------------------------------------------
 
-    def _infer_rhs_type(self, value: "Node") -> str | None:
+    def _infer_rhs_type(self, value: Node) -> str | None:
         if value.type != "call":
             return None
         callee = _callable_of(value)
@@ -937,9 +929,7 @@ class _ReferenceCollector:
                 return attr_name
         return None
 
-    def _infer_rhs_iter_kind(
-        self, value: "Node"
-    ) -> tuple[str, SymbolRef, str] | None:
+    def _infer_rhs_iter_kind(self, value: Node) -> tuple[str, SymbolRef, str] | None:
         if value.type != "call":
             return None
         resolved = self._resolve_call_target(value)
@@ -956,9 +946,7 @@ class _ReferenceCollector:
             return ("sync_iter", ref, context)
         return None
 
-    def _resolve_call_target(
-        self, call: "Node"
-    ) -> tuple[SymbolRef, str | None, str] | None:
+    def _resolve_call_target(self, call: Node) -> tuple[SymbolRef, str | None, str] | None:
         callee = _callable_of(call)
         if callee is None:
             return None
@@ -1029,7 +1017,7 @@ class _ReferenceCollector:
         return None
 
 
-def _returns_annotation_node(func_def: "Node") -> "Node | None":
+def _returns_annotation_node(func_def: Node) -> Node | None:
     """Return the return-type annotation node of a function_definition, or None."""
     saw_params = False
     for c in func_def.children:
@@ -1041,7 +1029,7 @@ def _returns_annotation_node(func_def: "Node") -> "Node | None":
     return None
 
 
-def _has_yield(func_def: "Node") -> bool:
+def _has_yield(func_def: Node) -> bool:
     """True if the function body contains any yield node."""
     body = next((c for c in func_def.children if c.type == "block"), None)
     if body is None:
@@ -1088,7 +1076,7 @@ def extract_references(
 # ---------------------------------------------------------------------------
 
 
-def _sig_from_funcdef(func_def: "Node") -> Signature:
+def _sig_from_funcdef(func_def: Node) -> Signature:
     params_node = next((c for c in func_def.children if c.type == "parameters"), None)
     params: list[str] = []
     has_var_kw = False
@@ -1205,9 +1193,7 @@ def extract_provides(
                     has_type = any(c.type == "type" for c in inner.children)
                     if has_type:
                         out[
-                            SymbolRef(
-                                owner=cname, name=target.text.decode("utf-8"), kind="field"
-                            )
+                            SymbolRef(owner=cname, name=target.text.decode("utf-8"), kind="field")
                         ] = None
 
     return out
@@ -1315,7 +1301,7 @@ def _is_awaitable_type(return_type: str | None) -> bool:
 
 
 def _close_method_matches(
-    target: str, candidates: "Iterator[str] | list[str] | set[str]", limit: int = 3
+    target: str, candidates: Iterator[str] | list[str] | set[str], limit: int = 3
 ) -> list[str]:
     """Top-`limit` closest method-name matches by edit distance.
 

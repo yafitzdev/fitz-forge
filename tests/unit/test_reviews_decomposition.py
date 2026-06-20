@@ -275,8 +275,6 @@ def test_review_result_issue_count():
     r = ReviewResult(scope="decomposition", passed=True)
     assert r.issue_count == 0
     r.issues.append(
-        ReviewIssue(
-            scope="decomposition", target="d1", intent="i", actual="a", suggestion="s"
-        )
+        ReviewIssue(scope="decomposition", target="d1", intent="i", actual="a", suggestion="s")
     )
     assert r.issue_count == 1

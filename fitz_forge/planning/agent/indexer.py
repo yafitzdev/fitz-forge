@@ -165,7 +165,7 @@ def _extract_structure(suffix: str, content: str, rel_path: str) -> str:
     return ""
 
 
-def _node_name(node: "Node | None") -> str:
+def _node_name(node: Node | None) -> str:
     """Human-readable name from a tree-sitter node (ast.unparse analogue)."""
     if node is None:
         return ""
@@ -194,7 +194,7 @@ def _node_name(node: "Node | None") -> str:
     return "?"
 
 
-def _extract_key_decorators(class_or_func_node: "Node") -> list[str]:
+def _extract_key_decorators(class_or_func_node: Node) -> list[str]:
     """Extract recognised decorator names from a decorated_definition wrapper."""
     result: list[str] = []
     parent = class_or_func_node.parent
@@ -227,7 +227,7 @@ def _extract_key_decorators(class_or_func_node: "Node") -> list[str]:
     return result
 
 
-def _iter_top_level(root: "Node"):
+def _iter_top_level(root: Node):
     """Yield each top-level definition, unwrapping decorated wrappers."""
     for c in root.children:
         if c.type == "decorated_definition":
@@ -238,7 +238,7 @@ def _iter_top_level(root: "Node"):
             yield c
 
 
-def _all_param_names_except_self(func_def: "Node") -> list[str]:
+def _all_param_names_except_self(func_def: Node) -> list[str]:
     """Positional-or-keyword params only, excluding self."""
     params_node = next((c for c in func_def.children if c.type == "parameters"), None)
     if params_node is None:
@@ -259,7 +259,7 @@ def _all_param_names_except_self(func_def: "Node") -> list[str]:
     return out
 
 
-def _formatted_param(p: "Node") -> str | None:
+def _formatted_param(p: Node) -> str | None:
     """Return formatted ``name[: Ann]`` string for a parameter node, or None to skip."""
     if p.type == "identifier":
         name = p.text.decode("utf-8")
@@ -293,7 +293,7 @@ def _formatted_param(p: "Node") -> str | None:
     return None
 
 
-def _module_docstring(root: "Node") -> str | None:
+def _module_docstring(root: Node) -> str | None:
     """First real statement's string literal, if any."""
     for c in root.children:
         if not c.is_named or c.type == "comment":
@@ -631,7 +631,7 @@ def extract_method_flows(content: str, min_lines: int = _MIN_METHOD_LINES) -> st
 
 
 def _extract_flow_steps(
-    method: "Node",
+    method: Node,
     component_types: dict[str, str],
 ) -> list[str]:
     """Extract ordered pipeline steps from a method body."""
@@ -662,10 +662,7 @@ def _extract_flow_steps(
             inner_attr = next((c for c in callee.children if c.type == "attribute"), None)
             if inner_attr is not None:
                 inner_idents = [c for c in inner_attr.children if c.type == "identifier"]
-                if (
-                    len(inner_idents) == 2
-                    and inner_idents[0].text.decode("utf-8") == "self"
-                ):
+                if len(inner_idents) == 2 and inner_idents[0].text.decode("utf-8") == "self":
                     component = inner_idents[1].text.decode("utf-8")
                     if component in _FLOW_SKIP_OBJECTS:
                         continue
@@ -972,9 +969,7 @@ def _extract_full_imports(
             relative = next((c for c in n.children if c.type == "relative_import"), None)
             module_node = next((c for c in n.children if c.type == "dotted_name"), None)
             if relative is not None and pkg:
-                inner_dotted = next(
-                    (c for c in relative.children if c.type == "dotted_name"), None
-                )
+                inner_dotted = next((c for c in relative.children if c.type == "dotted_name"), None)
                 if inner_dotted is not None:
                     dots_text = relative.text.decode("utf-8")
                     level = 0

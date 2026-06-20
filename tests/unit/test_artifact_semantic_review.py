@@ -291,11 +291,7 @@ async def test_non_integer_line_coerced_to_zero():
 
 @pytest.mark.asyncio
 async def test_code_fenced_response_parses():
-    response = (
-        "```json\n"
-        + json.dumps({"passed": True, "issues": []})
-        + "\n```"
-    )
+    response = "```json\n" + json.dumps({"passed": True, "issues": []}) + "\n```"
     client = _StubClient(response=response)
     result = await semantic_review(
         reasoning="",

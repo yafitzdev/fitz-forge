@@ -11,10 +11,11 @@ import asyncio
 import logging
 import re
 import traceback
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING as _TC
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from fitz_forge.config.schema import FitzPlannerConfig
 from fitz_forge.llm.llama_cpp import LlamaCppClient
@@ -637,9 +638,8 @@ class BackgroundWorker:
                     "decision_decomposition"
                 ]
             agent_ctx = result.outputs.get("_agent_context", {}) or {}
-            full_index = (
-                agent_ctx.get("full_structural_index", "")
-                or result.outputs.get("_gathered_context", "")
+            full_index = agent_ctx.get("full_structural_index", "") or result.outputs.get(
+                "_gathered_context", ""
             )
             source_dir = result.outputs.get("_source_dir", "") or ""
 
@@ -715,9 +715,7 @@ class BackgroundWorker:
             if resume:
                 await self._set_phase(job_id, "resuming", state=JobState.RUNNING)
             else:
-                await self._set_phase(
-                    job_id, "starting", progress=0.0, state=JobState.RUNNING
-                )
+                await self._set_phase(job_id, "starting", progress=0.0, state=JobState.RUNNING)
             await self._process_job(job)
             # Check if job ended at AWAITING_REVIEW (pipeline paused for API review)
             final_job = await self._store.get(job_id)
@@ -740,9 +738,7 @@ class BackgroundWorker:
                 await self._store.update(job_id, state=JobState.FAILED, error=error_msg)
             except Exception:
                 pass
-            await self._emit(
-                JobFailed(job_id=job_id, error=error_msg, elapsed_s=self._elapsed())
-            )
+            await self._emit(JobFailed(job_id=job_id, error=error_msg, elapsed_s=self._elapsed()))
             raise
         finally:
             self._current_job_id = None

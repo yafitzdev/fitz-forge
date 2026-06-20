@@ -295,9 +295,7 @@ def test_chain_route_service_engine_synth_aligned_no_violations():
     ]
     viols = _missing_violations(check_closure(artifacts, _make_lookup()))
     cross_artifact = [
-        v
-        for v in viols
-        if v.ref.owner in ("Service", "Engine", "Synth") and v.ref.name is not None
+        v for v in viols if v.ref.owner in ("Service", "Engine", "Synth") and v.ref.name is not None
     ]
     assert cross_artifact == [], [v.pretty() for v in cross_artifact]
 
@@ -352,9 +350,7 @@ def test_chain_mid_link_drift_fires_one_violation_per_offender():
     assert drift[0].artifact == "engine.py"
     assert "generate" in drift[0].detail
     # And no spurious violations on the aligned links
-    spurious_engine = [
-        v for v in viols if v.ref.owner == "Engine" and v.ref.name == "run_query"
-    ]
+    spurious_engine = [v for v in viols if v.ref.owner == "Engine" and v.ref.name == "run_query"]
     assert spurious_engine == []
     spurious_service = [
         v for v in viols if v.ref.owner == "Service" and v.ref.name == "handle_request"

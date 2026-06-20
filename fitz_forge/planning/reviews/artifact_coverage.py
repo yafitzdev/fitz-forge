@@ -113,10 +113,7 @@ def review_artifact_coverage(
                     "ship as an artifact — the plan commits to touching "
                     "it, so the implementer expects to find it."
                 ),
-                actual=(
-                    f"{filename} is in needed_artifacts but missing from "
-                    "design.artifacts."
-                ),
+                actual=(f"{filename} is in needed_artifacts but missing from design.artifacts."),
                 suggestion=(
                     f"Generate the artifact for {filename}"
                     + (f" with purpose: {purpose}" if purpose else "")

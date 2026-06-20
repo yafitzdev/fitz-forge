@@ -51,14 +51,14 @@ def _stub_regen_prompt(monkeypatch, stage) -> None:
     """Replace build_prompt with a minimal stub so the regen call is
     independent of the real synthesis prompt template.
     """
+
     def fake_build_prompt(self, job_description, prior_outputs):
         return [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "user"},
         ]
-    monkeypatch.setattr(
-        SynthesisStage, "build_prompt", fake_build_prompt
-    )
+
+    monkeypatch.setattr(SynthesisStage, "build_prompt", fake_build_prompt)
 
 
 def _stub_generate(monkeypatch, new_reasoning: str) -> list[str]:
@@ -91,8 +91,7 @@ _RICH_REASONING = (
     "rank_signals, record_breakdown, pre_rerank_score, retrieval_method "
     "and composite_score are the named fields. "
     "Decision milestone deliverable and mitigation risk keep the "
-    "plan within scope. "
-    + ("Filler text. " * 400)
+    "plan within scope. " + ("Filler text. " * 400)
 )
 
 _JUNK_REASONING = "ok"
@@ -137,9 +136,7 @@ async def test_review_pass_keeps_original(monkeypatch, stage):
 
 
 @pytest.mark.asyncio
-async def test_review_issues_trigger_reasoning_regen_and_retry_wins(
-    monkeypatch, stage
-):
+async def test_review_issues_trigger_reasoning_regen_and_retry_wins(monkeypatch, stage):
     original = _arch("Blocking + split")
     review_states = iter(
         [
@@ -347,9 +344,7 @@ async def test_empty_reextraction_keeps_original(monkeypatch, stage):
 
 
 @pytest.mark.asyncio
-async def test_reasoning_regen_below_score_gate_keeps_original(
-    monkeypatch, stage
-):
+async def test_reasoning_regen_below_score_gate_keeps_original(monkeypatch, stage):
     original = _arch("Good Approach")
 
     async def fake_review(**kwargs):
@@ -393,9 +388,7 @@ async def test_reasoning_regen_below_score_gate_keeps_original(
 
 
 @pytest.mark.asyncio
-async def test_reasoning_regen_generate_failure_keeps_original(
-    monkeypatch, stage
-):
+async def test_reasoning_regen_generate_failure_keeps_original(monkeypatch, stage):
     original = _arch("Safe Approach")
 
     async def fake_review(**kwargs):

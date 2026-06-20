@@ -122,6 +122,7 @@ def _is_python_file(filename: str) -> bool:
         return True
     return any(lower.endswith(ext) for ext in _PYTHON_EXTENSIONS)
 
+
 _SELF_METHOD_RE = re.compile(r"self\.([a-zA-Z_]\w*)\s*\(")
 _CLASS_CTOR_RE = re.compile(r"\b([A-Z][a-zA-Z0-9_]*)\s*\(")
 
@@ -353,7 +354,9 @@ def check_single_artifact(
         parseable = tree is not None
 
         if recovered_content is not None:
-            violations = check_artifact({"filename": filename, "content": recovered_content}, lookup)
+            violations = check_artifact(
+                {"filename": filename, "content": recovered_content}, lookup
+            )
         else:
             violations = check_artifact(artifact, lookup)
     else:
@@ -368,9 +371,7 @@ def check_single_artifact(
     has_yield = None
     has_correct_return_type = None
 
-    is_streaming_file = is_python and any(
-        filename.endswith(ind) for ind in _STREAMING_INDICATORS
-    )
+    is_streaming_file = is_python and any(filename.endswith(ind) for ind in _STREAMING_INDICATORS)
     if task_requires_streaming and is_streaming_file and tree is not None:
         has_yield = bool(_YIELD_RE.search(content))
 
@@ -495,9 +496,7 @@ def check_all_artifacts_v2(
         added = lookup.augment_from_source_dir(source_dir)
         if added:
             logger.info(f"Augmented index with {added} classes from {source_dir}")
-    lookup.augment_from_artifacts(
-        augment_from if augment_from is not None else artifacts
-    )
+    lookup.augment_from_artifacts(augment_from if augment_from is not None else artifacts)
     return [check_single_artifact(a, lookup, task_requires_streaming) for a in artifacts]
 
 
@@ -601,13 +600,42 @@ def check_cross_artifact_consistency(
             ):
                 continue
             _STDLIB_METHODS = {
-                "append", "extend", "pop", "insert", "remove", "clear",
-                "copy", "sort", "reverse", "update", "keys", "values",
-                "items", "get", "post", "put", "delete", "patch",
-                "head", "options", "add", "discard", "union",
-                "intersection", "difference", "format", "encode",
-                "decode", "strip", "split", "join", "replace",
-                "startswith", "endswith", "lower", "upper",
+                "append",
+                "extend",
+                "pop",
+                "insert",
+                "remove",
+                "clear",
+                "copy",
+                "sort",
+                "reverse",
+                "update",
+                "keys",
+                "values",
+                "items",
+                "get",
+                "post",
+                "put",
+                "delete",
+                "patch",
+                "head",
+                "options",
+                "add",
+                "discard",
+                "union",
+                "intersection",
+                "difference",
+                "format",
+                "encode",
+                "decode",
+                "strip",
+                "split",
+                "join",
+                "replace",
+                "startswith",
+                "endswith",
+                "lower",
+                "upper",
             }
             if method_name in _STDLIB_METHODS:
                 continue
@@ -795,7 +823,9 @@ def score_plan_live(
     if artifact_checks:
         weights = [max(10, a.content_lines) for a in artifact_checks]
         total_weight = sum(weights)
-        artifact_mean = sum(a.score * w for a, w in zip(artifact_checks, weights)) / total_weight
+        artifact_mean = (
+            sum(a.score * w for a, w in zip(artifact_checks, weights, strict=True)) / total_weight
+        )
     else:
         artifact_mean = 0.0
     artifact_quality = round(artifact_mean * 0.5, 1)

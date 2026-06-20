@@ -169,9 +169,7 @@ async def test_regen_failure_surfaces_all_missing(monkeypatch, stage):
     async def exploding_build_missing(client, missing_specs, reasoning, prior_outputs):
         raise RuntimeError("artifact gen down")
 
-    monkeypatch.setattr(
-        stage, "_build_missing_artifacts", exploding_build_missing
-    )
+    monkeypatch.setattr(stage, "_build_missing_artifacts", exploding_build_missing)
 
     context_merged = {
         "needed_artifacts": [

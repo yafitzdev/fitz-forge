@@ -65,12 +65,8 @@ def test_coverage_all_shipped_non_stub():
 
 def test_coverage_missing_file_dings_score():
     plan = {
-        "context": {
-            "needed_artifacts": ["src/a.py", "src/b.py"]
-        },
-        "design": {
-            "artifacts": [{"filename": "src/a.py", "content": "def a(): return 1\n"}]
-        },
+        "context": {"needed_artifacts": ["src/a.py", "src/b.py"]},
+        "design": {"artifacts": [{"filename": "src/a.py", "content": "def a(): return 1\n"}]},
         "roadmap": {"phases": []},
     }
     q = compute_quality_indicators(plan)

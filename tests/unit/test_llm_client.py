@@ -143,8 +143,6 @@ class TestGenerateWithFallback:
         chunks = _make_stream_chunks(["yes"])
         client._client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
 
-        result, model = await client.generate_with_fallback(
-            [{"role": "user", "content": "hi"}]
-        )
+        result, model = await client.generate_with_fallback([{"role": "user", "content": "hi"}])
         assert result == "yes"
         assert model == "primary"

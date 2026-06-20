@@ -146,9 +146,7 @@ async def test_retry_does_not_improve_returns_original(monkeypatch, stage):
     retry_parsed = _make_parsed()
 
     issues_list = [
-        ReviewIssue(
-            scope="decomposition", target="d1", intent="i", actual="a", suggestion="s"
-        )
+        ReviewIssue(scope="decomposition", target="d1", intent="i", actual="a", suggestion="s")
     ]
     # Original: 1 issue. Retry: 2 issues (worse). Expect original returned.
     review_states = iter(

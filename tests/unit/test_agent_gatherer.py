@@ -1,17 +1,12 @@
 # tests/unit/test_agent_gatherer.py
 """Unit tests for AgentContextGatherer (fitz-sage powered retrieval)."""
 
-import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from fitz_forge.config.schema import AgentConfig
-from fitz_forge.planning.agent.gatherer import (
-    AgentContextGatherer,
-    _make_chat_factory,
-)
+from fitz_forge.planning.agent.gatherer import AgentContextGatherer
 
 
 def _make_config(**kwargs):
@@ -41,20 +36,78 @@ def _make_read_result(file_path, content, origin="selected"):
     return result
 
 
+class _FakeManifest:
+    def __init__(self, paths):
+        self._paths = paths
+
+    def entries(self):
+        return self._paths
+
+
+class _FakeEngine:
+    def __init__(self, results=None, error=None):
+        self._results = results or []
+        self._error = error
+        self.queries = []
+
+    def retrieve(self, query):
+        self.queries.append(query)
+        if self._error is not None:
+            raise self._error
+        return self._results
+
+
+def _patch_krag_engine(results, paths, error=None):
+    engine = _FakeEngine(results=results, error=error)
+    manifest = _FakeManifest(paths)
+    return patch.object(
+        AgentContextGatherer,
+        "_build_engine",
+        return_value=(engine, manifest),
+    ), engine
+
+
 # ---------------------------------------------------------------------------
-# ChatFactory bridge
+# KRAG engine bridge
 # ---------------------------------------------------------------------------
-class TestChatFactoryBridge:
-    @pytest.mark.asyncio
-    async def test_bridge_uses_client_model_regardless_of_tier(self, mock_client):
-        """Tier argument is ignored — fitz-forge serves a single model."""
+class TestKragEngineBridge:
+    def test_build_engine_uses_client_endpoint_model(self, tmp_path, mock_client):
+        """fitz-forge exposes one local model to every KRAG chat tier."""
         mock_client.model = "single-30b"
+        mock_client.base_url = "http://localhost:1234/v1"
+        fake_engine = MagicMock()
+        fake_manifest = MagicMock()
+        fake_engine.point.return_value = fake_manifest
 
-        loop = MagicMock()
-        factory = _make_chat_factory(mock_client, loop)
+        with patch(
+            "fitz_forge.planning.agent.gatherer.create_engine",
+            return_value=fake_engine,
+        ) as create_engine:
+            gatherer = AgentContextGatherer(
+                config=_make_config(),
+                source_dir=str(tmp_path),
+            )
+            engine, manifest = gatherer._build_engine(mock_client)
 
-        for tier in ("fast", "balanced", "smart", "anything"):
-            assert factory(tier)._model == "single-30b"
+        assert engine is fake_engine
+        assert manifest is fake_manifest
+        create_engine.assert_called_once()
+        assert create_engine.call_args.args[0] == "fitz_krag"
+
+        config = create_engine.call_args.kwargs["config"]
+        assert config.chat_fast == "endpoint/single-30b"
+        assert config.chat_balanced == "endpoint/single-30b"
+        assert config.chat_smart == "endpoint/single-30b"
+        assert config.chat_base_url == "http://localhost:1234/v1"
+        assert config.retrieval_workers == 1
+        assert config.enable_multi_hop is False
+
+        fake_engine.point.assert_called_once()
+        assert fake_engine.point.call_args.args[0] == tmp_path.resolve()
+        assert fake_engine.point.call_args.kwargs == {
+            "collection": config.collection,
+            "start_worker": False,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +170,7 @@ class TestPrioritizeForSummary:
 
 
 # ---------------------------------------------------------------------------
-# E2E: gather() — mocks CodeRetriever
+# E2E: gather() — mocks the KRAG engine boundary
 # ---------------------------------------------------------------------------
 class TestGatherEndToEnd:
     @pytest.mark.asyncio
@@ -139,11 +192,8 @@ class TestGatherEndToEnd:
             _make_read_result("util.py", "def helper(): pass", "neighbor"),
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = ["main.py", "util.py"]
-
+        engine_patch, engine = _patch_krag_engine(mock_results, ["main.py", "util.py"])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(),
                 source_dir=str(tmp_path),
@@ -159,14 +209,12 @@ class TestGatherEndToEnd:
         agent_files = result["agent_files"]
         assert agent_files["total_screened"] == 2
         assert "main.py" in agent_files["scan_hits"]
+        assert engine.queries[0].text == "how does run work?"
 
     @pytest.mark.asyncio
     async def test_empty_results_returns_empty(self, tmp_path, mock_client):
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = []
-            instance.get_file_paths.return_value = ["main.py"]
-
+        engine_patch, _ = _patch_krag_engine([], ["main.py"])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(),
                 source_dir=str(tmp_path),
@@ -188,11 +236,8 @@ class TestGatherEndToEnd:
             _make_read_result("c.py", "class C: pass", "neighbor"),
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = ["a.py", "b.py", "c.py"]
-
+        engine_patch, _ = _patch_krag_engine(mock_results, ["a.py", "b.py", "c.py"])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(),
                 source_dir=str(tmp_path),
@@ -206,10 +251,8 @@ class TestGatherEndToEnd:
 
     @pytest.mark.asyncio
     async def test_total_failure_returns_empty(self, tmp_path, mock_client):
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.side_effect = RuntimeError("total fail")
-
+        engine_patch, _ = _patch_krag_engine([], ["main.py"], RuntimeError("total fail"))
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(),
                 source_dir=str(tmp_path),
@@ -220,27 +263,22 @@ class TestGatherEndToEnd:
         assert result["synthesized"] == ""
 
     @pytest.mark.asyncio
-    async def test_retriever_receives_correct_config(self, tmp_path, mock_client):
+    async def test_build_engine_receives_client_and_retrieves_query(self, tmp_path, mock_client):
         (tmp_path / "a.py").write_text("x = 1")
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = [
-                _make_read_result("a.py", "x = 1", "selected"),
-            ]
-            instance.get_file_paths.return_value = ["a.py"]
-
+        engine_patch, engine = _patch_krag_engine(
+            [_make_read_result("a.py", "x = 1", "selected")],
+            ["a.py"],
+        )
+        with engine_patch as build_engine:
             gatherer = AgentContextGatherer(
                 config=_make_config(max_file_bytes=25_000),
                 source_dir=str(tmp_path),
             )
             await gatherer.gather(mock_client, "task")
 
-        # Verify CodeRetriever was constructed with correct params
-        MockRetriever.assert_called_once()
-        call_kwargs = MockRetriever.call_args[1]
-        assert call_kwargs["max_file_bytes"] == 25_000
-        assert str(call_kwargs["source_dir"]) == str(tmp_path)
+        build_engine.assert_called_once_with(mock_client)
+        assert engine.queries[0].text == "task"
 
 
 # ---------------------------------------------------------------------------
@@ -251,13 +289,11 @@ class TestProgressCallback:
     async def test_all_phases_reported(self, tmp_path, mock_client):
         (tmp_path / "main.py").write_text("def run(): pass")
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = [
-                _make_read_result("main.py", "def run(): pass", "selected"),
-            ]
-            instance.get_file_paths.return_value = ["main.py"]
-
+        engine_patch, _ = _patch_krag_engine(
+            [_make_read_result("main.py", "def run(): pass", "selected")],
+            ["main.py"],
+        )
+        with engine_patch:
             phases = []
 
             def track(progress, phase):
@@ -278,13 +314,11 @@ class TestProgressCallback:
     async def test_async_callback_awaited(self, tmp_path, mock_client):
         (tmp_path / "main.py").write_text("def run(): pass")
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = [
-                _make_read_result("main.py", "def run(): pass", "selected"),
-            ]
-            instance.get_file_paths.return_value = ["main.py"]
-
+        engine_patch, _ = _patch_krag_engine(
+            [_make_read_result("main.py", "def run(): pass", "selected")],
+            ["main.py"],
+        )
+        with engine_patch:
             calls = []
 
             async def async_track(progress, phase):
@@ -317,11 +351,8 @@ class TestSeedAndFetch:
             _make_read_result("util.py", "def helper(): pass", "selected"),
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = ["main.py", "util.py"]
-
+        engine_patch, _ = _patch_krag_engine(mock_results, ["main.py", "util.py"])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=30),
                 source_dir=str(tmp_path),
@@ -341,11 +372,8 @@ class TestSeedAndFetch:
             _make_read_result(f"file{i}.py", f"def func{i}(): pass", "selected") for i in range(5)
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = [f"file{i}.py" for i in range(5)]
-
+        engine_patch, _ = _patch_krag_engine(mock_results, [f"file{i}.py" for i in range(5)])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=2),
                 source_dir=str(tmp_path),
@@ -370,14 +398,14 @@ class TestSeedAndFetch:
             _make_read_result("neighbor.py", "def matched(): pass", "neighbor"),
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = [
+        engine_patch, _ = _patch_krag_engine(
+            mock_results,
+            [
                 "scan_hit.py",
                 "neighbor.py",
-            ]
-
+            ],
+        )
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=1),
                 source_dir=str(tmp_path),
@@ -398,11 +426,8 @@ class TestSeedAndFetch:
             _make_read_result(f"m{i}.py", f"def f{i}(): pass", "selected") for i in range(4)
         ]
 
-        with patch("fitz_forge.planning.agent.gatherer.CodeRetriever") as MockRetriever:
-            instance = MockRetriever.return_value
-            instance.retrieve.return_value = mock_results
-            instance.get_file_paths.return_value = [f"m{i}.py" for i in range(4)]
-
+        engine_patch, _ = _patch_krag_engine(mock_results, [f"m{i}.py" for i in range(4)])
+        with engine_patch:
             gatherer = AgentContextGatherer(
                 config=_make_config(max_seed_files=2),
                 source_dir=str(tmp_path),

@@ -1,84 +1,168 @@
+<!-- README.md -->
+
 <div align="center">
 
 # fitz-forge
 
-### Experimental coding-plan harness for local LLMs
+### Agentic coding-planning harness for local LLMs.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/fitz-forge.svg)](https://pypi.org/project/fitz-forge/)
-[![Tests](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml/badge.svg)](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/version-0.6.2-green.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.3-green.svg)](CHANGELOG.md)
+[![Tests](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml/badge.svg)](https://github.com/yafitzdev/fitz-forge/actions/workflows/test.yml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-[Research Question](#research-question) | [Current Answer](#current-answer) | [Why fitz-forge?](#why-fitz-forge) | [How It Works](#how-it-works) | [Evaluation](#evaluation) | [Quick Start](#quick-start) | [Docs](docs/features/)
+[Planning Artifact](#planning-artifact) • [Why `fitz-forge`?](#why-fitz-forge) • [Pipeline](#pipeline) • [Evaluation](#evaluation) • [Documentation](#links) • [GitHub](https://github.com/yafitzdev/fitz-forge)
 
+</div>
+
+<br />
+
+---
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center" colspan="2">
+      <pre><strong>Task: "Add WebSocket support to the chat API"</strong>
+(Given a real codebase with FastAPI routes, Pydantic schemas, and an existing REST chat endpoint.)</pre>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <strong>❌ Raw local LLM</strong>
+<pre>
+"Add a WebSocket endpoint.
+ Use the websockets library.
+ Create handlers.
+ Add auth middleware."
+</pre>
+    </td>
+    <td align="center" width="50%">
+      <strong>🔨 fitz-forge</strong>
+<pre>
+Phase 1: Extend api/routes/chat.py
+  - Reuse existing ChatService
+  - Validate token with current auth layer
+  - Test: pytest tests/api/test_chat_ws.py
+
+Phase 2: Adapt schemas/chat.py
+  - Preserve current ChatMessage shape
+  - Verify: pydantic model_validate()
+</pre>
+    </td>
+  </tr>
+</table>
+
+  → `fitz-forge` turns a broad coding request into grounded context, reviewed decisions, artifact code, and a verification roadmap.
 </div>
 
 ---
 
-## Status
+### Where to start 🚀
 
-`fitz-forge` is an alpha-stage research/engineering project. The project asks a narrow question:
+> [!IMPORTANT]
+> `fitz-forge plan` runs local-first by default. A local model does the planning work, fitz-sage handles code retrieval,
+> SQLite stores jobs and checkpoints, and optional API review only runs when you configure it.
 
-> How much coding-planning ability can be moved out of the model and into the harness around it?
+```bash
+pip install fitz-forge
 
-The current implementation generates coding-plan artifacts from a real codebase using local LLMs. The interesting part is the harness: retrieval, task decomposition, structured schemas, deterministic AST checks, artifact generation, and review/regeneration loops.
+fitz-forge prep
+fitz-forge plan "Add WebSocket support to the chat API"
+```
 
-## Research Question
+The result is a planning artifact: repository context, implementation status, architectural decisions, proposed code
+artifacts, review findings, and commands a human or coding agent can use to verify the work.
 
-Can a local LLM, when wrapped in the right planning harness, produce coding plans that are substantially more complete, grounded, and actionable than the same model prompted directly?
+---
 
-In other words:
+### About
 
-> Can scaffolding compensate for model weakness in agentic coding planning?
+`fitz-forge` is a working LLM harness for agentic coding planning. It reads a real repository, gathers relevant context,
+decomposes the requested change, generates implementation artifacts, validates cross-file consistency, and writes a plan
+that a human or coding agent can execute.
 
-This project treats local models as a stress test. If a weak/local model improves significantly under a harness, that improvement is evidence that at least part of "agentic intelligence" lives in the system design, not only in model weights.
+⭐ The planning pipeline is deliberately decomposed. Instead of one giant prompt, local models work through focused
+retrieval, implementation checks, decision decomposition, decision resolution, synthesis, artifact generation, and review
+passes.
 
-## Current Answer
+⭐ The harness carries the exactness. fitz-sage retrieval, structural indexes, AST passes, call graphs, grounding checks,
+and artifact-set closure checks catch classes of mistakes that prompt-only planning tends to miss.
 
-The current answer is:
+⭐ Evaluation is built around golden-plan taxonomies. For benchmark tasks, a strong model such as Claude Sonnet helps
+author the ideal plan taxonomy, and generated plans are scored against that explicit answer key.
 
-> Yes, substantially for planning. Not enough to replace frontier coding agents end-to-end.
+Yan Fitzner — ([LinkedIn](https://www.linkedin.com/in/yan-fitzner/), [GitHub](https://github.com/yafitzdev), [HuggingFace](https://huggingface.co/yafitzdev)).
 
-What the project has shown so far on curated internal challenge tasks:
+![fitz-forge LLM harness](docs/assets/llm_with_harness.jpg)
 
-- Raw local models tend to produce vague, partial, or hallucinated coding plans.
-- The same class of model becomes much more useful when the task is decomposed into small decisions and each stage is checked.
-- Deterministic scaffolding matters: call graphs, structural indexes, grounding checks, closure checks, and set-level artifact validation catch failures a prompt alone misses.
-- Review/regeneration loops matter: scoped "senior engineer" critique passes can improve stage outputs without relying on one giant self-critique prompt.
-- Token savings are not the core result. Claude Code and similar tools already use caching and still read code during implementation. The stronger direction is plan quality and, next, plan executability.
+---
 
-The next research step is to measure whether harness-produced plans reduce downstream implementation adaptation: fewer missing files, fewer hallucinated APIs, fewer corrective turns, and eventually higher patch-resolution rates on external benchmarks.
+### Why `fitz-forge`?
 
-## Shape of the Difference
+**Planning artifact as the contract 🧾**
+> Every job produces a markdown artifact with codebase context, implementation status, decisions, proposed artifacts,
+> review findings, risks, and verification commands. The plan is meant to be inspected, handed to a coding agent, or used
+> by a human engineer.
 
-Illustrative example, not a benchmark result:
+**Harnessed local models 🧠**
+> Local coding models are much more useful when the harness narrows each call to something the model can do reliably:
+> inspect this context, resolve this decision, write this artifact, critique this stage.
 
-| Direct local prompt | Same model inside the harness |
-|---|---|
-| "Add a WebSocket endpoint. Use the websockets library. Create handlers. Add auth middleware." | "Extend `api/routes/chat.py`; reuse the existing chat service; validate tokens through the existing auth layer; add tests under `tests/api/`; verify with `pytest ...`." |
-| Generic advice. No file paths. Easy to hallucinate libraries and miss repository conventions. | Real files, explicit dependencies, phased work, and verification commands grounded in the codebase. |
+**Codebase-grounded context 🗂️** → [Agent Context Gathering](docs/features/pipeline/01_agent-context-gathering.md)
+> fitz-sage retrieval, structural indexes, interface signatures, import context, and AST-derived summaries feed the
+> planning pipeline before design decisions are made.
 
-## What It Produces
+**Senior-engineer review layer 🧑‍💼** → [Senior Engineer Reviews](docs/features/infrastructure/senior-engineer-reviews.md)
+> Narrow review passes critique decomposition, assumptions, architecture, design, semantic artifact quality, and artifact
+> coverage. A failed review can regenerate the affected stage; a failed review pass leaves the original output unchanged.
 
-`fitz-forge` produces a markdown plan with structured sections such as:
+**Closed artifact sets 🔒**
+> Artifact generation is checked as a set, not just one file at a time. Closure checks look for missing cross-file symbols,
+> unresolved imports, invalid kwargs, async/sync misuse, and typed field access errors.
 
-- relevant codebase context,
-- implementation status checks,
-- decomposed architectural decisions,
-- resolved decisions with evidence,
-- proposed code artifacts,
-- phased roadmap and verification commands,
-- risk notes and review findings.
+**MCP-ready workflow 🔌**
+> The CLI and MCP server share the same service layer. `fitz-forge` can run standalone, or sit behind Claude Desktop,
+> Claude Code, Codex, or another MCP-capable client.
 
-The artifact code is intended to be concrete enough for a human or coding agent to inspect and adapt. It is not yet guaranteed to be directly applicable as a patch.
+**Local-first execution 🏠**
+> Ollama, LM Studio, and llama.cpp are supported local backends. Jobs are stored in SQLite and long runs can be resumed
+> from checkpoints.
 
-## How It Works
+---
 
-A 10-stage pipeline decomposes architectural planning into small, focused LLM calls interleaved with deterministic AST work. Retrieval and implementation checks feed a decision-based reasoning core: decompose, resolve, synthesize. Artifacts are then generated, closure-checked, and grounded against the real codebase before the plan is written.
+### Planning Artifact
 
-The important design choice is that **a senior-engineer review layer wraps the pipeline**. It runs narrow critique passes scoped to one stage's output, then regenerates the affected stage when a review flags issues.
+`fitz-forge` treats the plan as the output contract.
+
+It is not a guaranteed patch generator. The artifact code is intended to be concrete enough for a human or coding agent to
+inspect, adapt, and implement.
+
+<br>
+
+| Part | Meaning | What you can do with it |
+|------|---------|-------------------------|
+| **Context** | Relevant repository files, structural summaries, interface signatures, and constraints. | See what evidence the plan is grounded in. |
+| **Implementation status** | Whether the requested behavior already exists, with evidence and gaps. | Avoid reimplementing finished work or plan around the real missing pieces. |
+| **Decisions** | Decomposed architectural decisions and resolved choices with rationale. | Review the design before code generation or agent handoff. |
+| **Artifacts** | Proposed file-level code artifacts for critical implementation pieces. | Inspect concrete code shape and catch wrong interfaces early. |
+| **Reviews** | Senior-engineer critique of assumptions, architecture, design, artifacts, and coverage. | Decide whether the plan is ready or needs another cycle. |
+| **Roadmap** | Phased implementation steps, verification commands, and risk notes. | Hand the work to a coding agent or execute it manually. |
+
+---
+
+### Pipeline
+
+[Pipeline Docs](docs/features/) • [Architecture](docs/features/reference/ARCHITECTURE.md) • [Configuration](docs/features/reference/CONFIG.md)
+
+`fitz-forge` runs a 10-stage planning pipeline with deterministic code analysis between LLM calls.
+
+The important design choice is that **a senior-engineer review layer wraps the pipeline**. It runs narrow critique passes
+scoped to one stage's output, then regenerates the affected stage when a review flags issues.
+
+<br>
 
 ```text
      USER PROMPT
@@ -112,101 +196,82 @@ The important design choice is that **a senior-engineer review layer wraps the p
           │
           ▼
     ~/.fitz-forge/plans/plan_<id>.md
-
-Total: ~45-70 LLM calls · ~8-12 min on RTX 5090 for the current Python-heavy benchmark path.
 ```
 
-| # | Stage | Docs |
-|---|---|---|
-| 1 | Agent Context Gathering | [01_agent-context-gathering.md](docs/features/pipeline/01_agent-context-gathering.md) |
-| 2 | Implementation Check | [02_implementation-check.md](docs/features/pipeline/02_implementation-check.md) |
-| 3 | Call Graph Extraction | [03_call-graph-extraction.md](docs/features/pipeline/03_call-graph-extraction.md) |
-| 4 | Decision Decomposition | [04_decision-decomposition.md](docs/features/pipeline/04_decision-decomposition.md) |
-| 5 | Decision Resolution | [05_decision-resolution.md](docs/features/pipeline/05_decision-resolution.md) |
-| 6 | Synthesis | [06_synthesis.md](docs/features/pipeline/06_synthesis.md) |
-| 7 | Artifact Generation | [07_artifact-generation.md](docs/features/pipeline/07_artifact-generation.md) |
-| 8 | Grounding Validation | [08_grounding-validation.md](docs/features/pipeline/08_grounding-validation.md) |
-| 9 | Coherence Check | [09_coherence-check.md](docs/features/pipeline/09_coherence-check.md) |
-| 10 | Render + Write | - |
-| * | Senior Engineer Reviews | [senior-engineer-reviews.md](docs/features/infrastructure/senior-engineer-reviews.md) |
+<br>
 
-The pipeline decomposes a problem that would overwhelm a small model into calls small enough to review, validate, and retry. Deterministic AST work carries the structural load so LLM calls can focus on interpretation and design.
+| # | Stage | What it does | Docs |
+|---|-------|--------------|------|
+| 1 | Agent Context Gathering | Retrieve and compress codebase context. | [01_agent-context-gathering.md](docs/features/pipeline/01_agent-context-gathering.md) |
+| 2 | Implementation Check | Ask whether the requested behavior already exists. | [02_implementation-check.md](docs/features/pipeline/02_implementation-check.md) |
+| 3 | Call Graph Extraction | Build deterministic call graph context. | [03_call-graph-extraction.md](docs/features/pipeline/03_call-graph-extraction.md) |
+| 4 | Decision Decomposition | Split the task into architectural decisions. | [04_decision-decomposition.md](docs/features/pipeline/04_decision-decomposition.md) |
+| 5 | Decision Resolution | Resolve each decision against code evidence. | [05_decision-resolution.md](docs/features/pipeline/05_decision-resolution.md) |
+| 6 | Synthesis | Build the plan shape and design. | [06_synthesis.md](docs/features/pipeline/06_synthesis.md) |
+| 7 | Artifact Generation | Generate proposed code artifacts. | [07_artifact-generation.md](docs/features/pipeline/07_artifact-generation.md) |
+| 8 | Grounding Validation | Check generated content against the repository. | [08_grounding-validation.md](docs/features/pipeline/08_grounding-validation.md) |
+| 9 | Coherence Check | Check cross-stage consistency. | [09_coherence-check.md](docs/features/pipeline/09_coherence-check.md) |
+| 10 | Render + Write | Write the final markdown plan. | - |
 
-The senior-engineer review layer is the quality multiplier. A local model writing a plan unsupervised tends to pick plausible wrong patterns, under-specify interfaces, and build on assumptions the codebase contradicts. Each review is one narrow critique that hands feedback back to the stage for regeneration. Reviews are fail-safe: they can improve the plan or leave it unchanged.
+<br>
 
-Full pipeline documentation lives in [docs/features/](docs/features/).
+> [!NOTE]
+> The current Python-heavy benchmark path is roughly 45-70 LLM calls and about 8-12 minutes on an RTX 5090. Hardware,
+> model, source size, and optional review settings change that substantially.
 
-## Architecture
+---
 
-```text
-CLI (typer)   -> tools/ -> SQLiteJobStore <- BackgroundWorker -> DecomposedPipeline
-MCP (fastmcp) -> tools/ -> SQLiteJobStore                              |
-                                                                       v
-                                                                 LLM Client
-                                                        Ollama / LM Studio / llama.cpp
-```
+### Evaluation
 
-Main modules:
+[Scorer V2 Spec](docs/features/reference/SCORER-V2-SPEC.md) • [Example Taxonomy](benchmarks/challenges/streaming_implementation/taxonomy.json) • [Golden-Plan Authoring Harness](docs/roadmap/golden-plan-authoring-harness.md)
 
-| Module | Role |
-|---|---|
-| `fitz_forge/cli.py` | Typer CLI |
-| `fitz_forge/server.py` | FastMCP server |
-| `fitz_forge/tools/` | Shared service layer for CLI and MCP |
-| `fitz_forge/models/` | SQLite job store and job state models |
-| `fitz_forge/background/` | Worker lifecycle and crash recovery |
-| `fitz_forge/llm/` | Ollama, LM Studio, llama.cpp clients |
-| `fitz_forge/planning/` | Planning pipeline, reviews, artifacts, validation |
-| `benchmarks/` | Internal evaluation harnesses and challenge tasks |
+The core evaluation problem is simple:
 
-See [docs/features/reference/ARCHITECTURE.md](docs/features/reference/ARCHITECTURE.md) for the full architecture guide.
+> How do you score a planning artifact when there is no single correct patch yet?
 
-## Evaluation
+`fitz-forge` answers that with a task-specific golden-plan taxonomy. For each benchmark challenge, a frontier model such as
+Claude Sonnet is used to inspect the target repository and draft the ideal planning artifact: the right architecture, the
+files that matter, the expected implementation shape, and the common wrong approaches. That draft is reviewed into a
+taxonomy before local-model output is scored.
 
-The core evaluation question is: **how do you score a planning artifact when there is no single correct patch yet?**
+<br>
 
-`fitz-forge` answers this with a task-specific golden-plan taxonomy. For each benchmark challenge, a frontier model such as Claude Sonnet is used to inspect the target repository and draft the ideal planning artifact: the right architecture, the files that matter, the expected implementation shape, and the common wrong approaches. That draft is then reviewed into a taxonomy before any local-model output is scored.
+| Taxonomy layer | What it captures |
+|----------------|------------------|
+| **Architecture tiers** | Whether the plan chooses the correct implementation shape or a degraded alternative. |
+| **Required files** | Which files must be touched, which are optional, and which are distracting. |
+| **Artifact criteria** | What each critical code artifact must contain. |
+| **Failure modes** | Stubs, fabricated APIs, wrong request fields, missing streaming behavior, ungrounded imports, and similar defects. |
+| **Verification shape** | Commands and checks that should prove the implementation works. |
 
-The taxonomy defines what a good plan must understand:
-
-- which files are required, recommended, or optional,
-- what the ideal architecture looks like,
-- which degraded architecture patterns are acceptable, partial, poor, or failing,
-- what a correct implementation artifact should contain for each critical file,
-- which failure modes should be penalized, such as stubs, fabricated APIs, missing streaming behavior, wrong request fields, or ungrounded imports.
-
-That taxonomy becomes the benchmark's answer key. A generated plan is not graded by vibes; it is classified against explicit tiers.
-
-Example shape for a streaming feature:
+Example architecture tiers for a streaming feature:
 
 | Tier | Meaning | Score |
-|---|---|---:|
-| `A1` | Full existing pipeline preserved; final generation streams tokens correctly | 100 |
-| `A2` | Streaming works but bypasses part of the synthesis abstraction | 75 |
-| `A3` | Calls a provider stream directly and skips retrieval/context logic | 30 |
-| `A4` | Calls the blocking answer path and splits the finished text | 10 |
-| `A5` | Gives up, stubs, or misses the feature | 0 |
+|------|---------|------:|
+| `A1` | Full existing pipeline preserved; final generation streams tokens correctly. | 100 |
+| `A2` | Streaming works but bypasses part of the synthesis abstraction. | 75 |
+| `A3` | Calls a provider stream directly and skips retrieval/context logic. | 30 |
+| `A4` | Calls the blocking answer path and splits the finished text. | 10 |
+| `A5` | Gives up, stubs, or misses the feature. | 0 |
 
-The same idea applies per file. For example, `engine.py` might have tiers for "full pipeline with `yield` and correct return type," "partial pipeline," "direct provider shortcut," "blocking implementation," and "absent/stubbed." Routes, schemas, SDK files, and services each get their own task-specific tiers when they matter.
+The scorer combines deterministic checks with taxonomy classification. Deterministic checks catch exact failures such as
+missing required files, parse errors, `NotImplementedError`, `sys.stdout`, missing `yield`, fabricated symbols, unresolved
+imports, cross-artifact method mismatches, and invalid roadmap commands. Taxonomy classification then maps the plan's
+architecture and critical artifacts onto the golden answer key.
 
-The scorer then combines two layers:
+> [!NOTE]
+> Plans generated during normal use do not carry a score. The scorer is an offline evaluation harness for measuring the
+> planning pipeline and comparing raw local-model output against the same model inside the harness.
 
-- **Deterministic checks** verify things a program can know exactly: required-file coverage, parseability, `NotImplementedError`, `sys.stdout`, missing `yield`, fabricated methods/classes/fields, unresolved imports, cross-artifact method mismatches, and roadmap verification commands.
-- **Taxonomy classification** maps the plan's architecture and critical artifacts onto the golden taxonomy entries. A model can help classify, but the scores come from the prewritten taxonomy, not from an open-ended opinion.
+---
 
-This makes the benchmark useful for research: a raw local model and the same model inside the harness can be compared against the same golden taxonomy. The question becomes measurable: did the harness move the plan toward the ideal architecture, required file coverage, grounded artifacts, and executable roadmap?
+<details>
 
-Plans generated during normal use do not carry a score. The scorer is an offline evaluation harness for measuring the planning pipeline. See [docs/features/reference/SCORER-V2-SPEC.md](docs/features/reference/SCORER-V2-SPEC.md) for the detailed scoring design, [benchmarks/challenges/streaming_implementation/taxonomy.json](benchmarks/challenges/streaming_implementation/taxonomy.json) for a concrete taxonomy, and [docs/roadmap/golden-plan-authoring-harness.md](docs/roadmap/golden-plan-authoring-harness.md) for the planned Sonnet-assisted authoring tool.
+<summary><strong>📦 Quick Start</strong></summary>
 
-## Quick Start
+<br>
 
-Prerequisites:
-
-- Python 3.10+
-- one local LLM backend: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp)
-- [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval
-
-Install:
+#### Install
 
 ```bash
 pip install fitz-forge
@@ -219,13 +284,19 @@ pip install "fitz-forge[api-review]"  # Anthropic API review pass
 pip install "fitz-forge[dev]"         # pytest, ruff, build tools
 ```
 
-First-run configuration:
+#### Configure
 
 ```bash
 fitz-forge prep
 ```
 
-Create and run a plan:
+Prerequisites:
+
+- Python 3.10+
+- one local LLM backend: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or [llama.cpp](https://github.com/ggerganov/llama.cpp)
+- [fitz-sage](https://github.com/yafitzdev/fitz-sage) for code retrieval
+
+#### Run
 
 ```bash
 fitz-forge plan "Build a plugin system for data transformations"
@@ -240,7 +311,7 @@ fitz-forge list
 fitz-forge get <id>
 ```
 
-Development install:
+#### Development install
 
 ```bash
 git clone https://github.com/yafitzdev/fitz-forge.git
@@ -248,7 +319,15 @@ cd fitz-forge
 pip install -e ".[dev]"
 ```
 
-## Common CLI Commands
+</details>
+
+---
+
+<details>
+
+<summary><strong>📦 CLI Reference</strong></summary>
+
+<br>
 
 ```bash
 fitz-forge prep                 # Configure local model provider
@@ -268,12 +347,20 @@ fitz-forge serve                # Start MCP server
 Job lifecycle:
 
 ```text
-QUEUED -> RUNNING -> COMPLETE
-                  -> AWAITING_REVIEW -> QUEUED (confirm) / COMPLETE (cancel)
-                  -> FAILED / INTERRUPTED (both retryable)
+QUEUED → RUNNING → COMPLETE
+                  → AWAITING_REVIEW → QUEUED (confirm) / COMPLETE (cancel)
+                  → FAILED / INTERRUPTED (both retryable)
 ```
 
-## MCP Usage
+</details>
+
+---
+
+<details>
+
+<summary><strong>📦 MCP Usage</strong></summary>
+
+<br>
 
 For Claude Desktop, Claude Code, or another MCP-capable client:
 
@@ -291,7 +378,7 @@ For Claude Desktop, Claude Code, or another MCP-capable client:
 Exposed MCP tools:
 
 | Tool | Description |
-|---|---|
+|------|-------------|
 | `create_plan` | Queue a planning job |
 | `check_status` | Check job progress |
 | `get_plan` | Retrieve a completed plan |
@@ -300,27 +387,110 @@ Exposed MCP tools:
 | `confirm_review` | Approve optional API review |
 | `cancel_review` | Skip optional API review |
 
-## Configuration
+</details>
 
-`fitz-forge prep` creates a local config file and job database. The config selects the LLM backend, model, context length, source directory behavior, output directory, and optional Anthropic review settings.
+---
+
+<details>
+
+<summary><strong>📦 Architecture</strong> → <a href="docs/features/reference/ARCHITECTURE.md">Full Architecture Guide</a></summary>
+
+<br>
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                         fitz-forge                              │
+├─────────────────────────────────────────────────────────────────┤
+│  User Interfaces                                                │
+│  CLI: prep | plan | run | list | status | get | serve           │
+│  MCP: create_plan | check_status | get_plan | retry_job         │
+├─────────────────────────────────────────────────────────────────┤
+│  Shared Service Layer                                           │
+│  fitz_forge/tools: CLI and MCP call the same operations          │
+├─────────────────────────────────────────────────────────────────┤
+│  Job Store                                                       │
+│  SQLiteJobStore: queued jobs | state | checkpoints | plans       │
+├─────────────────────────────────────────────────────────────────┤
+│  Worker                                                         │
+│  BackgroundWorker: sequential execution and crash recovery       │
+├─────────────────────────────────────────────────────────────────┤
+│  Planning Pipeline                                               │
+│  retrieval | decisions | synthesis | artifacts | validation      │
+├─────────────────────────────────────────────────────────────────┤
+│  LLM Providers                                                   │
+│  Ollama | LM Studio | llama.cpp | optional Anthropic review      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Main modules:
+
+| Module | Role |
+|--------|------|
+| `fitz_forge/cli.py` | Typer CLI |
+| `fitz_forge/server.py` | FastMCP server |
+| `fitz_forge/tools/` | Shared service layer for CLI and MCP |
+| `fitz_forge/models/` | SQLite job store and job state models |
+| `fitz_forge/background/` | Worker lifecycle and crash recovery |
+| `fitz_forge/llm/` | Ollama, LM Studio, llama.cpp clients |
+| `fitz_forge/planning/` | Planning pipeline, reviews, artifacts, validation |
+| `benchmarks/` | Internal evaluation harnesses and challenge tasks |
+
+</details>
+
+---
+
+<details>
+
+<summary><strong>📦 Configuration</strong> → <a href="docs/features/reference/CONFIG.md">Full Configuration Guide</a></summary>
+
+<br>
+
+`fitz-forge prep` creates a local config file and job database. The config selects the LLM backend, model, context length,
+source directory behavior, output directory, and optional Anthropic review settings.
 
 | Platform | Config path |
-|---|---|
+|----------|-------------|
 | Windows | `%LOCALAPPDATA%\fitz-forge\fitz-forge\config.yaml` |
 | macOS | `~/Library/Application Support/fitz-forge/config.yaml` |
 | Linux | `~/.config/fitz-forge/config.yaml` |
 
-Supported local providers are Ollama, LM Studio, and llama.cpp. See [docs/features/reference/CONFIG.md](docs/features/reference/CONFIG.md) for every field.
+Supported local providers are Ollama, LM Studio, and llama.cpp.
 
-## Limitations
+</details>
 
-- Not a general autonomous coding agent.
-- Not a guaranteed patch generator.
-- Not a replacement for Claude Code, Codex, or human review.
-- Most mature on Python codebases; TypeScript-aware infrastructure exists but should be treated as experimental.
-- Benchmark scores are offline research signals, not correctness guarantees for normal user plans.
+---
 
-## Development
+<details>
+
+<summary><strong>📦 Boundaries / Troubleshooting</strong></summary>
+
+<br>
+
+**Is this a coding agent?**
+> Not by itself. `fitz-forge` is a planning harness. It produces a grounded implementation plan and proposed artifacts;
+> another coding agent or human still applies the patch.
+
+**Are generated artifacts guaranteed to apply cleanly?**
+> No. They are concrete planning artifacts, not a correctness guarantee. Closure and grounding checks catch important
+> failure classes, but generated code still needs review and tests.
+
+**Which codebases work best?**
+> The current implementation is most mature on Python codebases. TypeScript-aware infrastructure exists, but should be
+> treated as experimental.
+
+**Do benchmark scores apply to normal plans?**
+> No. Benchmark scores are offline evaluation signals. Normal planning jobs are not scored unless you run the benchmark
+> harness.
+
+**Why can a run take several minutes?**
+> The pipeline intentionally breaks planning into many small LLM calls and review passes. That makes local models more
+> reliable, but it is slower than one-shot prompting.
+
+</details>
+
+---
+
+### Development 🧪
 
 ```bash
 pytest
@@ -328,16 +498,31 @@ ruff check fitz_forge/
 ruff format --check fitz_forge/ tests/
 ```
 
-This is alpha research code. Treat CI failures as blockers before publishing a release or using benchmark numbers as project claims.
+This is alpha software. Treat CI failures as blockers before publishing a release or using benchmark numbers as project
+claims.
 
-## Links
+---
 
-- [Architecture](docs/features/reference/ARCHITECTURE.md)
-- [Feature Docs](docs/features/)
-- [Configuration Reference](docs/features/reference/CONFIG.md)
-- [Troubleshooting](docs/features/reference/TROUBLESHOOTING.md)
-- [Contributing](CONTRIBUTING.md)
-
-## License
+### License
 
 MIT
+
+---
+
+### Links
+
+- [GitHub](https://github.com/yafitzdev/fitz-forge)
+- [PyPI](https://pypi.org/project/fitz-forge/)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+
+**Documentation:**
+- [Feature Docs](docs/features/)
+- [Architecture](docs/features/reference/ARCHITECTURE.md)
+- [Configuration Reference](docs/features/reference/CONFIG.md)
+- [Scorer V2 Spec](docs/features/reference/SCORER-V2-SPEC.md)
+- [Senior Engineer Reviews](docs/features/infrastructure/senior-engineer-reviews.md)
+- [Agent Context Gathering](docs/features/pipeline/01_agent-context-gathering.md)
+- [Artifact Generation](docs/features/pipeline/07_artifact-generation.md)
+- [Grounding Validation](docs/features/pipeline/08_grounding-validation.md)
+- [Troubleshooting](docs/features/reference/TROUBLESHOOTING.md)

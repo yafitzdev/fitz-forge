@@ -268,15 +268,12 @@ class DecisionDecompositionStage(PipelineStage):
             )
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': senior review errored ({e}); "
-                "keeping original decomposition"
+                f"Stage '{self.name}': senior review errored ({e}); keeping original decomposition"
             )
             return parsed, decisions, raw
 
         if review.passed:
-            logger.info(
-                f"Stage '{self.name}': senior review passed ({len(decisions)} decisions)"
-            )
+            logger.info(f"Stage '{self.name}': senior review passed ({len(decisions)} decisions)")
             return parsed, decisions, raw
 
         logger.info(
@@ -307,14 +304,11 @@ class DecisionDecompositionStage(PipelineStage):
                 label="decomp_senior_retry",
             )
             t1 = time.monotonic()
-            logger.info(
-                f"Stage '{self.name}': senior-retry took {t1 - t0:.1f}s"
-            )
+            logger.info(f"Stage '{self.name}': senior-retry took {t1 - t0:.1f}s")
             retry_parsed = self.parse_output(retry_raw)
         except Exception as e:
             logger.warning(
-                f"Stage '{self.name}': senior-retry failed ({e}); "
-                "keeping original decomposition"
+                f"Stage '{self.name}': senior-retry failed ({e}); keeping original decomposition"
             )
             return parsed, decisions, raw
 

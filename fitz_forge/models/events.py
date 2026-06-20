@@ -229,7 +229,7 @@ def describe_phase(phase: str | None) -> str:
     if phase in _PHASE_DESCRIPTIONS:
         return _PHASE_DESCRIPTIONS[phase]
     if phase.startswith("agent:confirming:"):
-        return f"Confirming {phase[len('agent:confirming:'):]}"
+        return f"Confirming {phase[len('agent:confirming:') :]}"
     if phase.startswith("agent:summarizing:"):
         filename = phase.split(":")[-1].rsplit("/", 1)[-1]
         return f"Summarizing {filename}..."

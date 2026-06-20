@@ -40,9 +40,9 @@ PARSE_OK_CASES = [
 
 # Snippets the parser should reject post-recovery.
 PARSE_FAIL_CASES = [
-    "def foo(:\n    return",        # unterminated signature
-    "class ):\n    pass",             # malformed class header
-    "def foo(x) return x",            # missing colon
+    "def foo(:\n    return",  # unterminated signature
+    "class ):\n    pass",  # malformed class header
+    "def foo(x) return x",  # missing colon
 ]
 
 

@@ -176,7 +176,7 @@ def _build_user_prompt(
         "2. **Missing rubric-mandated detail.** If quality criteria "
         "demand specific field names (e.g. preserve `pre_rerank_score`), "
         "those exact names must appear in the data model or a "
-        "component's interface list. \"Preserve ranking signals\" is "
+        'component\'s interface list. "Preserve ranking signals" is '
         "not good enough — the implementer will settle for one "
         "composite field.\n\n"
         "3. **Leaky contracts.** Components returning raw dicts across "
@@ -187,23 +187,23 @@ def _build_user_prompt(
         "and the design skips one, the implementer will either invent "
         "it or silently collapse two layers.\n\n"
         "5. **ADRs that don't reinforce the rubric.** An ADR titled "
-        "\"We record ranking signals\" whose decision says \"add a "
-        "ranking_explanation dict\" papers over the criteria demanding "
+        '"We record ranking signals" whose decision says "add a '
+        'ranking_explanation dict" papers over the criteria demanding '
         "per-signal breakdown.\n\n"
         "Return JSON only. No prose. No code fences.\n\n"
         "{\n"
-        "  \"passed\": true | false,\n"
-        "  \"issues\": [\n"
+        '  "passed": true | false,\n'
+        '  "issues": [\n'
         "    {\n"
-        "      \"target\": \"<component name, artifact filename, adr title, or 'data_model'>\",\n"
-        "      \"intent\": \"<what a senior engineer would expect the design to specify>\",\n"
-        "      \"actual\": \"<what the design currently says, or what's missing>\",\n"
-        "      \"suggestion\": \"<concrete addition: name the fields, rename the signature, add the missing component>\"\n"
+        '      "target": "<component name, artifact filename, adr title, or \'data_model\'>",\n'
+        '      "intent": "<what a senior engineer would expect the design to specify>",\n'
+        '      "actual": "<what the design currently says, or what\'s missing>",\n'
+        '      "suggestion": "<concrete addition: name the fields, rename the signature, add the missing component>"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
         "If the design is already specific enough to drive correct "
-        "implementation, return {\"passed\": true, \"issues\": []}. Do "
+        'implementation, return {"passed": true, "issues": []}. Do '
         "not manufacture issues for designs that are already good — "
         "that just adds noise without improving the plan."
     )
@@ -275,9 +275,7 @@ async def review_design(
     try:
         parsed = extract_json(raw)
     except (ValueError, json.JSONDecodeError) as e:
-        logger.warning(
-            "design_review: unparseable response (%s); treating as passed", e
-        )
+        logger.warning("design_review: unparseable response (%s); treating as passed", e)
         return ReviewResult(scope="design", passed=True, raw_response=raw)
 
     if not isinstance(parsed, dict):

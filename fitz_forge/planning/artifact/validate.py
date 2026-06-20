@@ -57,12 +57,10 @@ _DATA_BASES = frozenset(
         "NamedTuple",
     }
 )
-_DATA_DECORATORS = frozenset(
-    {"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"}
-)
+_DATA_DECORATORS = frozenset({"dataclass", "pydantic_dataclass", "attr.s", "attrs", "define"})
 
 
-def _decorator_name(dec_node: "Node") -> str | None:
+def _decorator_name(dec_node: Node) -> str | None:
     """Return the leaf identifier of a ``decorator`` node."""
     body: Node | None = None
     for c in dec_node.children:
@@ -90,7 +88,7 @@ def _decorator_name(dec_node: "Node") -> str | None:
     return None
 
 
-def _class_decorators(class_def: "Node") -> list[str]:
+def _class_decorators(class_def: Node) -> list[str]:
     """Return decorator leaf names for a class node."""
     parent = class_def.parent
     if parent is not None and parent.type == "decorated_definition":
@@ -104,7 +102,7 @@ def _class_decorators(class_def: "Node") -> list[str]:
     return []
 
 
-def _is_data_class(class_def: "Node") -> bool:
+def _is_data_class(class_def: Node) -> bool:
     """True iff the class is Pydantic / dataclass / Enum / TypedDict / annotated.
 
     Short-circuits in order: annotated field → base class → decorator.
@@ -134,14 +132,10 @@ def _is_data_class(class_def: "Node") -> bool:
             if name in _DATA_BASES:
                 return True
 
-    for d in _class_decorators(class_def):
-        if d in _DATA_DECORATORS:
-            return True
-
-    return False
+    return any(d in _DATA_DECORATORS for d in _class_decorators(class_def))
 
 
-def _iter_all_functions(root: "Node"):
+def _iter_all_functions(root: Node):
     """Yield every function_definition in the tree (nested and decorated)."""
     stack: list[Node] = [root]
     seen: set[int] = set()

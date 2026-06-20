@@ -49,6 +49,7 @@ def _summarize_resolution(resolution: dict, decision: dict) -> tuple[str, str | 
     target = relevant[0] if relevant else None
     return first_line, target
 
+
 logger = logging.getLogger(__name__)
 
 _CONTRADICTION_CHECK_PROMPT = """\
@@ -204,7 +205,7 @@ class DecisionResolutionStage(PipelineStage):
             constraint_text = (
                 "UPSTREAM CONTEXT — resolved decisions this one depends on, plus "
                 "any emitted constraints. If the question references an upstream "
-                "choice (e.g. \"given d1's mechanism\"), your answer MUST be "
+                'choice (e.g. "given d1\'s mechanism"), your answer MUST be '
                 "consistent with the `RESOLVED:` line for that decision:\n"
                 + "\n".join(f"- {c}" for c in upstream_constraints)
             )

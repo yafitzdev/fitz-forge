@@ -12,10 +12,9 @@ import logging
 import re
 from typing import Any
 
-from fitz_forge.planning.validation.grounding.parser import parse_python
-
 from fitz_forge.llm.generate import generate
 from fitz_forge.planning.pipeline.stages.base import SYSTEM_PROMPT, extract_json
+from fitz_forge.planning.validation.grounding.parser import parse_python
 
 logger = logging.getLogger(__name__)
 
@@ -512,9 +511,7 @@ def ensure_valid_artifacts(
                 if callee is not None and callee.type == "attribute":
                     idents = [c for c in callee.children if c.type == "identifier"]
                     if idents:
-                        calls.append(
-                            (idents[-1].text.decode("utf-8"), n.start_point[0] + 1)
-                        )
+                        calls.append((idents[-1].text.decode("utf-8"), n.start_point[0] + 1))
             stack.extend(n.children)
         suspicious: set[int] = set()
         for method_name, line_num in calls:

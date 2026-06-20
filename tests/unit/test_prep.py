@@ -182,9 +182,7 @@ class TestIsUnconfigured:
 
     def test_empty_model(self, tmp_path: Path):
         cfg = tmp_path / "config.yaml"
-        cfg.write_text(
-            yaml.safe_dump({"lm_studio": {"model": ""}}), encoding="utf-8"
-        )
+        cfg.write_text(yaml.safe_dump({"lm_studio": {"model": ""}}), encoding="utf-8")
         assert is_unconfigured(cfg) is True
 
     def test_placeholder_model(self, tmp_path: Path):
@@ -211,9 +209,7 @@ class TestIsUnconfigured:
 
 def _patch_probe(success_url: str | None) -> AsyncMock:
     """Return an AsyncMock for probe_servers that matches success_url."""
-    results = [
-        (url, label, url == success_url) for url, label in CASCADE_TARGETS
-    ]
+    results = [(url, label, url == success_url) for url, label in CASCADE_TARGETS]
     return AsyncMock(return_value=results)
 
 
@@ -383,9 +379,7 @@ class TestCliIntegration:
 
 
 class TestFirstRunTrigger:
-    def test_load_config_triggers_wizard_when_unconfigured(
-        self, tmp_path, monkeypatch
-    ):
+    def test_load_config_triggers_wizard_when_unconfigured(self, tmp_path, monkeypatch):
         """If config is missing or model is placeholder, loader invokes wizard."""
         from fitz_forge.config import loader, prep as prep_mod
 
@@ -431,9 +425,7 @@ class TestFirstRunTrigger:
         cfg_path = tmp_path / "config.yaml"
         # Pre-write a config with the placeholder "local-model" value.
         cfg_path.write_text(
-            yaml.safe_dump(
-                {"provider": "lm_studio", "lm_studio": {"model": "local-model"}}
-            ),
+            yaml.safe_dump({"provider": "lm_studio", "lm_studio": {"model": "local-model"}}),
             encoding="utf-8",
         )
 
@@ -449,5 +441,3 @@ class TestFirstRunTrigger:
         config = loader.load_config()
         assert invoked["count"] == 1
         assert config.lm_studio.model == "real-model"
-
-

@@ -23,4 +23,4 @@ if sys.platform == "win32":
 
         platform._wmi_query = _wmi_disabled
 
-__version__ = "0.3.0"
+__version__ = "0.6.3"

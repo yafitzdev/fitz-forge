@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.3] - 2026-06-20
+
+### 🔄 Changed
+
+- Updated README positioning around the local-LLM agentic coding-planning harness.
+- Documented the golden-plan taxonomy approach used to evaluate planning artifacts.
+- Moved reference docs to `docs/features/reference/`.
+- Switched `.gitignore` to an allow-list style policy.
+- Updated package metadata for the current project description.
+- Aligned formatting, lint, and gatherer tests with the current CI configuration.
+
+### 🚀 Added
+
+- Roadmap note for a golden-plan authoring harness.
+
+### 🗑️ Removed
+
+- Removed the tracked `examples/` directory.
+
+---
+
 ## [0.6.2] - 2026-04-16
 
 ### 🎉 Highlights
@@ -470,7 +491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 391 tests
 
-[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/yafitzdev/fitz-forge/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/yafitzdev/fitz-forge/compare/v0.5.0...v0.6.0

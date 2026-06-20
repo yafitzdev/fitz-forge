@@ -118,13 +118,11 @@ class OpenAIApiClient:
         timeout: int = 300,
         api_key: str | None = None,
         disable_thinking: bool = True,
-        gpu_guard: "GPUTemperatureGuard | None" = None,
+        gpu_guard: GPUTemperatureGuard | None = None,
         context_length: int = 32768,
     ) -> None:
         if AsyncOpenAI is None:
-            raise ImportError(
-                "openai package required. Install with: pip install openai"
-            )
+            raise ImportError("openai package required. Install with: pip install openai")
 
         self.base_url = base_url
         self.model = model
@@ -339,7 +337,7 @@ class OpenAIApiClient:
     async def generate_with_monitoring(
         self,
         messages: list[dict],
-        monitor: "MemoryMonitor",
+        monitor: MemoryMonitor,
     ) -> tuple[str, str]:
         """Generate with a MemoryMonitor running in parallel.
 

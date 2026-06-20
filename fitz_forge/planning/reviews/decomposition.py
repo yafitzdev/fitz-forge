@@ -129,18 +129,18 @@ def _build_user_prompt(
         "entry and the implementation. Flag any missing middle layer.\n\n"
         "Return JSON only. No prose. No code fences.\n\n"
         "{\n"
-        "  \"passed\": true | false,\n"
-        "  \"issues\": [\n"
+        '  "passed": true | false,\n'
+        '  "issues": [\n'
         "    {\n"
-        "      \"target\": \"<decision id, or 'missing' if the issue is a missing question>\",\n"
-        "      \"intent\": \"<the quality bar a senior engineer would expect>\",\n"
-        "      \"actual\": \"<what this decomposition currently does wrong>\",\n"
-        "      \"suggestion\": \"<concrete change: rephrase this question, add a new decision, merge two decisions, etc.>\"\n"
+        '      "target": "<decision id, or \'missing\' if the issue is a missing question>",\n'
+        '      "intent": "<the quality bar a senior engineer would expect>",\n'
+        '      "actual": "<what this decomposition currently does wrong>",\n'
+        '      "suggestion": "<concrete change: rephrase this question, add a new decision, merge two decisions, etc.>"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
         "If you find no genuine issues (the decomposition is sound), "
-        "return {\"passed\": true, \"issues\": []}. Do not manufacture "
+        'return {"passed": true, "issues": []}. Do not manufacture '
         "issues for decompositions that are already good — that just "
         "makes the plan slower without improving quality."
     )

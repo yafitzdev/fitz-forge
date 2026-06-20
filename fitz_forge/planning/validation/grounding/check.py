@@ -19,6 +19,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .index import IndexedClass, StructuralIndexLookup
 from .inference import (
     _callable_of,
     _function_name,
@@ -28,7 +29,6 @@ from .inference import (
     iter_class_methods,
 )
 from .parser import parse_python
-from .index import IndexedClass, StructuralIndexLookup
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -238,7 +238,7 @@ _SKIP_NAMES = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _iter_all_functions(root: "Node"):
+def _iter_all_functions(root: Node):
     """Yield every function_definition in the tree (nested + decorated)."""
     stack: list[Node] = [root]
     seen: set[int] = set()
@@ -255,7 +255,7 @@ def _iter_all_functions(root: "Node"):
         stack.extend(n.children)
 
 
-def _walk_bfs(root: "Node"):
+def _walk_bfs(root: Node):
     """BFS traversal — matches ast.walk visit order."""
     q: deque[Node] = deque([root])
     while q:
@@ -264,7 +264,7 @@ def _walk_bfs(root: "Node"):
         q.extend(n.children)
 
 
-def _param_type_name(type_node: "Node") -> str | None:
+def _param_type_name(type_node: Node) -> str | None:
     """Extract name for a parameter annotation — only identifier / attribute."""
     named = [c for c in type_node.children if c.is_named]
     if len(named) != 1:
@@ -277,7 +277,7 @@ def _param_type_name(type_node: "Node") -> str | None:
     return None
 
 
-def _collect_param_type_map(func_def: "Node") -> dict[str, str]:
+def _collect_param_type_map(func_def: Node) -> dict[str, str]:
     """Return {param_name: type_name} for a function's typed_parameters."""
     params = next((c for c in func_def.children if c.type == "parameters"), None)
     if params is None:
@@ -296,7 +296,7 @@ def _collect_param_type_map(func_def: "Node") -> dict[str, str]:
     return out
 
 
-def _all_descendant_ids(node: "Node") -> set[int]:
+def _all_descendant_ids(node: Node) -> set[int]:
     """Return the set of node.id values for node + every descendant."""
     out: set[int] = set()
     stack = [node]
@@ -307,7 +307,7 @@ def _all_descendant_ids(node: "Node") -> set[int]:
     return out
 
 
-def _count_call_args(call: "Node") -> int:
+def _count_call_args(call: Node) -> int:
     """Count actual arguments in a call node (positional + keyword)."""
     args_list = next((c for c in call.children if c.type == "argument_list"), None)
     if args_list is None:
@@ -319,7 +319,7 @@ def _count_call_args(call: "Node") -> int:
     return n
 
 
-def _param_names_no_self(func_def: "Node") -> list[str]:
+def _param_names_no_self(func_def: Node) -> list[str]:
     """Flat parameter names, excluding ``self``."""
     params = next((c for c in func_def.children if c.type == "parameters"), None)
     if params is None:
@@ -425,7 +425,7 @@ def check_artifact(
 
 
 def _check_node(
-    node: "Node",
+    node: Node,
     filename: str,
     lookup: StructuralIndexLookup,
     artifact_classes: dict[str, set[str]],
@@ -559,8 +559,7 @@ def _check_node(
                 line,
                 f"{var_name}.{attr_name}",
                 "wrong_field",
-                f"'{attr_name}' not found on {type_name} "
-                f"(known: {', '.join(known[:10])})",
+                f"'{attr_name}' not found on {type_name} (known: {', '.join(known[:10])})",
                 f"Did you mean: {', '.join(suggestions)}" if suggestions else "",
             )
         )

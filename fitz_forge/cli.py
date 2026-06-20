@@ -22,7 +22,6 @@ from fitz_forge.models.events import (
     PhaseChanged,
     PhaseEnter,
     PlanEvent,
-    classify_phase,
 )
 
 __all__ = ["app"]
@@ -35,6 +34,7 @@ def _fmt_duration(seconds: float) -> str:
         return f"{s}s"
     m, s = divmod(s, 60)
     return f"{m}m{s:02d}s"
+
 
 app = typer.Typer(
     name="fitz-forge",
@@ -85,7 +85,6 @@ def _state_color(state: str) -> str:
         "interrupted": typer.colors.RED,
     }
     return colors.get(state, typer.colors.WHITE)
-
 
 
 async def _gather_context_for_clarification(
@@ -146,10 +145,7 @@ def _format_event(event: PlanEvent) -> str:
     if isinstance(event, PhaseEnter):
         # Highlighted banner-style rule, distinct from time/percentage lines.
         total = 10
-        return (
-            f"\n[bold cyan]━━━ {event.phase_number}/{total}  "
-            f"{event.phase_label} ━━━[/bold cyan]"
-        )
+        return f"\n[bold cyan]━━━ {event.phase_number}/{total}  {event.phase_label} ━━━[/bold cyan]"
     if isinstance(event, PhaseChanged):
         # Demote sub-phases to indented dim bullets so phase banners stay
         # visually prominent. Keep the percentage bar advancing via top-level
@@ -166,10 +162,7 @@ def _format_event(event: PlanEvent) -> str:
         # Keep first ~80 chars for readability
         if len(snippet) > 80:
             snippet = snippet[:77].rstrip() + "..."
-        return (
-            f"    [dim]· {event.decision_id}: dropped hallucinated evidence: "
-            f"{snippet}[/dim]"
-        )
+        return f"    [dim]· {event.decision_id}: dropped hallucinated evidence: {snippet}[/dim]"
     if isinstance(event, JobCompleted):
         # Three renderings:
         #   - n/a (em-dash): plan succeeded but had no artifacts to score
@@ -190,8 +183,7 @@ def _format_event(event: PlanEvent) -> str:
             else:
                 quality = f"{event.quality_score:.1f}/{max_q}"
         return (
-            f"\n[green]✓ Done[/green]  quality: {quality}  "
-            f"time: {_fmt_duration(event.elapsed_s)}"
+            f"\n[green]✓ Done[/green]  quality: {quality}  time: {_fmt_duration(event.elapsed_s)}"
         )
     if isinstance(event, JobAwaitingReview):
         return (
@@ -223,7 +215,7 @@ class _RichBulletHandler(logging.Handler):
         # Strip the module-level prefix ("artifact_set: ") so the bullet
         # content matches other indented lines' visual weight.
         if msg.startswith("artifact_set: "):
-            msg = msg[len("artifact_set: "):]
+            msg = msg[len("artifact_set: ") :]
         self._console.print(f"    [dim]· {msg}[/dim]")
 
 
@@ -251,9 +243,7 @@ async def _run_inline(
     _rerouted_loggers = [
         logging.getLogger("fitz_forge.planning.artifact.generator"),
     ]
-    _saved_state = [
-        (lg, list(lg.handlers), lg.propagate) for lg in _rerouted_loggers
-    ]
+    _saved_state = [(lg, list(lg.handlers), lg.propagate) for lg in _rerouted_loggers]
     for lg in _rerouted_loggers:
         lg.handlers = [_bullet_handler]
         lg.propagate = False

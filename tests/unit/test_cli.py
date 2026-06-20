@@ -282,8 +282,7 @@ class TestDescribePhase:
         from fitz_forge.models.events import describe_phase
 
         assert (
-            describe_phase("architecture_design:critiquing")
-            == "Reviewing analysis for quality..."
+            describe_phase("architecture_design:critiquing") == "Reviewing analysis for quality..."
         )
 
     def test_agent_mapping_phase(self):
@@ -593,8 +592,6 @@ class TestFormatEvent:
         from fitz_forge.cli import _format_event
         from fitz_forge.models.events import JobFailed
 
-        line = _format_event(
-            JobFailed(job_id="abc", error="boom", elapsed_s=7.0)
-        )
+        line = _format_event(JobFailed(job_id="abc", error="boom", elapsed_s=7.0))
         assert "Failed" in line
         assert "boom" in line

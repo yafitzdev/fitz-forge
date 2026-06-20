@@ -40,7 +40,7 @@ _KEEP_BODY_LINES = 6
 _MAX_INIT_ASSIGNMENTS = 25
 
 
-def _is_string_doc_expr(node: "Node") -> bool:
+def _is_string_doc_expr(node: Node) -> bool:
     """True if ``node`` is an ``expression_statement`` wrapping a string literal."""
     if node.type != "expression_statement":
         return False
@@ -48,7 +48,7 @@ def _is_string_doc_expr(node: "Node") -> bool:
     return inner is not None and inner.type == "string"
 
 
-def _is_ellipsis_expr(node: "Node") -> bool:
+def _is_ellipsis_expr(node: Node) -> bool:
     """True if ``node`` is ``...`` (Ellipsis literal) as an expression statement."""
     if node.type != "expression_statement":
         return False
@@ -56,11 +56,11 @@ def _is_ellipsis_expr(node: "Node") -> bool:
     return inner is not None and inner.type == "ellipsis"
 
 
-def _is_pass_stmt(node: "Node") -> bool:
+def _is_pass_stmt(node: Node) -> bool:
     return node.type == "pass_statement"
 
 
-def _iter_all_functions(root: "Node"):
+def _iter_all_functions(root: Node):
     """Walk and yield every function_definition (sync/async, decorated)."""
     stack = [root]
     seen: set[int] = set()
@@ -77,7 +77,7 @@ def _iter_all_functions(root: "Node"):
         stack.extend(n.children)
 
 
-def _iter_all_bodied_nodes(root: "Node"):
+def _iter_all_bodied_nodes(root: Node):
     """Yield module/class/function — anything that has a body block for doc stripping."""
     stack = [root]
     while stack:
@@ -91,14 +91,14 @@ def _iter_all_bodied_nodes(root: "Node"):
         stack.extend(n.children)
 
 
-def _function_name(func_def: "Node") -> str | None:
+def _function_name(func_def: Node) -> str | None:
     for c in func_def.children:
         if c.type == "identifier":
             return c.text.decode("utf-8")
     return None
 
 
-def _body_statements(node: "Node") -> list["Node"]:
+def _body_statements(node: Node) -> list[Node]:
     """Return the named statement children of node's body.
 
     For ``module`` the body is the node itself; for class/function it's
@@ -185,12 +185,12 @@ def _strip_comments_and_blanks(source: str) -> str:
     return "".join(out)
 
 
-def _lineno(node: "Node") -> int:
+def _lineno(node: Node) -> int:
     """Convert tree-sitter start_point (0-indexed row) to 1-indexed lineno."""
     return node.start_point[0] + 1
 
 
-def _end_lineno(node: "Node") -> int:
+def _end_lineno(node: Node) -> int:
     """Inclusive end line, 1-indexed (matches ast.end_lineno semantics)."""
     end_row = node.end_point[0]
     end_col = node.end_point[1]
@@ -238,9 +238,7 @@ def compress_python(source: str) -> str:
             continue
 
         # Skip trivial pass / ellipsis bodies
-        if len(real_body) == 1 and (
-            _is_pass_stmt(real_body[0]) or _is_ellipsis_expr(real_body[0])
-        ):
+        if len(real_body) == 1 and (_is_pass_stmt(real_body[0]) or _is_ellipsis_expr(real_body[0])):
             continue
 
         name = _function_name(node)
@@ -311,9 +309,7 @@ def _collapse_all_bodies(source: str) -> str:
         if not stmts:
             continue
         # Skip already-stubbed bodies
-        if len(stmts) == 1 and (
-            _is_pass_stmt(stmts[0]) or _is_ellipsis_expr(stmts[0])
-        ):
+        if len(stmts) == 1 and (_is_pass_stmt(stmts[0]) or _is_ellipsis_expr(stmts[0])):
             continue
         body_start_idx = 1 if _is_string_doc_expr(stmts[0]) else 0
         real_body = stmts[body_start_idx:]

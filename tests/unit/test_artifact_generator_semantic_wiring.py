@@ -88,9 +88,7 @@ def patched_deps(monkeypatch):
     # Skip the real lookup construction in grounding.
     from fitz_forge.planning.validation import grounding
 
-    monkeypatch.setattr(
-        grounding, "StructuralIndexLookup", lambda _text: _StubLookup()
-    )
+    monkeypatch.setattr(grounding, "StructuralIndexLookup", lambda _text: _StubLookup())
 
     calls: dict[str, list] = {"generate_artifact": [], "semantic_review": []}
 
@@ -142,9 +140,7 @@ async def test_semantic_review_disabled_by_zero_iters(patched_deps):
     mp.setattr(
         gen,
         "generate_artifact",
-        patched_deps["make_generate_artifact"](
-            lambda fn, _k: _make_result(fn, content=f"# {fn}")
-        ),
+        patched_deps["make_generate_artifact"](lambda fn, _k: _make_result(fn, content=f"# {fn}")),
     )
     mp.setattr(
         gen,
@@ -183,9 +179,7 @@ async def test_passes_on_first_pass_no_regeneration(patched_deps):
     mp.setattr(
         gen,
         "generate_artifact",
-        patched_deps["make_generate_artifact"](
-            lambda fn, _k: _make_result(fn, content=f"# {fn}")
-        ),
+        patched_deps["make_generate_artifact"](lambda fn, _k: _make_result(fn, content=f"# {fn}")),
     )
     mp.setattr(
         gen,
@@ -394,9 +388,7 @@ async def test_no_successful_artifacts_skips_gate(patched_deps):
     mp.setattr(
         gen,
         "generate_artifact",
-        patched_deps["make_generate_artifact"](
-            lambda fn, _k: _make_result(fn, success=False)
-        ),
+        patched_deps["make_generate_artifact"](lambda fn, _k: _make_result(fn, success=False)),
     )
     mp.setattr(
         gen,

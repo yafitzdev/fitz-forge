@@ -101,9 +101,9 @@ def _build_user_prompt(
         "Critique the architectural recommendation. Look specifically for:\n\n"
         "1. **Recommendation doesn't solve the task.** The most common "
         "failure: the approach looks plausible but quietly skips the "
-        "hard part. Examples: \"add streaming\" by buffering the full "
-        "response and splitting into fake tokens; \"add caching\" with "
-        "no invalidation; \"add auth\" that checks a flag but doesn't "
+        'hard part. Examples: "add streaming" by buffering the full '
+        'response and splitting into fake tokens; "add caching" with '
+        'no invalidation; "add auth" that checks a flag but doesn\'t '
         "verify signatures. If the recommendation is shaped like the "
         "solution but misses the *mechanism*, flag it.\n\n"
         "2. **Straw-man alternatives.** If only two approaches were "
@@ -113,25 +113,25 @@ def _build_user_prompt(
         "3. **Fights the codebase idioms.** If the codebase uses "
         "composition and the recommendation introduces a parallel "
         "inheritance hierarchy, or vice versa, flag it. The codebase "
-        "context above is the ground truth for \"how this team builds "
-        "things.\"\n\n"
+        'context above is the ground truth for "how this team builds '
+        'things."\n\n'
         "4. **Rubric mismatch.** If quality criteria are supplied, "
         "any divergence from them is a flag — the recommendation "
         "should visibly aim at the criteria, not ignore them.\n\n"
         "Return JSON only. No prose. No code fences.\n\n"
         "{\n"
-        "  \"passed\": true | false,\n"
-        "  \"issues\": [\n"
+        '  "passed": true | false,\n'
+        '  "issues": [\n'
         "    {\n"
-        "      \"target\": \"architecture.recommended\" | \"architecture.approaches\" | \"architecture.reasoning\",\n"
-        "      \"intent\": \"<what a senior engineer would expect>\",\n"
-        "      \"actual\": \"<what this recommendation currently does wrong>\",\n"
-        "      \"suggestion\": \"<concrete change: pick approach X, add alternative Y, rewrite reasoning to address Z>\"\n"
+        '      "target": "architecture.recommended" | "architecture.approaches" | "architecture.reasoning",\n'
+        '      "intent": "<what a senior engineer would expect>",\n'
+        '      "actual": "<what this recommendation currently does wrong>",\n'
+        '      "suggestion": "<concrete change: pick approach X, add alternative Y, rewrite reasoning to address Z>"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
         "If the recommendation is sound and the alternatives are "
-        "realistic, return {\"passed\": true, \"issues\": []}. Do NOT "
+        'realistic, return {"passed": true, "issues": []}. Do NOT '
         "manufacture issues for recommendations that are already good "
         "— that just burns plan time without improving quality."
     )
@@ -200,9 +200,7 @@ async def review_architecture(
     try:
         parsed = extract_json(raw)
     except (ValueError, json.JSONDecodeError) as e:
-        logger.warning(
-            "architecture_review: unparseable response (%s); treating as passed", e
-        )
+        logger.warning("architecture_review: unparseable response (%s); treating as passed", e)
         return ReviewResult(scope="architecture", passed=True, raw_response=raw)
 
     if not isinstance(parsed, dict):

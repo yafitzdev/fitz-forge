@@ -99,16 +99,16 @@ def _build_user_prompt(
         "cases. Quote the specific file name / class / signature that "
         "proves the contradiction in your `actual` text. If no codebase "
         "evidence exists to judge any assumption, return "
-        "{\"passed\": true, \"issues\": []}.\n\n"
+        '{"passed": true, "issues": []}.\n\n'
         "Return JSON only. No prose. No code fences.\n\n"
         "{\n"
-        "  \"passed\": true | false,\n"
-        "  \"issues\": [\n"
+        '  "passed": true | false,\n'
+        '  "issues": [\n'
         "    {\n"
-        "      \"target\": \"assumption 1\" | \"assumption 2\" | ...,\n"
-        "      \"intent\": \"<what the junior assumed>\",\n"
-        "      \"actual\": \"<codebase evidence against it, with a specific file/class/signature reference>\",\n"
-        "      \"suggestion\": \"<how to correct the assumption or which downstream decision to revisit>\"\n"
+        '      "target": "assumption 1" | "assumption 2" | ...,\n'
+        '      "intent": "<what the junior assumed>",\n'
+        '      "actual": "<codebase evidence against it, with a specific file/class/signature reference>",\n'
+        '      "suggestion": "<how to correct the assumption or which downstream decision to revisit>"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
@@ -174,9 +174,7 @@ async def review_assumptions(
     try:
         parsed = extract_json(raw)
     except (ValueError, json.JSONDecodeError) as e:
-        logger.warning(
-            "assumption_review: unparseable response (%s); treating as passed", e
-        )
+        logger.warning("assumption_review: unparseable response (%s); treating as passed", e)
         return ReviewResult(scope="assumption", passed=True, raw_response=raw)
 
     if not isinstance(parsed, dict):

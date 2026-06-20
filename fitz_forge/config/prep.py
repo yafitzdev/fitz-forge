@@ -48,9 +48,7 @@ def is_unconfigured(config_path: Path) -> bool:
     return model in _PLACEHOLDER_MODELS
 
 
-async def _probe_one(
-    client: httpx.AsyncClient, base_url: str
-) -> bool:
+async def _probe_one(client: httpx.AsyncClient, base_url: str) -> bool:
     """Probe a single base URL. Returns True iff GET {base_url}/models -> 200."""
     try:
         response = await client.get(f"{base_url}/models", timeout=2.0)
@@ -208,7 +206,7 @@ async def run_wizard(
         raise typer.Exit(1) from None
 
     if not models:
-        typer.echo(f"  -> 0 models")
+        typer.echo("  -> 0 models")
     elif len(models) == 1:
         typer.echo(f"  -> 1 model: {models[0]}")
     else:
@@ -232,8 +230,7 @@ def _resolve_model(models: list[str]) -> str:
     """Pick a model id: prompt if >0, loop until non-empty if 0."""
     if len(models) == 0:
         typer.echo(
-            "No model loaded on server. Load one (e.g., in LM Studio) "
-            "and enter its identifier:"
+            "No model loaded on server. Load one (e.g., in LM Studio) and enter its identifier:"
         )
         while True:
             raw = typer.prompt("Model identifier").strip()

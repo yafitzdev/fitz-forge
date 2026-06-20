@@ -7,7 +7,6 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from fitz_forge.planning.schemas._base import LLMOutputModel
-
 from fitz_forge.planning.schemas.architecture import ArchitectureOutput
 from fitz_forge.planning.schemas.context import ContextOutput
 from fitz_forge.planning.schemas.design import DesignOutput

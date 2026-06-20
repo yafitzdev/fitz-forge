@@ -154,6 +154,7 @@ def test_non_string_null_is_not_silently_coerced():
     broader coercer change is an explicit decision, not an accidental
     side effect."""
     import pydantic
+
     with pytest.raises(pydantic.ValidationError):
         Risk(description="test", affected_phases=None)
 

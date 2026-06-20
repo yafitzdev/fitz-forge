@@ -12,6 +12,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fitz_forge.llm.generate import generate
+from fitz_forge.planning.reviews import (
+    ReviewIssue,
+    format_issues_feedback,
+)
+from fitz_forge.planning.reviews import (
+    review_artifacts as semantic_review,
+)
 
 from .closure import (
     ClosureViolation,
@@ -22,11 +29,6 @@ from .closure import (
     route_missing_symbol,
 )
 from .context import assemble_context
-from fitz_forge.planning.reviews import (
-    ReviewIssue,
-    format_issues_feedback,
-    review_artifacts as semantic_review,
-)
 from .strategy import (
     ArtifactStrategy,
     NewCodeStrategy,
@@ -692,25 +694,17 @@ async def generate_artifact_set(
 
             for filename, issues in by_file.items():
                 offender_idx = next(
-                    (
-                        i
-                        for i, r in enumerate(results)
-                        if r.filename == filename and r.success
-                    ),
+                    (i for i, r in enumerate(results) if r.filename == filename and r.success),
                     None,
                 )
                 if offender_idx is None:
-                    logger.info(
-                        "semantic_review: %s not in result set — skipping regen", filename
-                    )
+                    logger.info("semantic_review: %s not in result set — skipping regen", filename)
                     continue
                 old_result = results[offender_idx]
                 feedback = format_issues_feedback(issues)
                 regen_purpose = f"{old_result.purpose}\n\n{feedback}"
                 regen_decisions = (
-                    decisions_for(filename)
-                    if callable(decisions_for)
-                    else str(decisions_for or "")
+                    decisions_for(filename) if callable(decisions_for) else str(decisions_for or "")
                 )
                 regen_result = await generate_artifact(
                     client=client,

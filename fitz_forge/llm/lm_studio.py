@@ -38,7 +38,7 @@ class LMStudioClient(OpenAIApiClient):
         fallback_model: str | None = None,
         timeout: int = 300,
         context_length: int = 32768,
-        gpu_guard: "GPUTemperatureGuard | None" = None,
+        gpu_guard: GPUTemperatureGuard | None = None,
         api_key: str | None = None,
         disable_thinking: bool = True,
     ):

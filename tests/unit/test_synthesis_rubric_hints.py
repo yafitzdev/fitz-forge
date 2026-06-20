@@ -30,9 +30,7 @@ def test_format_rubric_hints_empty_input_returns_empty_string():
 
 
 def test_format_rubric_hints_present_returns_block_with_header():
-    out = _format_rubric_hints(
-        {"_rubric_hints": "- preserve pre-rerank score\n- record breakdown"}
-    )
+    out = _format_rubric_hints({"_rubric_hints": "- preserve pre-rerank score\n- record breakdown"})
     assert "## Quality Criteria" in out
     assert "preserve pre-rerank score" in out
     assert "record breakdown" in out

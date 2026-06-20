@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fitz-forge"
-version = "0.6.2"
-description = "Experimental coding-plan harness for local LLMs"
+version = "0.6.3"
+description = "Agentic coding-planning harness for local LLMs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

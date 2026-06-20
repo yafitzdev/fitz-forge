@@ -105,9 +105,7 @@ class AgentContextGatherer:
             else:
                 # Normal mode: KRAG retrieval
                 await self._report(progress_callback, 0.065, "agent:scanning_index")
-                results = await asyncio.to_thread(
-                    engine.retrieve, Query(text=job_description)
-                )
+                results = await asyncio.to_thread(engine.retrieve, Query(text=job_description))
 
             # KRAG can surface the same file from multiple strategies — keep
             # one ReadResult per file, preserving retrieval order.
