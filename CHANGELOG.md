@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated package metadata for the current project description.
 - Aligned formatting, lint, and gatherer tests with the current CI configuration.
 - Made test configuration deterministic in empty CI environments.
+- Stabilized worker and CLI smoke tests across CI platforms.
 
 ### 🚀 Added
 

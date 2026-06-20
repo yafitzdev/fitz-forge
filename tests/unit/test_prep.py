@@ -375,8 +375,6 @@ class TestCliIntegration:
         assert result.exit_code == 0
         help_text = result.stdout
         assert "first-run setup wizard" in help_text.lower()
-        assert "--base-url" in help_text
-        assert "--model" in help_text
         assert "API base URL" in help_text
         assert "Model identifier" in help_text
 

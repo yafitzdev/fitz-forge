@@ -404,8 +404,11 @@ class BackgroundWorker:
                 agent=agent,
                 pre_gathered_context=self._pre_gathered_context,
             )
-            sig = inspect.signature(self._pipeline.execute)
-            if "event_emitter" in sig.parameters:
+            try:
+                sig = inspect.signature(self._pipeline.execute)
+            except (TypeError, ValueError):
+                sig = None
+            if sig is not None and "event_emitter" in sig.parameters:
                 pipeline_exec_kwargs["event_emitter"] = self._emit
 
             result = await self._pipeline.execute(**pipeline_exec_kwargs)
